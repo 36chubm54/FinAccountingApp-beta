@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from hashlib import sha1
@@ -13,6 +14,7 @@ from app.use_cases import (
     CreateExpense,
     CreateIncome,
     CreateMandatoryExpense,
+    CreateMandatoryExpenseRecord,
     CreateTransfer,
     CreateWallet,
     DeleteAllMandatoryExpenses,
@@ -31,7 +33,11 @@ from domain.records import IncomeRecord, MandatoryExpenseRecord, Record
 from domain.reports import Report
 from domain.transfers import Transfer
 from domain.validation import parse_ymd
+from domain.wallets import Wallet
 from infrastructure.repositories import RecordRepository
+from services.import_service import ImportService
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -80,18 +86,53 @@ class FinancialController:
     def get_system_initial_balance(self) -> float:
         return self._repository.load_initial_balance()
 
+    def get_currency_rate(self, currency: str) -> float:
+        return float(self._currency.get_rate(currency))
+
     def create_income(
-        self, *, date: str, wallet_id: int, amount: float, currency: str, category: str
+        self,
+        *,
+        date: str,
+        wallet_id: int,
+        amount: float,
+        currency: str,
+        category: str,
+        description: str = "",
+        amount_kzt: float | None = None,
+        rate_at_operation: float | None = None,
     ) -> None:
         CreateIncome(self._repository, self._currency).execute(
-            date=date, wallet_id=wallet_id, amount=amount, currency=currency, category=category
+            date=date,
+            wallet_id=wallet_id,
+            amount=amount,
+            currency=currency,
+            category=category,
+            description=description,
+            amount_kzt=amount_kzt,
+            rate_at_operation=rate_at_operation,
         )
 
     def create_expense(
-        self, *, date: str, wallet_id: int, amount: float, currency: str, category: str
+        self,
+        *,
+        date: str,
+        wallet_id: int,
+        amount: float,
+        currency: str,
+        category: str,
+        description: str = "",
+        amount_kzt: float | None = None,
+        rate_at_operation: float | None = None,
     ) -> None:
         CreateExpense(self._repository, self._currency).execute(
-            date=date, wallet_id=wallet_id, amount=amount, currency=currency, category=category
+            date=date,
+            wallet_id=wallet_id,
+            amount=amount,
+            currency=currency,
+            category=category,
+            description=description,
+            amount_kzt=amount_kzt,
+            rate_at_operation=rate_at_operation,
         )
 
     def generate_report(self) -> Report:
@@ -108,6 +149,8 @@ class FinancialController:
         category: str,
         description: str,
         period: str,
+        amount_kzt: float | None = None,
+        rate_at_operation: float | None = None,
     ) -> None:
         CreateMandatoryExpense(self._repository, self._currency).execute(
             amount=amount,
@@ -115,6 +158,33 @@ class FinancialController:
             category=category,
             description=description,
             period=period,
+            amount_kzt=amount_kzt,
+            rate_at_operation=rate_at_operation,
+        )
+
+    def create_mandatory_expense_record(
+        self,
+        *,
+        date: str,
+        wallet_id: int,
+        amount: float,
+        currency: str,
+        category: str,
+        description: str,
+        period: str,
+        amount_kzt: float | None = None,
+        rate_at_operation: float | None = None,
+    ) -> None:
+        CreateMandatoryExpenseRecord(self._repository, self._currency).execute(
+            date=date,
+            wallet_id=wallet_id,
+            amount=amount,
+            currency=currency,
+            category=category,
+            description=description,
+            period=period,
+            amount_kzt=amount_kzt,
+            rate_at_operation=rate_at_operation,
         )
 
     def load_mandatory_expenses(self) -> list[MandatoryExpenseRecord]:
@@ -142,6 +212,15 @@ class FinancialController:
     def load_wallets(self):
         return GetWallets(self._repository).execute()
 
+    def set_wallet_allow_negative_for_import(self, wallet_id: int, allow_negative: bool) -> None:
+        wallets = self._repository.load_wallets()
+        wallet = next((item for item in wallets if item.id == int(wallet_id)), None)
+        if wallet is None:
+            raise ValueError(f"Wallet not found: {wallet_id}")
+        if wallet.allow_negative == bool(allow_negative):
+            return
+        self._repository.save_wallet(replace(wallet, allow_negative=bool(allow_negative)))
+
     def load_active_wallets(self):
         return GetActiveWallets(self._repository).execute()
 
@@ -168,6 +247,8 @@ class FinancialController:
         description: str = "",
         commission_amount: float = 0.0,
         commission_currency: str | None = None,
+        amount_kzt: float | None = None,
+        rate_at_operation: float | None = None,
     ) -> int:
         parse_ymd(transfer_date)
         if from_wallet_id == to_wallet_id:
@@ -189,6 +270,8 @@ class FinancialController:
             description=description.strip(),
             commission_amount=float(commission_amount),
             commission_currency=(commission_currency or currency).strip().upper(),
+            amount_kzt=amount_kzt,
+            rate_at_operation=rate_at_operation,
         )
 
     def add_mandatory_to_report(
@@ -204,92 +287,68 @@ class FinancialController:
     def delete_all_mandatory_expenses(self) -> None:
         DeleteAllMandatoryExpenses(self._repository).execute()
 
+    def reset_operations_for_import(self, *, initial_balance: float) -> None:
+        self._repository.replace_records_and_transfers([], [])
+        self._repository.save_initial_balance(float(initial_balance))
+
+    def reset_mandatory_for_import(self) -> None:
+        self._repository.delete_all_mandatory_expenses()
+
+    def reset_all_for_import(self, *, wallets: list[Wallet], initial_balance: float) -> None:
+        self._repository.replace_all_data(
+            wallets=wallets,
+            records=[],
+            mandatory_expenses=[],
+            transfers=[],
+        )
+        self._repository.save_initial_balance(float(initial_balance))
+
+    def run_import_transaction(self, operation):
+        wallets_snapshot = self._repository.load_wallets()
+        records_snapshot = self._repository.load_all()
+        mandatory_snapshot = self._repository.load_mandatory_expenses()
+        transfers_snapshot = self._repository.load_transfers()
+        try:
+            return operation()
+        except Exception as import_error:
+            logger.exception("Import failed, rolling back repository state")
+            try:
+                self._repository.replace_all_data(
+                    wallets=wallets_snapshot,
+                    records=records_snapshot,
+                    mandatory_expenses=mandatory_snapshot,
+                    transfers=transfers_snapshot,
+                )
+            except Exception:
+                logger.exception("Rollback failed after import error")
+            raise import_error
+
+    def normalize_operation_ids_for_import(self) -> None:
+        records = sorted(self._repository.load_all(), key=lambda item: int(item.id))
+        transfers = sorted(self._repository.load_transfers(), key=lambda item: int(item.id))
+        transfer_id_map = {int(item.id): index for index, item in enumerate(transfers, start=1)}
+        normalized_transfers = [
+            replace(transfer, id=transfer_id_map[int(transfer.id)]) for transfer in transfers
+        ]
+        normalized_records: list[Record] = []
+        for index, record in enumerate(records, start=1):
+            mapped_transfer_id = None
+            if record.transfer_id is not None:
+                mapped_transfer_id = transfer_id_map[int(record.transfer_id)]
+            normalized_records.append(replace(record, id=index, transfer_id=mapped_transfer_id))
+        self._repository.replace_records_and_transfers(normalized_records, normalized_transfers)
+
     def import_records(
         self, fmt: str, filepath: str, policy: ImportPolicy
     ) -> tuple[int, int, list[str]]:
-        existing_initial_balance = self._repository.load_initial_balance()
-        if fmt == "CSV":
-            from gui.importers import import_records_from_csv
-
-            records, initial_balance, summary = import_records_from_csv(
-                filepath,
-                policy=policy,
-                currency_service=self._currency,
-                wallet_ids={wallet.id for wallet in self._repository.load_wallets()},
-                existing_initial_balance=existing_initial_balance,
-            )
-            self._ensure_import_valid(summary)
-            records = self._reindex_records_for_import(records)
-            transfers = self._rebuild_transfers(records)
-            self._repository.replace_records_and_transfers(records, transfers)
-            self._repository.save_initial_balance(float(initial_balance))
-            return summary
-
-        if fmt == "XLSX":
-            from gui.importers import import_records_from_xlsx
-
-            records, initial_balance, summary = import_records_from_xlsx(
-                filepath,
-                policy=policy,
-                currency_service=self._currency,
-                wallet_ids={wallet.id for wallet in self._repository.load_wallets()},
-                existing_initial_balance=existing_initial_balance,
-            )
-            self._ensure_import_valid(summary)
-            records = self._reindex_records_for_import(records)
-            transfers = self._rebuild_transfers(records)
-            self._repository.replace_records_and_transfers(records, transfers)
-            self._repository.save_initial_balance(float(initial_balance))
-            return summary
-
-        if fmt == "JSON":
-            from gui.importers import import_full_backup
-
-            wallets, records, mandatory_expenses, transfers, summary = import_full_backup(filepath)
-            self._ensure_import_valid(summary)
-            self._repository.replace_all_data(
-                wallets=wallets,
-                records=records,
-                mandatory_expenses=mandatory_expenses,
-                transfers=transfers,
-            )
-            return summary
-
-        raise ValueError(f"Unsupported format: {fmt}")
+        if fmt not in {"CSV", "XLSX", "JSON"}:
+            raise ValueError(f"Unsupported format: {fmt}")
+        return ImportService(self, policy=policy).import_file(filepath)
 
     def import_mandatory(self, fmt: str, filepath: str) -> tuple[int, int, list[str]]:
-        if fmt == "CSV":
-            from gui.importers import import_mandatory_expenses_from_csv
-
-            expenses, summary = import_mandatory_expenses_from_csv(
-                filepath,
-                policy=ImportPolicy.FULL_BACKUP,
-                currency_service=self._currency,
-            )
-        elif fmt == "XLSX":
-            from gui.importers import import_mandatory_expenses_from_xlsx
-
-            expenses, summary = import_mandatory_expenses_from_xlsx(
-                filepath,
-                policy=ImportPolicy.FULL_BACKUP,
-                currency_service=self._currency,
-            )
-        else:
+        if fmt not in {"CSV", "XLSX", "JSON"}:
             raise ValueError(f"Unsupported format: {fmt}")
-
-        # Keep existing behavior: imported templates are recalculated via use-case.
-        self._ensure_import_valid(summary)
-        self.delete_all_mandatory_expenses()
-        create_use_case = CreateMandatoryExpense(self._repository, self._currency)
-        for expense in expenses:
-            create_use_case.execute(
-                amount=expense.amount_original,
-                currency=expense.currency,
-                category=expense.category,
-                description=expense.description,
-                period=expense.period,
-            )
-        return summary
+        return ImportService(self, policy=ImportPolicy.FULL_BACKUP).import_mandatory_file(filepath)
 
     @staticmethod
     def _ensure_import_valid(summary: tuple[int, int, list[str]]) -> None:

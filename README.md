@@ -178,6 +178,16 @@ python main.py
 
 Импорт выполняется через `Import` во вкладке `Operations`.
 
+Архитектура импорта:
+
+- `ImportService -> FinancialController (FinanceService) -> RecordRepository/Storage`.
+- Импорт не создаёт записи напрямую через `JsonStorage/SQLiteStorage`.
+- Переводы создаются только через `create_transfer(...)` сервиса (инвариант `1 transfer = 2 record` сохраняется).
+- Импорт выполняется как атомарная сервисная транзакция: при ошибке выполняется rollback к снимку состояния.
+- Для `Full Backup` сохраняются исходные `amount_kzt` и `rate_at_operation` из файла.
+- Для `Current Rate` применяется пересчёт через `CurrencyService.get_rate(...)`.
+- В parser-слое действуют лимиты безопасности (размер файла, число строк, размер CSV-поля).
+
 Форматы:
 
 - `CSV`, `XLSX`.
@@ -622,11 +632,23 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 
 `gui/importers.py`
 
-- `import_records_from_csv(filepath, policy, currency_service, wallet_ids)` -> `(records, initial_balance, (imported, skipped, errors))`.
-- `import_records_from_xlsx(filepath, policy, currency_service, wallet_ids)` -> `(records, initial_balance, (imported, skipped, errors))`.
-- `import_mandatory_expenses_from_csv(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`.
-- `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`.
-- `import_full_backup(filepath)` -> `(wallets, records, mandatory_expenses, transfers, (imported, skipped, errors))`.
+- Legacy-обёртки над `utils/*` для обратной совместимости и unit-тестов.
+
+`services/import_parser.py`
+
+- `parse_import_file(path)` -> `ParsedImportData` (DTO/словарный слой, без записи в хранилище).
+- Валидация ограничений: размер файла, row-limit, размер CSV-поля.
+
+`services/import_service.py`
+
+- `ImportService.import_file(path)` — импорт операций через методы `FinancialController`.
+- `ImportService.import_mandatory_file(path)` — импорт шаблонов обязательных расходов через сервис.
+- `Full Backup` сохраняет фиксированные `amount_kzt/rate_at_operation`; `Current Rate` пересчитывает значения.
+
+`app/finance_service.py`
+
+- Протокол `FinanceService` для import-оркестратора (`ImportService`).
+- Явно описывает методы импорта, rollback и нормализации идентификаторов.
 
 `gui/helpers.py`
 
@@ -702,6 +724,7 @@ project/
 │
 ├── app/                        # Application layer
 │   ├── __init__.py
+│   ├── finance_service.py      # Протокол FinanceService для import-сервиса
 │   ├── record_service.py       # Сервис записей
 │   ├── services.py             # CurrencyService адаптер
 │   └── use_cases.py            # Сценарии использования
@@ -730,6 +753,11 @@ project/
 ├── db/                         # SQL schema для SQLite
 │   └── schema.sql
 │
+├── services/                   # Сервисный импортный слой
+│   ├── __init__.py
+│   ├── import_parser.py        # Парсер CSV/XLSX/JSON -> DTO
+│   └── import_service.py       # Оркестрация импорта через FinanceService
+│
 ├── utils/                      # Импорт/экспорт и графики
 │   ├── __init__.py
 │   ├── backup_utils.py         # Резервное копирование данных
@@ -750,7 +778,7 @@ project/
 │   ├── tkinter_gui.py          # Основное GUI-приложение
 │   ├── helpers.py              # Помощники для GUI
 │   ├── controllers.py          # Контроллеры GUI
-│   ├── importers.py            # Импорт записей, обязательных расходов и backup
+│   ├── importers.py            # Legacy-обёртки импортеров (совместимость/тесты)
 │   └── exporters.py            # Экспорт отчётов, записей, обязательных расходов и backup
 │
 ├── web/                        # Веб-приложение
@@ -769,8 +797,10 @@ project/
     ├── test_bootstrap_backup.py
     ├── test_migrate_json_to_sqlite.py
     ├── test_import_core.py
+    ├── test_import_parser.py
     ├── test_import_policy_and_backup.py
     ├── test_import_security.py
+    ├── test_import_service.py
     ├── test_pdf.py
     ├── test_records.py
     ├── test_reports.py

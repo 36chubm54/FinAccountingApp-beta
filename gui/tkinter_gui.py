@@ -121,6 +121,7 @@ class FinancialApp(tk.Tk):
         self.progress.pack(fill=tk.X, padx=8, pady=(0, 8))
         self.progress.pack_forget()
 
+        self._refresh_list()
         self._refresh_charts()
 
     def destroy(self) -> None:

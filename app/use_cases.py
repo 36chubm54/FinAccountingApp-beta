@@ -50,20 +50,27 @@ class CreateIncome:
         amount: float,
         currency: str,
         category: str = "General",
+        description: str = "",
+        amount_kzt: float | None = None,
+        rate_at_operation: float | None = None,
     ) -> None:
         """Create and persist an income record."""
         wallet = _wallet_by_id(self._repository, wallet_id)
         if not wallet.is_active:
             raise ValueError("Cannot create operation for inactive wallet")
-        amount_kzt = self._currency.convert(amount, currency)
+        if amount_kzt is None:
+            amount_kzt = self._currency.convert(amount, currency)
+        if rate_at_operation is None:
+            rate_at_operation = _build_rate(amount, amount_kzt, currency)
         record = IncomeRecord(
             date=date,
             wallet_id=wallet_id,
             amount_original=amount,
             currency=currency.upper(),
-            rate_at_operation=_build_rate(amount, amount_kzt, currency),
+            rate_at_operation=float(rate_at_operation),
             amount_kzt=amount_kzt,
             category=category,
+            description=description,
         )
         self._repository.save(record)
         logger.info(
@@ -88,12 +95,18 @@ class CreateExpense:
         amount: float,
         currency: str,
         category: str = "General",
+        description: str = "",
+        amount_kzt: float | None = None,
+        rate_at_operation: float | None = None,
     ) -> None:
         """Create and persist an expense record."""
         wallet = _wallet_by_id(self._repository, wallet_id)
         if not wallet.is_active:
             raise ValueError("Cannot create operation for inactive wallet")
-        amount_kzt = self._currency.convert(amount, currency)
+        if amount_kzt is None:
+            amount_kzt = self._currency.convert(amount, currency)
+        if rate_at_operation is None:
+            rate_at_operation = _build_rate(amount, amount_kzt, currency)
         if not wallet.allow_negative:
             balance = _wallet_balance_kzt(wallet, self._repository.load_all())
             if balance - amount_kzt < 0:
@@ -103,9 +116,10 @@ class CreateExpense:
             wallet_id=wallet_id,
             amount_original=amount,
             currency=currency.upper(),
-            rate_at_operation=_build_rate(amount, amount_kzt, currency),
+            rate_at_operation=float(rate_at_operation),
             amount_kzt=amount_kzt,
             category=category,
+            description=description,
         )
         self._repository.save(record)
         logger.info(
@@ -271,6 +285,8 @@ class CreateTransfer:
         description: str = "",
         commission_amount: float = 0.0,
         commission_currency: str | None = None,
+        amount_kzt: float | None = None,
+        rate_at_operation: float | None = None,
     ) -> int:
         if from_wallet_id == to_wallet_id:
             raise ValueError("Transfer wallets must be different")
@@ -289,8 +305,14 @@ class CreateTransfer:
         if not from_wallet.is_active or not to_wallet.is_active:
             raise ValueError("Transfers are allowed only between active wallets")
 
-        transfer_kzt = float(self._currency.convert(amount_original, currency))
-        transfer_rate = _build_rate(amount_original, transfer_kzt, currency)
+        if amount_kzt is None:
+            transfer_kzt = float(self._currency.convert(amount_original, currency))
+        else:
+            transfer_kzt = float(amount_kzt)
+        if rate_at_operation is None:
+            transfer_rate = _build_rate(amount_original, transfer_kzt, currency)
+        else:
+            transfer_rate = float(rate_at_operation)
 
         commission_ccy = (commission_currency or currency).upper()
         commission_kzt = 0.0
@@ -512,19 +534,24 @@ class CreateMandatoryExpense:
         category: str,
         description: str,
         period: str,
+        amount_kzt: float | None = None,
+        rate_at_operation: float | None = None,
     ) -> None:
         """Create and persist a mandatory expense template."""
         from domain.validation import ensure_valid_period
 
         ensure_valid_period(period)
 
-        amount_kzt = self._currency.convert(amount, currency)
+        if amount_kzt is None:
+            amount_kzt = self._currency.convert(amount, currency)
+        if rate_at_operation is None:
+            rate_at_operation = _build_rate(amount, amount_kzt, currency)
         expense = MandatoryExpenseRecord(
             date="",  # Will be set when added to report
             wallet_id=SYSTEM_WALLET_ID,
             amount_original=amount,
             currency=currency.upper(),
-            rate_at_operation=_build_rate(amount, amount_kzt, currency),
+            rate_at_operation=float(rate_at_operation),
             amount_kzt=amount_kzt,
             category=category,
             description=description,
@@ -538,6 +565,54 @@ class CreateMandatoryExpense:
             description,
             period,
         )
+
+
+class CreateMandatoryExpenseRecord:
+    def __init__(self, repository: RecordRepository, currency: CurrencyService):
+        self._repository = repository
+        self._currency = currency
+
+    def execute(
+        self,
+        *,
+        date: str,
+        wallet_id: int,
+        amount: float,
+        currency: str,
+        category: str,
+        description: str,
+        period: str,
+        amount_kzt: float | None = None,
+        rate_at_operation: float | None = None,
+    ) -> None:
+        from domain.validation import ensure_valid_period
+
+        ensure_valid_period(period)
+        wallet = _wallet_by_id(self._repository, wallet_id)
+        if not wallet.is_active:
+            raise ValueError("Cannot create operation for inactive wallet")
+
+        if amount_kzt is None:
+            amount_kzt = self._currency.convert(amount, currency)
+        if rate_at_operation is None:
+            rate_at_operation = _build_rate(amount, amount_kzt, currency)
+        if not wallet.allow_negative:
+            balance = _wallet_balance_kzt(wallet, self._repository.load_all())
+            if balance - amount_kzt < 0:
+                raise ValueError("Insufficient funds in wallet")
+
+        record = MandatoryExpenseRecord(
+            date=date,
+            wallet_id=wallet_id,
+            amount_original=amount,
+            currency=currency.upper(),
+            rate_at_operation=float(rate_at_operation),
+            amount_kzt=amount_kzt,
+            category=category,
+            description=description,
+            period=period,  # type: ignore[arg-type]
+        )
+        self._repository.save(record)
 
 
 class GetMandatoryExpenses:

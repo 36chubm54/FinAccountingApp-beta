@@ -16,7 +16,9 @@ class SQLiteStorage(Storage):
 
     def __init__(self, db_path: str = "records.db") -> None:
         self._db_path = db_path
-        self._conn = sqlite3.connect(db_path)
+        # GUI import/export tasks run via background worker threads.
+        # A single operation is executed at a time, so cross-thread access is serialized.
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON;")
         self._conn.execute("PRAGMA journal_mode = WAL;")

@@ -398,7 +398,7 @@ def build_settings_tab(
         row=0, column=3, padx=6
     )
     ttk.Button(actions, text="Refresh", command=refresh_mandatory).grid(row=0, column=4, padx=6)
-    ttk.OptionMenu(actions, format_var, "CSV", "CSV", "XLSX", "JSON").grid(row=0, column=5, padx=6)
+    ttk.OptionMenu(actions, format_var, "CSV", "CSV", "XLSX").grid(row=0, column=5, padx=6)
 
     def import_mand() -> None:
         fmt = format_var.get()

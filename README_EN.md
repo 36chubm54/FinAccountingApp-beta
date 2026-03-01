@@ -178,6 +178,16 @@ Import/export of mandatory expenses:
 
 Import is performed via `Import` in the `Operations` tab.
 
+Import architecture:
+
+- `ImportService -> FinancialController (FinanceService) -> RecordRepository/Storage`.
+- Import does not create records directly through `JsonStorage/SQLiteStorage`.
+- Transfers are created only via `create_transfer(...)` (the `1 transfer = 2 record` invariant is preserved).
+- Import runs as an atomic service transaction with rollback to snapshot on failure.
+- `Full Backup` preserves source `amount_kzt` and `rate_at_operation` values.
+- `Current Rate` recalculates values using `CurrencyService.get_rate(...)`.
+- Parser-level guardrails are enabled (file size, row limit, CSV field size).
+
 Formats:
 
 - `CSV`, `XLSX`.
@@ -622,11 +632,23 @@ Below are the key classes and functions synchronized with the actual code.
 
 `gui/importers.py`
 
-- `import_records_from_csv(filepath, policy, currency_service, wallet_ids)` -> `(records, initial_balance, (imported, skipped, errors))`.
-- `import_records_from_xlsx(filepath, policy, currency_service, wallet_ids)` -> `(records, initial_balance, (imported, skipped, errors))`.
-- `import_mandatory_expenses_from_csv(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`.
-- `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`.
-- `import_full_backup(filepath)` -> `(wallets, records, mandatory_expenses, transfers, (imported, skipped, errors))`.
+- Legacy wrappers over `utils/*` kept for backward compatibility and tests.
+
+`services/import_parser.py`
+
+- `parse_import_file(path)` -> `ParsedImportData` (DTO/dict parsing layer, no storage writes).
+- Enforces safety limits: file size, row count, CSV field size.
+
+`services/import_service.py`
+
+- `ImportService.import_file(path)` — imports operations through `FinancialController` methods.
+- `ImportService.import_mandatory_file(path)` — imports mandatory templates through the service layer.
+- `Full Backup` keeps fixed `amount_kzt/rate_at_operation`; `Current Rate` recalculates values.
+
+`app/finance_service.py`
+
+- `FinanceService` protocol used by the import orchestrator (`ImportService`).
+- Defines import-facing methods, rollback wrapper, and ID normalization.
 
 `gui/helpers.py`
 
@@ -702,6 +724,7 @@ project/
 │
 ├── app/                        # Application layer
 │   ├── __init__.py
+│   ├── finance_service.py      # FinanceService protocol for import orchestration
 │   ├── record_service.py       # Service for records
 │   ├── services.py             # CurrencyService adapter
 │   └── use_cases.py            # Use cases
@@ -730,6 +753,11 @@ project/
 ├── db/                         # SQL schema for SQLite
 │   └── schema.sql
 │
+├── services/                   # Import service layer
+│   ├── __init__.py
+│   ├── import_parser.py        # CSV/XLSX/JSON parser -> DTO
+│   └── import_service.py       # Import orchestration via FinanceService
+│
 ├── utils/                      # Import/export and graphs
 │   ├── __init__.py
 │   ├── backup_utils.py         # Backup of data
@@ -750,7 +778,7 @@ project/
 │   ├── tkinter_gui.py          # Main GUI application
 │   ├── helpers.py              # Helpers for GUI
 │   ├── controllers.py          # GUI controllers
-│   ├── importers.py            # Import mandatory expenses, records and full backup
+│   ├── importers.py            # Legacy import wrappers (compatibility/tests)
 │   └── exporters.py            # Export reports, mandatory expenses and backup
 │
 ├── web/                        # Web application
@@ -769,8 +797,10 @@ project/
     ├── test_bootstrap_backup.py
     ├── test_migrate_json_to_sqlite.py
     ├── test_import_core.py
+    ├── test_import_parser.py
     ├── test_import_policy_and_backup.py
     ├── test_import_security.py
+    ├── test_import_service.py
     ├── test_pdf.py
     ├── test_records.py
     ├── test_reports.py
