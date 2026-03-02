@@ -114,6 +114,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `tests/test_bootstrap_migration_verification.py` for `migration_verified` flow and SQLite-only startup validation.
   - Added `tests/test_transfer_order_sqlite.py` to verify transfer records are appended to the end of `records`.
 
+### Removed
+
+- Remove outdated web directory with frontend files (HTML, CSS, JS) for financial accounting interface
+
 ### Changed
 
 - SQLite import/ID normalization and startup performance:

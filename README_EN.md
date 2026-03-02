@@ -6,7 +6,6 @@ Graphical and web application for personal financial accounting with multicurren
 
 - [Quick start](#-quick-start)
 - [Using the application](#️-using-the-application)
-- [Web application](#-web-application)
 - [Project architecture](#️-project-architecture)
 - [Software API](#-software-api)
 - [File structure](#-file-structure)
@@ -424,21 +423,6 @@ Format:
 
 ---
 
-## 🌐 Web application
-
-The web version is located in `web/` and runs entirely on the client (no server). The data is stored in the browser's `localStorage`.
-
-Features:
-
-- Separate sections for income, expenses, reports and settings.
-- Built-in charts and dashboard.
-- Support for rates of the National Bank of the Republic of Kazakhstan via RSS (`rates_all.xml`) with daily caching in `localStorage`.
-- Export report to `CSV` (web version).
-
-To run: Open `web/index.html` in a browser.
-
----
-
 ## 🏗️ Project architecture
 
 The project follows a layered architecture:
@@ -793,11 +777,6 @@ project/
 │   ├── controllers.py          # GUI controllers
 │   ├── importers.py            # Legacy import wrappers (compatibility/tests)
 │   └── exporters.py            # Export reports, mandatory expenses and backup
-│
-├── web/                        # Web application
-│   ├── index.html
-│   ├── styles.css
-│   └── app.js
 │
 └── tests/                      # Tests
     ├── __init__.py
