@@ -1,8 +1,10 @@
 import json
 import logging
 import os
+import shutil
 import tempfile
 import threading
+import time
 from abc import ABC, abstractmethod
 from dataclasses import replace as dc_replace
 from datetime import date as dt_date
@@ -410,13 +412,37 @@ class JsonFileRecordRepository(RecordRepository):
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
                     json.dump(payload, f, indent=2, ensure_ascii=False)
-                os.replace(tmp_path, self._file_path)
+                self._replace_with_retry(tmp_path)
+            except PermissionError as e:
+                error_path = self._file_path + ".error"
+                shutil.copy2(tmp_path, error_path)
+                raise Exception(
+                    f"Failed to save data to {self._file_path}. "
+                    f"Temporary file saved to {error_path}"
+                ) from e
             finally:
                 try:
                     if os.path.exists(tmp_path):
                         os.remove(tmp_path)
                 except Exception:
                     logger.exception("Failed to cleanup temporary file during save: %s", tmp_path)
+
+    @staticmethod
+    def _is_retryable_windows_permission_error(error: PermissionError) -> bool:
+        return int(getattr(error, "winerror", 0) or 0) in {5, 32}
+
+    def _replace_with_retry(self, tmp_path: str) -> None:
+        delays = (0.01, 0.02, 0.05)
+        for attempt, delay in enumerate(delays, start=1):
+            try:
+                os.replace(tmp_path, self._file_path)
+                return
+            except PermissionError as error:
+                if not self._is_retryable_windows_permission_error(error):
+                    raise
+                if attempt == len(delays):
+                    raise
+                time.sleep(delay)
 
     @staticmethod
     def _as_float(value, default: float = 0.0) -> float:

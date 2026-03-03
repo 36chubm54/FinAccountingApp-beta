@@ -350,12 +350,6 @@ def report_to_csv(report: Report, filepath: str) -> None:
         writer.writerow(["FINAL BALANCE", "", "", f"{report.total_fixed():.2f}"])
 
 
-def report_from_csv(filepath: str) -> Report:
-    """Backward-compatible helper. Prefers data CSV and supports legacy report CSV."""
-    records, initial_balance, _ = import_records_from_csv(filepath, ImportPolicy.LEGACY)
-    return Report(records, initial_balance)
-
-
 def export_records_to_csv(
     records: list[Record],
     filepath: str,

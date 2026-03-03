@@ -3,15 +3,16 @@ from __future__ import annotations
 import math
 from argparse import Namespace
 from pathlib import Path
-from sqlite3 import Row
+from typing import TYPE_CHECKING
 
 from backup import create_backup, export_to_json
 from config import JSON_PATH, SQLITE_PATH, USE_SQLITE
 from infrastructure.repositories import JsonFileRecordRepository, RecordRepository
-from infrastructure.sqlite_repository import SQLiteRecordRepository
 from migrate_json_to_sqlite import run_migration
 from storage.json_storage import JsonStorage
-from storage.sqlite_storage import SQLiteStorage
+
+if TYPE_CHECKING:
+    from infrastructure.sqlite_repository import SQLiteRecordRepository
 
 EPSILON = 0.00001
 
@@ -24,6 +25,8 @@ def _resolve_schema_path(schema_path: str) -> str:
 
 
 def _sqlite_has_data(sqlite_path: str, schema_path: str | None = None) -> bool:
+    from storage.sqlite_storage import SQLiteStorage
+
     if schema_path is not None:
         schema_path = _resolve_schema_path(schema_path)
     storage = SQLiteStorage(sqlite_path)
@@ -129,7 +132,7 @@ def _is_migration_verified(sqlite_repo: SQLiteRecordRepository) -> bool:
     ).fetchone()
     if row is None:
         return False
-    value = row[0] if isinstance(row, (tuple, Row)) else row["value"]
+    value = row[0] if isinstance(row, tuple) else row["value"]
     return str(value).strip().lower() == "true"
 
 
@@ -248,6 +251,8 @@ def bootstrap_repository() -> RecordRepository:
     if not USE_SQLITE:
         print("[bootstrap] Storage selected: JSON")
         return JsonFileRecordRepository(JSON_PATH)
+
+    from infrastructure.sqlite_repository import SQLiteRecordRepository
 
     print("[bootstrap] Storage selected: SQLite")
     create_backup(JSON_PATH)

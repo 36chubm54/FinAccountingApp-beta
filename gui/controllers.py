@@ -53,6 +53,7 @@ class FinancialController:
         self._repository = repository
         self._currency = currency_service
         self._record_service = RecordService(repository)
+        self.supports_bulk_import_replace = True
 
     def build_record_list_items(self) -> list[RecordListItem]:
         records = self._repository.load_all()
@@ -303,6 +304,33 @@ class FinancialController:
         )
         self._repository.save_initial_balance(float(initial_balance))
 
+    def replace_all_for_import(
+        self,
+        *,
+        wallets: list[Wallet] | None,
+        initial_balance: float,
+        records: list[Record],
+        transfers: list[Transfer],
+        mandatory_templates: list[MandatoryExpenseRecord],
+        preserve_existing_mandatory: bool,
+    ) -> None:
+        target_wallets = list(wallets) if wallets else list(self._repository.load_wallets())
+        target_wallets = self._wallets_with_system_initial_balance(
+            target_wallets, float(initial_balance)
+        )
+
+        mandatory_payload: list[MandatoryExpenseRecord] = []
+        if preserve_existing_mandatory:
+            mandatory_payload.extend(self._repository.load_mandatory_expenses())
+        mandatory_payload.extend(mandatory_templates)
+
+        self._repository.replace_all_data(
+            wallets=target_wallets,
+            records=records,
+            mandatory_expenses=mandatory_payload,
+            transfers=transfers,
+        )
+
     def run_import_transaction(self, operation):
         wallets_snapshot = self._repository.load_wallets()
         records_snapshot = self._repository.load_all()
@@ -473,3 +501,39 @@ class FinancialController:
             except TypeError:
                 reindexed.append(record)
         return reindexed
+
+    @staticmethod
+    def _wallets_with_system_initial_balance(
+        wallets: list[Wallet], initial_balance: float
+    ) -> list[Wallet]:
+        updated_wallets = list(wallets)
+        target_index: int | None = None
+        for index, wallet in enumerate(updated_wallets):
+            if int(wallet.id) == 1:
+                target_index = index
+                break
+        if target_index is None:
+            for index, wallet in enumerate(updated_wallets):
+                if bool(wallet.system):
+                    target_index = index
+                    break
+        if target_index is not None:
+            target_wallet = updated_wallets[target_index]
+            updated_wallets[target_index] = replace(
+                target_wallet,
+                initial_balance=float(initial_balance),
+                system=True,
+            )
+            return updated_wallets
+
+        base_currency = updated_wallets[0].currency if updated_wallets else "KZT"
+        system_wallet = Wallet(
+            id=1,
+            name="Main wallet",
+            currency=str(base_currency or "KZT").upper(),
+            initial_balance=float(initial_balance),
+            system=True,
+            allow_negative=False,
+            is_active=True,
+        )
+        return [system_wallet, *updated_wallets]

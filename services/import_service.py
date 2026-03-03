@@ -8,6 +8,7 @@ from typing import Any
 from app.finance_service import FinanceService
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
+from domain.transfers import Transfer
 from domain.wallets import Wallet
 from services.import_parser import ParsedImportData, parse_import_file
 from utils.csv_utils import _parse_transfer_row
@@ -157,6 +158,45 @@ class ImportService:
         if errors:
             raise ValueError(self._build_error(errors))
 
+        replace_all_for_import = getattr(self._finance_service, "replace_all_for_import", None)
+        fast_replace_enabled = (
+            getattr(self._finance_service, "supports_bulk_import_replace", False) is True
+        )
+        if (
+            fast_replace_enabled
+            and callable(replace_all_for_import)
+            and self._policy != ImportPolicy.CURRENT_RATE
+        ):
+            target_wallets = wallets if wallets else None
+            if target_wallets:
+                wallet_ids = {wallet.id for wallet in target_wallets}
+            else:
+                wallet_ids = {wallet.id for wallet in self._finance_service.load_wallets()}
+
+            self._ensure_wallets_exist(parsed_records, raw_transfer_ops, wallet_ids)
+            records, transfers, counters = self._build_import_operations(
+                parsed_records=parsed_records,
+                transfer_rows=raw_transfer_ops,
+                counters=ImportCounters(wallets=imported_wallets),
+            )
+            mandatory_templates = self._normalize_mandatory_templates(parsed_mandatory_templates)
+            replace_all_for_import(
+                wallets=target_wallets,
+                initial_balance=initial_balance,
+                records=records,
+                transfers=transfers,
+                mandatory_templates=mandatory_templates,
+                preserve_existing_mandatory=not bool(target_wallets),
+            )
+            logger.info(
+                "Import completed (bulk) file=%s wallets=%s records=%s transfers=%s",
+                parsed.path,
+                counters.wallets,
+                counters.records,
+                counters.transfers,
+            )
+            return imported, skipped, []
+
         if wallets:
             self._finance_service.reset_all_for_import(
                 wallets=wallets, initial_balance=initial_balance
@@ -184,6 +224,173 @@ class ImportService:
         )
         self._finance_service.normalize_operation_ids_for_import()
         return imported, skipped, []
+
+    def _build_import_operations(
+        self,
+        *,
+        parsed_records: list[Record],
+        transfer_rows: list[dict[str, Any]],
+        counters: ImportCounters,
+    ) -> tuple[list[Record], list[Transfer], ImportCounters]:
+        records: list[Record] = []
+        transfers: list[Transfer] = []
+        next_record_id = 1
+        next_transfer_id = 1
+
+        for record in self._sort_records_for_import(parsed_records):
+            if record.transfer_id is not None:
+                continue
+            records.append(replace(record, id=next_record_id, transfer_id=None))
+            next_record_id += 1
+
+        transfer_records: dict[int, list[Record]] = defaultdict(list)
+        for record in parsed_records:
+            if record.transfer_id is not None:
+                transfer_records[int(record.transfer_id)].append(record)
+
+        transfers_count = counters.transfers
+        for _transfer_id, linked in sorted(
+            transfer_records.items(), key=lambda item: self._record_sort_key(item[1][0])
+        ):
+            if len(linked) != 2:
+                raise ValueError(
+                    f"Transfer integrity violated: expected 2 linked records (got {len(linked)})"
+                )
+            source = next((item for item in linked if isinstance(item, ExpenseRecord)), None)
+            target = next((item for item in linked if isinstance(item, IncomeRecord)), None)
+            if source is None or target is None:
+                raise ValueError("Transfer integrity violated: requires one expense and one income")
+            if source.wallet_id == target.wallet_id:
+                raise ValueError("Transfer integrity violated: wallets must be different")
+
+            transfer = Transfer(
+                id=next_transfer_id,
+                from_wallet_id=int(source.wallet_id),
+                to_wallet_id=int(target.wallet_id),
+                date=str(source.date),
+                amount_original=float(source.amount_original or 0.0),
+                currency=str(source.currency).upper(),
+                rate_at_operation=float(source.rate_at_operation),
+                amount_kzt=float(source.amount_kzt or 0.0),
+                description=str(source.description or ""),
+            )
+            transfers.append(transfer)
+            records.append(
+                ExpenseRecord(
+                    id=next_record_id,
+                    date=str(source.date),
+                    wallet_id=int(source.wallet_id),
+                    transfer_id=int(transfer.id),
+                    amount_original=float(source.amount_original or 0.0),
+                    currency=str(source.currency).upper(),
+                    rate_at_operation=float(source.rate_at_operation),
+                    amount_kzt=float(source.amount_kzt or 0.0),
+                    category="Transfer",
+                )
+            )
+            next_record_id += 1
+            records.append(
+                IncomeRecord(
+                    id=next_record_id,
+                    date=str(source.date),
+                    wallet_id=int(target.wallet_id),
+                    transfer_id=int(transfer.id),
+                    amount_original=float(source.amount_original or 0.0),
+                    currency=str(source.currency).upper(),
+                    rate_at_operation=float(source.rate_at_operation),
+                    amount_kzt=float(source.amount_kzt or 0.0),
+                    category="Transfer",
+                )
+            )
+            next_record_id += 1
+            next_transfer_id += 1
+            transfers_count += 1
+
+        grouped_ids = {
+            int(record.transfer_id)
+            for record in parsed_records
+            if isinstance(record.transfer_id, int) and record.transfer_id > 0
+        }
+        for transfer_row in sorted(transfer_rows, key=self._transfer_row_sort_key):
+            if int(transfer_row["transfer_id"]) in grouped_ids:
+                continue
+            transfer = Transfer(
+                id=next_transfer_id,
+                from_wallet_id=int(transfer_row["from_wallet_id"]),
+                to_wallet_id=int(transfer_row["to_wallet_id"]),
+                date=str(transfer_row["transfer_date"]),
+                amount_original=float(transfer_row["amount"]),
+                currency=str(transfer_row["currency"]).upper(),
+                rate_at_operation=float(transfer_row["rate_at_operation"]),
+                amount_kzt=float(transfer_row["amount_kzt"]),
+                description=str(transfer_row.get("description", "")),
+            )
+            transfers.append(transfer)
+            records.append(
+                ExpenseRecord(
+                    id=next_record_id,
+                    date=str(transfer.date),
+                    wallet_id=int(transfer.from_wallet_id),
+                    transfer_id=int(transfer.id),
+                    amount_original=float(transfer.amount_original),
+                    currency=str(transfer.currency).upper(),
+                    rate_at_operation=float(transfer.rate_at_operation),
+                    amount_kzt=float(transfer.amount_kzt),
+                    category="Transfer",
+                )
+            )
+            next_record_id += 1
+            records.append(
+                IncomeRecord(
+                    id=next_record_id,
+                    date=str(transfer.date),
+                    wallet_id=int(transfer.to_wallet_id),
+                    transfer_id=int(transfer.id),
+                    amount_original=float(transfer.amount_original),
+                    currency=str(transfer.currency).upper(),
+                    rate_at_operation=float(transfer.rate_at_operation),
+                    amount_kzt=float(transfer.amount_kzt),
+                    category="Transfer",
+                )
+            )
+            next_record_id += 1
+            next_transfer_id += 1
+            transfers_count += 1
+
+        return (
+            records,
+            transfers,
+            ImportCounters(
+                wallets=counters.wallets,
+                records=len(records),
+                transfers=transfers_count,
+            ),
+        )
+
+    def _normalize_mandatory_templates(
+        self, templates: list[MandatoryExpenseRecord]
+    ) -> list[MandatoryExpenseRecord]:
+        normalized: list[MandatoryExpenseRecord] = []
+        for template in templates:
+            description = self._normalize_mandatory_description(
+                str(template.description or ""),
+                str(template.category),
+            )
+            normalized.append(
+                MandatoryExpenseRecord(
+                    id=int(template.id),
+                    date="",
+                    wallet_id=1,
+                    amount_original=float(template.amount_original or 0.0),
+                    currency=str(template.currency).upper(),
+                    rate_at_operation=float(template.rate_at_operation),
+                    amount_kzt=float(template.amount_kzt or 0.0),
+                    category=str(template.category),
+                    description=description,
+                    period=str(template.period),  # type: ignore[arg-type]
+                )
+            )
+        return normalized
 
     def _apply_operations_with_relaxed_wallet_limits(
         self,
