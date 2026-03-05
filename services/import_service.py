@@ -34,8 +34,8 @@ class ImportService:
         self._finance_service = finance_service
         self._policy = policy
 
-    def import_file(self, path: str) -> tuple[int, int, list[str]]:
-        parsed = parse_import_file(path)
+    def import_file(self, path: str, *, force: bool = False) -> tuple[int, int, list[str]]:
+        parsed = parse_import_file(path, force=force)
         return self._finance_service.run_import_transaction(
             lambda: self._import_records_payload(parsed)
         )

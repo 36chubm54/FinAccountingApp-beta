@@ -1,8 +1,10 @@
 from pathlib import Path
 
+import json
 import pytest
 
 from services import import_parser
+from utils.backup_utils import BackupReadonlyError, compute_checksum
 
 
 def test_parse_import_file_rejects_large_file(monkeypatch, tmp_path: Path) -> None:
@@ -26,3 +28,52 @@ def test_parse_import_file_rejects_csv_row_limit(monkeypatch, tmp_path: Path) ->
 
     with pytest.raises(ValueError, match="row limit"):
         import_parser.parse_import_file(str(csv_path))
+
+
+def test_parse_import_file_rejects_readonly_snapshot_without_force(tmp_path: Path) -> None:
+    data = {
+        "wallets": [],
+        "records": [],
+        "mandatory_expenses": [],
+        "transfers": [],
+    }
+    payload = {
+        "meta": {
+            "created_at": "2026-03-05T00:00:00Z",
+            "app_version": "0.0.0",
+            "storage": "json",
+            "readonly": True,
+            "checksum": compute_checksum(data),
+        },
+        "data": data,
+    }
+    json_path = tmp_path / "snapshot.json"
+    json_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(BackupReadonlyError):
+        import_parser.parse_import_file(str(json_path))
+
+
+def test_parse_import_file_accepts_readonly_snapshot_with_force(tmp_path: Path) -> None:
+    data = {
+        "wallets": [],
+        "records": [],
+        "mandatory_expenses": [],
+        "transfers": [],
+    }
+    payload = {
+        "meta": {
+            "created_at": "2026-03-05T00:00:00Z",
+            "app_version": "0.0.0",
+            "storage": "json",
+            "readonly": True,
+            "checksum": compute_checksum(data),
+        },
+        "data": data,
+    }
+    json_path = tmp_path / "snapshot.json"
+    json_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    parsed = import_parser.parse_import_file(str(json_path), force=True)
+    assert parsed.file_type == "json"
+    assert parsed.rows == []

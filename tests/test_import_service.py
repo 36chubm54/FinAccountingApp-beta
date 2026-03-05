@@ -359,3 +359,16 @@ def test_import_service_bulk_replace_normalizes_mandatory_ids_from_one() -> None
         "mandatory_templates"
     ]
     assert [template.id for template in mandatory_templates] == [1, 2]
+
+
+def test_import_service_passes_force_flag_to_parser() -> None:
+    finance_service = _finance_mock()
+    payload = ParsedImportData(path="data.json", file_type="json", rows=[])
+
+    with patch("services.import_service.parse_import_file", return_value=payload) as parse_mock:
+        ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file(
+            "data.json",
+            force=True,
+        )
+
+    parse_mock.assert_called_once_with("data.json", force=True)

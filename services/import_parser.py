@@ -8,6 +8,7 @@ from typing import Any
 
 from openpyxl import load_workbook
 
+from utils.backup_utils import unwrap_backup_payload
 from utils.import_core import as_float, norm_key
 
 MAX_IMPORT_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
@@ -25,7 +26,7 @@ class ParsedImportData:
     initial_balance: float | None = None
 
 
-def parse_import_file(path: str) -> ParsedImportData:
+def parse_import_file(path: str, *, force: bool = False) -> ParsedImportData:
     source = Path(path)
     if not source.exists():
         raise FileNotFoundError(f"Import file not found: {path}")
@@ -39,7 +40,7 @@ def parse_import_file(path: str) -> ParsedImportData:
         rows = _read_xlsx_rows(path)
         return ParsedImportData(path=path, file_type="xlsx", rows=rows)
     if suffix == ".json":
-        return _read_json_payload(path)
+        return _read_json_payload(path, force=force)
     raise ValueError(f"Unsupported import file type: {suffix}")
 
 
@@ -105,13 +106,10 @@ def _read_xlsx_rows(path: str) -> list[dict[str, Any]]:
             pass
 
 
-def _read_json_payload(path: str) -> ParsedImportData:
+def _read_json_payload(path: str, *, force: bool = False) -> ParsedImportData:
     with open(path, encoding="utf-8") as fp:
         payload = json.load(fp)
-    if isinstance(payload, list):
-        payload = {"records": payload}
-    if not isinstance(payload, dict):
-        raise ValueError("JSON import payload must be an object")
+    payload = unwrap_backup_payload(payload, force=force)
 
     wallets = payload.get("wallets", [])
     if not isinstance(wallets, list):

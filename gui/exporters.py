@@ -82,6 +82,7 @@ def export_full_backup(
     mandatory_expenses,
     transfers=None,
     initial_balance: float = 0.0,
+    readonly: bool = True,
 ) -> None:
     del initial_balance  # legacy argument
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
@@ -94,6 +95,7 @@ def export_full_backup(
             records=list(records),
             mandatory_expenses=list(mandatory_expenses),
             transfers=list(transfers or []),
+            readonly=readonly,
         )
     except Exception:
         logger.exception("Failed to export full backup to %s", filepath)

@@ -230,12 +230,19 @@ python main.py
 
 ### Backup
 
-Полный backup реализован в формате `JSON`:
+Полный backup реализован в формате `JSON` в двух вариантах:
 
-- Поля: `wallets`, `records`, `mandatory_expenses` и `transfers`.
+- `Snapshot backup` (по умолчанию):
+  - корень: `meta` + `data`;
+  - `meta.readonly=true`, `meta.checksum` (SHA256 от `data`);
+  - checksum считается детерминированно по `json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))`.
+- `Technical backup` (`readonly=False`):
+  - legacy-совместимый JSON без `meta` и без checksum;
+  - используется для обычного pipeline без readonly-ограничения.
 - Вкладка `Settings` содержит кнопки:
   - `Export Full Backup`
   - `Import Full Backup`
+- Импорт `readonly` snapshot требует `force=True` (или подтверждение force в UI).
 
 Backup восстанавливает:
 
@@ -642,12 +649,12 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 
 `services/import_parser.py`
 
-- `parse_import_file(path)` -> `ParsedImportData` (DTO/словарный слой, без записи в хранилище).
+- `parse_import_file(path, force=False)` -> `ParsedImportData` (DTO/словарный слой, без записи в хранилище).
 - Валидация ограничений: размер файла, row-limit, размер CSV-поля.
 
 `services/import_service.py`
 
-- `ImportService.import_file(path)` — импорт операций через методы `FinancialController`.
+- `ImportService.import_file(path, force=False)` — импорт операций через методы `FinancialController`.
 - `ImportService.import_mandatory_file(path)` — импорт шаблонов обязательных расходов через сервис.
 - `Full Backup` сохраняет фиксированные `amount_kzt/rate_at_operation`; `Current Rate` пересчитывает значения.
 
@@ -664,8 +671,9 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 
 `utils/backup_utils.py`
 
-- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0)`.
-- `import_full_backup_from_json(filepath)`.
+- `compute_checksum(data)` — SHA256 для `data`.
+- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0, readonly=True)`.
+- `import_full_backup_from_json(filepath, force=False)`.
 
 `utils/csv_utils.py`
 

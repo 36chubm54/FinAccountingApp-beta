@@ -506,8 +506,13 @@ def build_settings_tab(
         ):
             return
 
-        def task() -> tuple[int, int, list[str]]:
-            return context.controller.import_records("JSON", filepath, ImportPolicy.FULL_BACKUP)
+        def task(force: bool) -> tuple[int, int, list[str]]:
+            return context.controller.import_records(
+                "JSON",
+                filepath,
+                ImportPolicy.FULL_BACKUP,
+                force=force,
+            )
 
         def on_success(result: tuple[int, int, list[str]]) -> None:
             imported, skipped, errors = result
@@ -521,11 +526,35 @@ def build_settings_tab(
             context._refresh_list()
             context._refresh_charts()
 
-        context._run_background(
-            task,
-            on_success=on_success,
-            busy_message="Importing full backup...",
-        )
+        def run_import(force: bool) -> None:
+            def current_task() -> tuple[int, int, list[str]]:
+                return task(force)
+
+            def on_error(exc: BaseException) -> None:
+                try:
+                    from utils.backup_utils import BackupReadonlyError
+
+                    is_readonly = isinstance(exc, BackupReadonlyError)
+                except Exception:
+                    is_readonly = False
+
+                if is_readonly and not force:
+                    if messagebox.askyesno(
+                        "Readonly Snapshot",
+                        "Backup is readonly snapshot. Import with force override?",
+                    ):
+                        run_import(True)
+                    return
+                messagebox.showerror("Error", f"Failed to import backup: {str(exc)}")
+
+            context._run_background(
+                current_task,
+                on_success=on_success,
+                on_error=on_error,
+                busy_message="Importing full backup...",
+            )
+
+        run_import(False)
 
     def export_backup() -> None:
         filepath = filedialog.asksaveasfilename(

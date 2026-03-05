@@ -230,12 +230,19 @@ All modes perform line-by-line validation and generate a report:
 
 ### Backup
 
-Full backup is implemented in `JSON` format:
+Full backup is implemented in `JSON` format in two modes:
 
-- Fields: `wallets`, `records`, `mandatory_expenses` and `transfers`.
+- `Snapshot backup` (default):
+  - root object: `meta` + `data`;
+  - `meta.readonly=true`, `meta.checksum` (SHA256 of `data`);
+  - checksum is computed deterministically via `json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))`.
+- `Technical backup` (`readonly=False`):
+  - legacy-compatible JSON without `meta` and checksum;
+  - used by the standard import pipeline without readonly protection.
 - The `Settings` tab contains the following buttons:
   - `Export Full Backup`
   - `Import Full Backup`
+- Importing a readonly snapshot requires `force=True` (or force confirmation in UI).
 
 Backup restores:
 
@@ -642,12 +649,12 @@ Below are the key classes and functions synchronized with the actual code.
 
 `services/import_parser.py`
 
-- `parse_import_file(path)` -> `ParsedImportData` (DTO/dict parsing layer, no storage writes).
+- `parse_import_file(path, force=False)` -> `ParsedImportData` (DTO/dict parsing layer, no storage writes).
 - Enforces safety limits: file size, row count, CSV field size.
 
 `services/import_service.py`
 
-- `ImportService.import_file(path)` — imports operations through `FinancialController` methods.
+- `ImportService.import_file(path, force=False)` — imports operations through `FinancialController` methods.
 - `ImportService.import_mandatory_file(path)` — imports mandatory templates through the service layer.
 - `Full Backup` keeps fixed `amount_kzt/rate_at_operation`; `Current Rate` recalculates values.
 
@@ -662,10 +669,11 @@ Below are the key classes and functions synchronized with the actual code.
 
 ### Utils
 
-`utils/backup.py`
+`utils/backup_utils.py`
 
-- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0)`.
-- `import_full_backup_from_json(filepath)`.
+- `compute_checksum(data)` — SHA256 checksum for `data`.
+- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0, readonly=True)`.
+- `import_full_backup_from_json(filepath, force=False)`.
 
 `utils/csv_utils.py`
 

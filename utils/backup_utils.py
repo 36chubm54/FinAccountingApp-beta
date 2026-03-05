@@ -1,8 +1,11 @@
+import hashlib
 import json
 import logging
 import os
 from collections.abc import Sequence
 from datetime import date as dt_date
+from datetime import datetime, timezone
+from typing import Any
 
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
@@ -12,6 +15,23 @@ from utils.import_core import ImportSummary, parse_import_row, record_type_name
 
 logger = logging.getLogger(__name__)
 SYSTEM_WALLET_ID = 1
+
+try:
+    from version import __version__
+except Exception:
+    __version__ = "0.0.0"
+
+
+class BackupFormatError(ValueError):
+    """Raised when backup JSON has invalid structure."""
+
+
+class BackupIntegrityError(ValueError):
+    """Raised when snapshot checksum does not match payload."""
+
+
+class BackupReadonlyError(PermissionError):
+    """Raised when readonly snapshot import is attempted without force."""
 
 
 def _record_to_payload(record: Record) -> dict:
@@ -57,6 +77,69 @@ def _transfer_to_payload(transfer: Transfer) -> dict:
         "amount_kzt": float(transfer.amount_kzt),
         "description": str(transfer.description or ""),
     }
+
+
+def compute_checksum(data: dict) -> str:
+    if not isinstance(data, dict):
+        raise BackupFormatError("Checksum payload must be object")
+    serialized = json.dumps(
+        data,
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _storage_mode() -> str:
+    try:
+        from config import USE_SQLITE
+
+        return "sqlite" if bool(USE_SQLITE) else "json"
+    except Exception:
+        return "json"
+
+
+def _now_utc_iso8601() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _unwrap_backup_payload(payload: Any, *, force: bool = False) -> dict[str, Any]:
+    if isinstance(payload, list):
+        return {"records": payload}
+    if not isinstance(payload, dict):
+        raise BackupFormatError("Invalid backup JSON structure: root must be object")
+
+    has_meta = "meta" in payload
+    has_data = "data" in payload
+    if not has_meta and not has_data:
+        return payload
+    if has_meta != has_data:
+        raise BackupFormatError("Snapshot backup must include both 'meta' and 'data'")
+
+    meta = payload.get("meta")
+    data = payload.get("data")
+    if not isinstance(meta, dict):
+        raise BackupFormatError("Snapshot backup: 'meta' must be object")
+    if not isinstance(data, dict):
+        raise BackupFormatError("Snapshot backup: 'data' must be object")
+
+    checksum = meta.get("checksum")
+    if not isinstance(checksum, str) or not checksum.strip():
+        raise BackupFormatError("Snapshot backup: missing meta.checksum")
+    actual_checksum = compute_checksum(data)
+    if checksum != actual_checksum:
+        raise BackupIntegrityError("Snapshot checksum mismatch")
+
+    readonly = bool(meta.get("readonly", False))
+    if readonly and not force:
+        raise BackupReadonlyError("Readonly snapshot cannot be imported without force=True")
+
+    return data
+
+
+def unwrap_backup_payload(payload: Any, *, force: bool = False) -> dict[str, Any]:
+    return _unwrap_backup_payload(payload, force=force)
 
 
 def _validate_transfer_integrity(records: list[Record], transfers: list[Transfer]) -> list[str]:
@@ -166,6 +249,7 @@ def export_full_backup_to_json(
     mandatory_expenses: Sequence[MandatoryExpenseRecord],
     transfers: Sequence[Transfer] = (),
     initial_balance: float = 0.0,
+    readonly: bool = True,
 ) -> None:
     normalized_wallets = list(wallets or [])
     if not normalized_wallets:
@@ -180,7 +264,7 @@ def export_full_backup_to_json(
                 is_active=True,
             )
         ]
-    payload = {
+    data_payload = {
         "wallets": [_wallet_to_payload(wallet) for wallet in normalized_wallets],
         "records": [_record_to_payload(record) for record in records],
         "mandatory_expenses": [
@@ -193,6 +277,20 @@ def export_full_backup_to_json(
         ],
         "transfers": [_transfer_to_payload(transfer) for transfer in transfers],
     }
+    payload: dict[str, Any]
+    if readonly:
+        payload = {
+            "meta": {
+                "created_at": _now_utc_iso8601(),
+                "app_version": __version__,
+                "storage": _storage_mode(),
+                "readonly": True,
+                "checksum": compute_checksum(data_payload),
+            },
+            "data": data_payload,
+        }
+    else:
+        payload = data_payload
 
     directory = os.path.dirname(filepath)
     if directory:
@@ -203,25 +301,29 @@ def export_full_backup_to_json(
 
 def import_full_backup_from_json(
     filepath: str,
+    *,
+    force: bool = False,
 ) -> tuple[list[Wallet], list[Record], list[MandatoryExpenseRecord], list[Transfer], ImportSummary]:
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"JSON file not found: {filepath}")
 
-    with open(filepath, encoding="utf-8") as fp:
-        data = json.load(fp)
+    try:
+        with open(filepath, encoding="utf-8") as fp:
+            raw_payload = json.load(fp)
+    except json.JSONDecodeError as exc:
+        raise BackupFormatError(f"Invalid backup JSON: {exc}") from exc
 
-    if not isinstance(data, dict):
-        raise ValueError("Invalid backup JSON structure: root must be object")
+    source_payload = _unwrap_backup_payload(raw_payload, force=force)
 
-    migrated_legacy = not all(key in data for key in ("wallets", "records", "transfers"))
+    migrated_legacy = not all(key in source_payload for key in ("wallets", "records", "transfers"))
 
-    raw_records = data.get("records", [])
-    raw_mandatory = data.get("mandatory_expenses", [])
-    raw_wallets = data.get("wallets", [])
-    raw_transfers = data.get("transfers", [])
+    raw_records = source_payload.get("records", [])
+    raw_mandatory = source_payload.get("mandatory_expenses", [])
+    raw_wallets = source_payload.get("wallets", [])
+    raw_transfers = source_payload.get("transfers", [])
 
     if not isinstance(raw_records, list) or not isinstance(raw_mandatory, list):
-        raise ValueError(
+        raise BackupFormatError(
             "Invalid backup JSON structure: records and mandatory_expenses must be arrays"
         )
 
@@ -232,7 +334,7 @@ def import_full_backup_from_json(
             raw_transfers = []
 
     if not isinstance(raw_wallets, list) or not isinstance(raw_transfers, list):
-        raise ValueError("Invalid backup JSON structure: wallets and transfers must be arrays")
+        raise BackupFormatError("Invalid backup JSON structure: wallets and transfers must be arrays")
 
     errors: list[str] = []
     skipped = 0
@@ -262,7 +364,7 @@ def import_full_backup_from_json(
                 errors.append(f"wallets[{idx}]: invalid wallet ({exc})")
     else:
         # Legacy migration: move global initial_balance into system wallet.
-        legacy_balance = float(data.get("initial_balance", 0.0) or 0.0)
+        legacy_balance = float(source_payload.get("initial_balance", 0.0) or 0.0)
         wallets = [
             Wallet(
                 id=SYSTEM_WALLET_ID,
@@ -394,3 +496,32 @@ def import_full_backup_from_json(
         migrated_legacy,
     )
     return wallets, records, mandatory_expenses, transfers, (imported, skipped, errors)
+
+
+def create_backup(
+    filepath: str,
+    *,
+    wallets: Sequence[Wallet] | None = None,
+    records: Sequence[Record],
+    mandatory_expenses: Sequence[MandatoryExpenseRecord],
+    transfers: Sequence[Transfer] = (),
+    initial_balance: float = 0.0,
+    readonly: bool = True,
+) -> None:
+    export_full_backup_to_json(
+        filepath,
+        wallets=wallets,
+        records=records,
+        mandatory_expenses=mandatory_expenses,
+        transfers=transfers,
+        initial_balance=initial_balance,
+        readonly=readonly,
+    )
+
+
+def import_backup(
+    filepath: str,
+    *,
+    force: bool = False,
+) -> tuple[list[Wallet], list[Record], list[MandatoryExpenseRecord], list[Transfer], ImportSummary]:
+    return import_full_backup_from_json(filepath, force=force)

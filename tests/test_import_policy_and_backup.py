@@ -1,10 +1,19 @@
 import os
 import tempfile
+import json
+
+import pytest
 
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
 from domain.wallets import Wallet
-from utils.backup_utils import export_full_backup_to_json, import_full_backup_from_json
+from utils.backup_utils import (
+    BackupFormatError,
+    BackupIntegrityError,
+    BackupReadonlyError,
+    export_full_backup_to_json,
+    import_full_backup_from_json,
+)
 from utils.csv_utils import import_records_from_csv
 
 
@@ -148,12 +157,131 @@ def test_full_backup_roundtrip():
             mandatory_expenses=mandatory,
         )
         wallets, imported_records, imported_mandatory, transfers, summary = (
-            import_full_backup_from_json(path)
+            import_full_backup_from_json(path, force=True)
         )
         assert wallets[0].initial_balance == 123.0
         assert len(imported_records) == 1
         assert len(imported_mandatory) == 1
         assert transfers == []
         assert summary[1] == 0
+    finally:
+        os.unlink(path)
+
+
+def test_snapshot_checksum_mismatch_raises_integrity_error() -> None:
+    records = [
+        IncomeRecord(
+            date="2025-01-01",
+            wallet_id=1,
+            amount_original=10.0,
+            currency="USD",
+            rate_at_operation=500.0,
+            amount_kzt=5000.0,
+            category="Salary",
+        )
+    ]
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
+        path = tmp.name
+    try:
+        export_full_backup_to_json(
+            path,
+            wallets=[Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=0.0, system=True)],
+            records=records,
+            mandatory_expenses=[],
+            transfers=[],
+            readonly=True,
+        )
+        with open(path, encoding="utf-8") as fp:
+            payload = json.load(fp)
+        payload["data"]["records"][0]["amount_original"] = 999.0
+        with open(path, "w", encoding="utf-8") as fp:
+            json.dump(payload, fp, ensure_ascii=False, indent=2)
+
+        with pytest.raises(BackupIntegrityError):
+            import_full_backup_from_json(path, force=True)
+    finally:
+        os.unlink(path)
+
+
+def test_snapshot_readonly_requires_force() -> None:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
+        path = tmp.name
+    try:
+        export_full_backup_to_json(
+            path,
+            wallets=[Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=1.0, system=True)],
+            records=[],
+            mandatory_expenses=[],
+            transfers=[],
+            readonly=True,
+        )
+        with pytest.raises(BackupReadonlyError):
+            import_full_backup_from_json(path)
+    finally:
+        os.unlink(path)
+
+
+def test_snapshot_readonly_force_import_succeeds() -> None:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
+        path = tmp.name
+    try:
+        export_full_backup_to_json(
+            path,
+            wallets=[Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=42.0, system=True)],
+            records=[],
+            mandatory_expenses=[],
+            transfers=[],
+            readonly=True,
+        )
+        wallets, records, mandatory, transfers, summary = import_full_backup_from_json(
+            path,
+            force=True,
+        )
+        assert len(wallets) == 1
+        assert wallets[0].initial_balance == 42.0
+        assert records == []
+        assert mandatory == []
+        assert transfers == []
+        assert summary[1] == 0
+    finally:
+        os.unlink(path)
+
+
+def test_legacy_json_without_meta_imports_normally() -> None:
+    payload = {
+        "wallets": [
+            {
+                "id": 1,
+                "name": "Main wallet",
+                "currency": "KZT",
+                "initial_balance": 5.0,
+                "system": True,
+                "allow_negative": False,
+                "is_active": True,
+            }
+        ],
+        "records": [],
+        "mandatory_expenses": [],
+        "transfers": [],
+    }
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json", encoding="utf-8") as tmp:
+        json.dump(payload, tmp, ensure_ascii=False)
+        path = tmp.name
+    try:
+        wallets, _, _, _, summary = import_full_backup_from_json(path)
+        assert wallets[0].initial_balance == 5.0
+        assert summary[1] == 0
+    finally:
+        os.unlink(path)
+
+
+def test_snapshot_invalid_structure_raises_backup_format_error() -> None:
+    payload = {"meta": {"readonly": True, "checksum": "abc"}, "data": []}
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json", encoding="utf-8") as tmp:
+        json.dump(payload, tmp, ensure_ascii=False)
+        path = tmp.name
+    try:
+        with pytest.raises(BackupFormatError):
+            import_full_backup_from_json(path, force=True)
     finally:
         os.unlink(path)

@@ -7,6 +7,27 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.2.0] - 2026-03-05
+
+### Added
+
+- Immutable snapshot backup format
+- SHA256 integrity validation
+- Readonly import protection
+- Force override mode
+
+### Security
+
+- Prevent import of modified backups
+- Guarantee transactional rollback on integrity failure
+
+### Docs
+
+- Update `README.md` and `README_EN.md` with new backup format details
+- Document the force override mode and integrity validation process
+
+---
+
 ## [1.1.3] - 2026-03-04
 
 ### Fixed

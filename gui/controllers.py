@@ -367,11 +367,14 @@ class FinancialController:
         self._repository.replace_records_and_transfers(normalized_records, normalized_transfers)
 
     def import_records(
-        self, fmt: str, filepath: str, policy: ImportPolicy
+        self, fmt: str, filepath: str, policy: ImportPolicy, *, force: bool = False
     ) -> tuple[int, int, list[str]]:
         if fmt not in {"CSV", "XLSX", "JSON"}:
             raise ValueError(f"Unsupported format: {fmt}")
-        return ImportService(self, policy=policy).import_file(filepath)
+        service = ImportService(self, policy=policy)
+        if force:
+            return service.import_file(filepath, force=True)
+        return service.import_file(filepath)
 
     def import_mandatory(self, fmt: str, filepath: str) -> tuple[int, int, list[str]]:
         if fmt not in {"CSV", "XLSX", "JSON"}:

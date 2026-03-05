@@ -84,11 +84,11 @@ def import_mandatory_expenses_from_xlsx(
         raise
 
 
-def import_full_backup(filepath: str):
+def import_full_backup(filepath: str, *, force: bool = False):
     try:
         from utils.backup_utils import import_full_backup_from_json
 
-        return import_full_backup_from_json(filepath)
+        return import_full_backup_from_json(filepath, force=force)
     except Exception:
         logger.exception("Failed to import full backup from json: %s", filepath)
         raise
