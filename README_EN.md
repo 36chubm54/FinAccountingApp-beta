@@ -193,8 +193,9 @@ Import architecture:
 
 Formats:
 
-- `CSV`, `XLSX`.
-- All existing entries are replaced with data from the file.
+- `JSON`, `CSV`, `XLSX`.
+- Import pipeline: `parser -> domain validation -> SQLite transaction -> commit / rollback`.
+- All existing runtime data is replaced inside a single SQLite transaction.
 
 Data format:
 
@@ -274,16 +275,19 @@ Rules for migrating old formats:
 
 ### Data storage
 
-Current primary storage is SQLite (`finance.db`).
-JSON (`data.json`) is used as backup/export.
+SQLite (`finance.db`) is the only runtime storage.
+JSON (`data.json`) is no longer used as an application backend and remains only for:
+
+- JSON import;
+- JSON export;
+- backups.
+
 A dedicated `storage/` layer is used for data access:
 
 - `storage/base.py` — `Storage` contract (data-access operations only).
-- `storage/json_storage.py` — `JsonStorage` adapter over the current JSON implementation.
+- `storage/json_storage.py` — JSON adapter for import/export/backup only.
 - `storage/sqlite_storage.py` — `SQLiteStorage` based on standard `sqlite3`.
 - `db/schema.sql` — SQL schema for `wallets`, `records`, `transfers`, `mandatory_expenses`.
-
-Domain models and service-layer business logic remain unchanged.
 
 ### JSON -> SQLite migration
 
@@ -309,29 +313,24 @@ What the script does:
 - performs `rollback` on any error or mismatch.
 - is safe to rerun: if SQLite already has an equivalent dataset, migration is skipped without failure.
 
-### Primary storage configuration
+### Runtime storage configuration
 
-`config.py` controls the storage source:
+`config.py` defines the paths:
 
-- `USE_SQLITE = True`
 - `SQLITE_PATH = "finance.db"`
 - `JSON_PATH = "data.json"`
 
-Paths in `config.py` and default values in `migrate_json_to_sqlite.py`
-are resolved relative to the `project` directory, so `finance.db` and `data.json` are created inside `project` even when launched from another folder, and `data_backup_*.json` are created inside `project/backups/` (the folder is created automatically).
+Paths are resolved relative to the `project` directory, so `finance.db` and `data.json` are created inside `project` even when launched from another folder.
 
 Initialization is handled by `bootstrap.py`:
 
-- with `USE_SQLITE=True`, SQLite is selected as primary storage;
-- if SQLite is empty, a one-time migration from JSON is executed;
-- if SQLite already has data, repeated migration is blocked;
-- on each startup a JSON backup is created (`data_backup_YYYYMMDD_HHMMSS.json`);
-- after successful migration, `schema_meta.migration_verified=true` is stored;
-- JSON vs SQLite comparison runs only until migration is verified;
-- on regular starts with `USE_SQLITE=True`, only SQLite internal integrity is validated:
+- the application always uses SQLite as runtime storage;
+- if `finance.db` is missing, the database and schema are created on startup;
+- the bootstrap ensures that a system wallet exists;
+- SQLite internal integrity is validated on startup:
   `PRAGMA foreign_key_check`, transfer linkage (`exactly 2 linked records: income+expense`),
   no orphan records, and no CHECK-like violations;
-- reverse export SQLite -> JSON is available via `backup.export_to_json`.
+- JSON bootstrap and direct runtime work against `data.json` have been removed.
 
 SQLite behavior by identifiers:
 
@@ -449,7 +448,7 @@ The project follows a layered architecture:
 - `infrastructure/` — JSON and SQLite `RecordRepository` implementations.
 - `storage/` — storage abstraction and JSON/SQLite adapters.
 - `db/` — SQLite SQL schema.
-- `bootstrap.py` — storage selection, migration and startup validation.
+- `bootstrap.py` — SQLite initialization and startup validation.
 - `backup.py` — JSON backup and SQLite -> JSON export.
 - `config.py` — storage flag and paths.
 - `utils/` — import/export and preparation of data for graphs.
@@ -458,7 +457,7 @@ The project follows a layered architecture:
 
 Data flow for GUI:
 
-- UI (Tkinter) → `gui/controllers.py` → `app/use_cases.py` → `infrastructure/repositories.py` → `data.json`.
+- UI (Tkinter) → `gui/controllers.py` → `app/use_cases.py` → `infrastructure/sqlite_repository.py` → `finance.db`.
 
 Domain relationships:
 
@@ -576,7 +575,7 @@ Below are the key classes and functions synchronized with the actual code.
 `infrastructure/repositories.py`
 
 - `RecordRepository` — repository interface.
-- `JsonFileRecordRepository(file_path="data.json")` — JSON storage.
+- `JsonFileRecordRepository(file_path="data.json")` — JSON repository for backup/import/export scenarios.
 
 `infrastructure/sqlite_repository.py`
 
@@ -588,7 +587,7 @@ Below are the key classes and functions synchronized with the actual code.
 
 `storage/json_storage.py`
 
-- `JsonStorage(file_path="data.json")` — wrapper over the existing JSON implementation, compatible with the current codebase.
+- `JsonStorage(file_path="data.json")` — JSON wrapper used only for import/export/backup scenarios.
 
 `storage/sqlite_storage.py`
 
@@ -722,10 +721,10 @@ project/
 │
 ├── main.py                     # Application entry point
 ├── config.py                   # Storage configuration (SQLite/JSON)
-├── bootstrap.py                # Storage selection + startup migration/validation
+├── bootstrap.py                # SQLite initialization + startup validation
 ├── backup.py                   # JSON backup and SQLite -> JSON export
 ├── migrate_json_to_sqlite.py   # Data migration from JSON to SQLite
-├── data.json                # Record storage (created automatically)
+├── data.json                # Optional JSON import/export/backup file
 ├── currency_rates.json         # Currency rate cache (use_online=True)
 ├── requirements.txt            # Runtime dependencies
 ├── requirements-dev.txt        # Dev dependencies (tests, coverage)
@@ -816,6 +815,7 @@ project/
     ├── test_reports.py
     ├── test_repositories.py
     ├── test_services.py
+    ├── test_sqlite_runtime_storage.py
     ├── test_use_cases.py
     ├── test_validation.py
     ├── test_transfer_integrity.py

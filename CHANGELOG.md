@@ -7,6 +7,38 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.2.1] - 2026-03-07
+
+### Refactor
+
+- Finalize SQLite as the only runtime storage backend
+- Remove `USE_SQLITE` feature flag and runtime branching
+- Simplify bootstrap to always initialize and validate `finance.db`
+- Remove JSON runtime bootstrap and startup export flow
+- Keep JSON only for import, export, backup, and migration workflows
+
+### Changed
+
+- Repositories now use SQLite runtime storage by default
+- Import pipeline now commits application data through SQLite transactions only
+- Transfer-linked records now cascade on SQLite transfer deletion
+
+### Tests
+
+- Add SQLite runtime coverage for bootstrap initialization
+- Add integration coverage for JSON/CSV/XLSX import into SQLite
+- Add rollback regression coverage to ensure failed imports do not mutate the database
+- Add cascade-delete verification for transfers and linked records
+
+### Docs
+
+- Update `README.md` and `README_EN.md` to describe SQLite as primary runtime storage
+- Add release draft for tag `Finalize SQLite storage backend`
+
+This release removes the legacy dual-backend runtime model.
+
+---
+
 ## [1.2.0] - 2026-03-05
 
 ### Added

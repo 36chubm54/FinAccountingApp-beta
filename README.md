@@ -193,8 +193,9 @@ python main.py
 
 Форматы:
 
-- `CSV`, `XLSX`.
-- Все существующие записи заменяются данными из файла.
+- `JSON`, `CSV`, `XLSX`.
+- Pipeline импорта: `parser -> domain validation -> SQLite transaction -> commit / rollback`.
+- Все существующие runtime-данные заменяются данными из файла внутри транзакции SQLite.
 
 Формат данных:
 
@@ -274,16 +275,19 @@ Backup восстанавливает:
 
 ### Хранение данных
 
-Текущий primary storage — SQLite (`finance.db`).
-JSON (`data.json`) используется как backup/экспорт.
+Runtime-хранилище приложения — только SQLite (`finance.db`).
+JSON (`data.json`) больше не используется как backend для работы приложения и нужен только для:
+
+- импорта JSON;
+- экспорта JSON;
+- резервных копий.
+
 Для работы со storage используется отдельный слой `storage/`:
 
 - `storage/base.py` — контракт `Storage` (только data-access операции).
-- `storage/json_storage.py` — адаптер `JsonStorage` поверх текущей JSON-реализации.
+- `storage/json_storage.py` — JSON-адаптер только для import/export/backup сценариев.
 - `storage/sqlite_storage.py` — `SQLiteStorage` на стандартном `sqlite3`.
 - `db/schema.sql` — SQL-схема таблиц `wallets`, `records`, `transfers`, `mandatory_expenses`.
-
-Сервисный слой и доменные модели при этом не изменялись.
 
 ### Миграция JSON -> SQLite
 
@@ -309,29 +313,24 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - делает `rollback` при любой ошибке или расхождении.
 - безопасен к повторному запуску: если SQLite уже содержит эквивалентный набор данных, миграция пропускается без ошибки.
 
-### Конфигурация primary storage
+### Конфигурация runtime storage
 
-В модуле `config.py` задаётся источник данных:
+В модуле `config.py` задаются пути:
 
-- `USE_SQLITE = True`
 - `SQLITE_PATH = "finance.db"`
 - `JSON_PATH = "data.json"`
 
-Пути в `config.py` и значения по умолчанию в `migrate_json_to_sqlite.py`
-резолвятся относительно каталога `project`, поэтому `finance.db` и `data.json` создаются внутри `project` даже при запуске из другой папки, а `data_backup_*.json` — внутри `project/backups/` (папка создаётся автоматически).
+Пути резолвятся относительно каталога `project`, поэтому `finance.db` и `data.json` создаются внутри `project` даже при запуске из другой папки.
 
 Инициализация происходит через `bootstrap.py`:
 
-- при `USE_SQLITE=True` выбирается SQLite как primary storage;
-- если SQLite пуст, выполняется одноразовая миграция из JSON;
-- если SQLite уже содержит данные, повторная миграция блокируется;
-- при старте создаётся backup JSON (`data_backup_YYYYMMDD_HHMMSS.json`);
-- после миграции выставляется флаг `schema_meta.migration_verified=true`;
-- сравнение JSON vs SQLite выполняется только до подтверждения миграции;
-- на обычных стартах при `USE_SQLITE=True` выполняется только проверка внутренней целостности SQLite:
+- приложение всегда использует SQLite как runtime storage;
+- если `finance.db` отсутствует, база создаётся автоматически и schema инициализируется при старте;
+- при старте обеспечивается наличие системного кошелька;
+- выполняется проверка внутренней целостности SQLite:
   `PRAGMA foreign_key_check`, корректность связок transfer (`ровно 2 записи: income+expense`),
   отсутствие orphan records и CHECK-like нарушений;
-- после старта поддерживается обратный экспорт SQLite -> JSON (`backup.export_to_json`).
+- JSON bootstrap и работа приложения напрямую с `data.json` удалены.
 
 Поведение SQLite по идентификаторам:
 
@@ -449,7 +448,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `infrastructure/` — JSON и SQLite реализации `RecordRepository`.
 - `storage/` — абстракция хранилища и адаптеры JSON/SQLite.
 - `db/` — SQL-схема для SQLite.
-- `bootstrap.py` — выбор storage, миграция и стартовая валидация.
+- `bootstrap.py` — инициализация SQLite и стартовая валидация.
 - `backup.py` — backup JSON и экспорт SQLite -> JSON.
 - `config.py` — флаг и пути storage.
 - `utils/` — импорт/экспорт и подготовка данных для графиков.
@@ -458,7 +457,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 
 Поток данных для GUI:
 
-- UI (Tkinter) → `gui/controllers.py` → `app/use_cases.py` → `infrastructure/repositories.py` → `data.json`.
+- UI (Tkinter) → `gui/controllers.py` → `app/use_cases.py` → `infrastructure/sqlite_repository.py` → `finance.db`.
 
 Связь домена:
 
@@ -576,7 +575,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 `infrastructure/repositories.py`
 
 - `RecordRepository` — интерфейс репозитория.
-- `JsonFileRecordRepository(file_path="data.json")` — JSON‑хранилище.
+- `JsonFileRecordRepository(file_path="data.json")` — JSON‑репозиторий для backup/import/export сценариев.
 
 `infrastructure/sqlite_repository.py`
 
@@ -588,7 +587,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 
 `storage/json_storage.py`
 
-- `JsonStorage(file_path="data.json")` — обёртка над текущей JSON-реализацией, совместимая с существующим кодом.
+- `JsonStorage(file_path="data.json")` — JSON-обёртка только для import/export/backup сценариев.
 
 `storage/sqlite_storage.py`
 
@@ -722,10 +721,10 @@ project/
 │
 ├── main.py                     # Точка входа приложения
 ├── config.py                   # Конфигурация storage (SQLite/JSON)
-├── bootstrap.py                # Выбор storage + стартовая миграция/валидация
+├── bootstrap.py                # Инициализация SQLite + стартовая валидация
 ├── backup.py                   # Backup JSON и экспорт SQLite -> JSON
 ├── migrate_json_to_sqlite.py   # Миграция данных из JSON в SQLite
-├── data.json                # Хранилище записей (создаётся автоматически)
+├── data.json                # JSON import/export/backup файл (опционально)
 ├── currency_rates.json         # Кэш курсов валют (use_online=True)
 ├── requirements.txt            # Runtime-зависимости
 ├── requirements-dev.txt        # Dev-зависимости (тесты, coverage)
@@ -816,6 +815,7 @@ project/
     ├── test_reports.py
     ├── test_repositories.py
     ├── test_services.py
+    ├── test_sqlite_runtime_storage.py
     ├── test_use_cases.py
     ├── test_validation.py
     ├── test_transfer_integrity.py

@@ -3,8 +3,8 @@ import json
 import logging
 import os
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from datetime import date as dt_date
-from datetime import datetime, timezone
 from typing import Any
 
 from domain.import_policy import ImportPolicy
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 SYSTEM_WALLET_ID = 1
 
 try:
-    from version import __version__
+    from version import __version__  # pyright: ignore[reportMissingImports]
 except Exception:
     __version__ = "0.0.0"
 
@@ -92,16 +92,11 @@ def compute_checksum(data: dict) -> str:
 
 
 def _storage_mode() -> str:
-    try:
-        from config import USE_SQLITE
-
-        return "sqlite" if bool(USE_SQLITE) else "json"
-    except Exception:
-        return "json"
+    return "sqlite"
 
 
 def _now_utc_iso8601() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _unwrap_backup_payload(payload: Any, *, force: bool = False) -> dict[str, Any]:
@@ -268,11 +263,7 @@ def export_full_backup_to_json(
         "wallets": [_wallet_to_payload(wallet) for wallet in normalized_wallets],
         "records": [_record_to_payload(record) for record in records],
         "mandatory_expenses": [
-            {
-                key: value
-                for key, value in _record_to_payload(expense).items()
-                if key != "date"
-            }
+            {key: value for key, value in _record_to_payload(expense).items() if key != "date"}
             for expense in mandatory_expenses
         ],
         "transfers": [_transfer_to_payload(transfer) for transfer in transfers],
@@ -334,7 +325,9 @@ def import_full_backup_from_json(
             raw_transfers = []
 
     if not isinstance(raw_wallets, list) or not isinstance(raw_transfers, list):
-        raise BackupFormatError("Invalid backup JSON structure: wallets and transfers must be arrays")
+        raise BackupFormatError(
+            "Invalid backup JSON structure: wallets and transfers must be arrays"
+        )
 
     errors: list[str] = []
     skipped = 0

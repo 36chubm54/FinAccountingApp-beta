@@ -73,8 +73,6 @@ def test_bootstrap_marks_existing_sqlite_as_verified_without_json_compare(
     tmp_path, monkeypatch
 ) -> None:
     sqlite_path = tmp_path / "finance.db"
-    json_path = tmp_path / "data.json"
-
     storage = SQLiteStorage(str(sqlite_path))
     try:
         storage.initialize_schema(_schema_path())
@@ -88,17 +86,7 @@ def test_bootstrap_marks_existing_sqlite_as_verified_without_json_compare(
     finally:
         storage.close()
 
-    monkeypatch.setattr(bootstrap, "USE_SQLITE", True)
     monkeypatch.setattr(bootstrap, "SQLITE_PATH", str(sqlite_path))
-    monkeypatch.setattr(bootstrap, "JSON_PATH", str(json_path))
-    monkeypatch.setattr(bootstrap, "create_backup", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(bootstrap, "export_to_json", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(bootstrap, "run_migration", lambda *_args, **_kwargs: 0)
-    monkeypatch.setattr(
-        bootstrap,
-        "_validate_startup_integrity",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not be called")),
-    )
 
     repository = bootstrap.bootstrap_repository()
 
@@ -109,6 +97,24 @@ def test_bootstrap_marks_existing_sqlite_as_verified_without_json_compare(
             ).fetchone()
             assert row is not None
             assert str(row[0]).lower() == "true"
+        finally:
+            repository.close()
+
+
+def test_bootstrap_creates_sqlite_and_initializes_system_wallet(tmp_path, monkeypatch) -> None:
+    sqlite_path = tmp_path / "finance.db"
+    monkeypatch.setattr(bootstrap, "SQLITE_PATH", str(sqlite_path))
+
+    repository = bootstrap.bootstrap_repository()
+
+    if isinstance(repository, SQLiteRecordRepository):
+        try:
+            assert sqlite_path.exists()
+            wallets = repository.load_wallets()
+            assert len(wallets) == 1
+            assert wallets[0].id == 1
+            assert wallets[0].system is True
+            assert wallets[0].name == "Main wallet"
         finally:
             repository.close()
 

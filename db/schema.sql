@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS records (
     description TEXT NOT NULL DEFAULT '',
     period TEXT CHECK(period IN ('daily', 'weekly', 'monthly', 'yearly') OR period IS NULL),
     FOREIGN KEY(wallet_id) REFERENCES wallets(id) ON UPDATE CASCADE ON DELETE RESTRICT,
-    FOREIGN KEY(transfer_id) REFERENCES transfers(id) ON UPDATE CASCADE ON DELETE SET NULL
+    FOREIGN KEY(transfer_id) REFERENCES transfers(id) ON UPDATE CASCADE ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS mandatory_expenses (
