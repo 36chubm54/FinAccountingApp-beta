@@ -93,11 +93,10 @@ def test_dry_run_does_not_insert(tmp_path) -> None:
 
     sqlite_storage = SQLiteStorage(str(sqlite_path))
     sqlite_storage.initialize_schema(str(schema_path))
-    conn = sqlite_storage._conn
-    assert conn.execute("SELECT COUNT(*) FROM wallets").fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM transfers").fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM records").fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM mandatory_expenses").fetchone()[0] == 0
+    assert sqlite_storage.query_one("SELECT COUNT(*) FROM wallets")[0] == 0
+    assert sqlite_storage.query_one("SELECT COUNT(*) FROM transfers")[0] == 0
+    assert sqlite_storage.query_one("SELECT COUNT(*) FROM records")[0] == 0
+    assert sqlite_storage.query_one("SELECT COUNT(*) FROM mandatory_expenses")[0] == 0
     sqlite_storage.close()
 
 
@@ -119,19 +118,18 @@ def test_migration_moves_all_data_and_preserves_ids(tmp_path) -> None:
 
     sqlite_storage = SQLiteStorage(str(sqlite_path))
     sqlite_storage.initialize_schema(str(schema_path))
-    conn = sqlite_storage._conn
-    assert conn.execute("SELECT COUNT(*) FROM wallets").fetchone()[0] == 2
-    assert conn.execute("SELECT COUNT(*) FROM transfers").fetchone()[0] == 1
-    assert conn.execute("SELECT COUNT(*) FROM records").fetchone()[0] == 2
-    assert conn.execute("SELECT COUNT(*) FROM mandatory_expenses").fetchone()[0] == 1
+    assert sqlite_storage.query_one("SELECT COUNT(*) FROM wallets")[0] == 2
+    assert sqlite_storage.query_one("SELECT COUNT(*) FROM transfers")[0] == 1
+    assert sqlite_storage.query_one("SELECT COUNT(*) FROM records")[0] == 2
+    assert sqlite_storage.query_one("SELECT COUNT(*) FROM mandatory_expenses")[0] == 1
 
-    wallet_ids = [row[0] for row in conn.execute("SELECT id FROM wallets ORDER BY id").fetchall()]
+    wallet_ids = [row[0] for row in sqlite_storage.query_all("SELECT id FROM wallets ORDER BY id")]
     transfer_ids = [
-        row[0] for row in conn.execute("SELECT id FROM transfers ORDER BY id").fetchall()
+        row[0] for row in sqlite_storage.query_all("SELECT id FROM transfers ORDER BY id")
     ]
-    record_ids = [row[0] for row in conn.execute("SELECT id FROM records ORDER BY id").fetchall()]
+    record_ids = [row[0] for row in sqlite_storage.query_all("SELECT id FROM records ORDER BY id")]
     mandatory_ids = [
-        row[0] for row in conn.execute("SELECT id FROM mandatory_expenses ORDER BY id").fetchall()
+        row[0] for row in sqlite_storage.query_all("SELECT id FROM mandatory_expenses ORDER BY id")
     ]
 
     assert wallet_ids == [1, 2]
@@ -162,9 +160,8 @@ def test_migration_is_safe_to_rerun_on_equivalent_dataset(tmp_path) -> None:
 
     sqlite_storage = SQLiteStorage(str(sqlite_path))
     sqlite_storage.initialize_schema(str(schema_path))
-    conn = sqlite_storage._conn
-    assert conn.execute("SELECT COUNT(*) FROM wallets").fetchone()[0] == 2
-    assert conn.execute("SELECT COUNT(*) FROM transfers").fetchone()[0] == 1
-    assert conn.execute("SELECT COUNT(*) FROM records").fetchone()[0] == 2
-    assert conn.execute("SELECT COUNT(*) FROM mandatory_expenses").fetchone()[0] == 1
+    assert sqlite_storage.query_one("SELECT COUNT(*) FROM wallets")[0] == 2
+    assert sqlite_storage.query_one("SELECT COUNT(*) FROM transfers")[0] == 1
+    assert sqlite_storage.query_one("SELECT COUNT(*) FROM records")[0] == 2
+    assert sqlite_storage.query_one("SELECT COUNT(*) FROM mandatory_expenses")[0] == 1
     sqlite_storage.close()

@@ -12,60 +12,38 @@ def _resolve_schema_path(schema_path: str) -> str:
     candidate = Path(schema_path)
     if candidate.is_absolute():
         return str(candidate)
-    return str((Path(__file__).resolve().parent / "db" / candidate.name).resolve())
+    return str((Path(__file__).resolve().parent / candidate).resolve())
 
 
 def _ensure_schema_meta(sqlite_repo: SQLiteRecordRepository) -> None:
-    sqlite_repo._conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS schema_meta (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        )
-        """
-    )
-    sqlite_repo._conn.commit()
+    sqlite_repo.ensure_schema_meta()
 
 
 def _is_migration_verified(sqlite_repo: SQLiteRecordRepository) -> bool:
     _ensure_schema_meta(sqlite_repo)
-    row = sqlite_repo._conn.execute(
-        "SELECT value FROM schema_meta WHERE key = 'migration_verified'"
-    ).fetchone()
-    if row is None:
+    value = sqlite_repo.get_schema_meta("migration_verified")
+    if value is None:
         return False
-    value = row[0] if isinstance(row, tuple) else row["value"]
     return str(value).strip().lower() == "true"
 
 
 def _mark_migration_verified(sqlite_repo: SQLiteRecordRepository) -> None:
     _ensure_schema_meta(sqlite_repo)
-    sqlite_repo._conn.execute(
-        """
-        INSERT OR REPLACE INTO schema_meta (key, value)
-        VALUES ('migration_verified', 'true')
-        """
-    )
-    sqlite_repo._conn.commit()
+    sqlite_repo.set_schema_meta("migration_verified", "true")
 
 
 def _ensure_system_wallet(sqlite_repo: SQLiteRecordRepository) -> None:
-    row = sqlite_repo._conn.execute(
-        "SELECT id FROM wallets WHERE system = 1 OR id = 1 ORDER BY id LIMIT 1"
-    ).fetchone()
-    if row is not None:
+    if sqlite_repo.has_system_wallet_row():
         return
     sqlite_repo.save_initial_balance(0.0)
 
 
 def _validate_sqlite_integrity_only(sqlite_repo: SQLiteRecordRepository) -> None:
-    conn = sqlite_repo._conn
-
-    fk_issues = conn.execute("PRAGMA foreign_key_check").fetchall()
+    fk_issues = sqlite_repo.foreign_key_issues()
     if fk_issues:
         raise RuntimeError(f"Аварийный режим: foreign key violations found ({len(fk_issues)})")
 
-    bad_transfers = conn.execute(
+    bad_transfers = sqlite_repo.query_all(
         """
         SELECT t.id, COUNT(r.id) AS linked_records
         FROM transfers AS t
@@ -73,14 +51,14 @@ def _validate_sqlite_integrity_only(sqlite_repo: SQLiteRecordRepository) -> None
         GROUP BY t.id
         HAVING COUNT(r.id) != 2
         """
-    ).fetchall()
+    )
     if bad_transfers:
         transfer_id, count = bad_transfers[0]
         raise RuntimeError(
             f"Аварийный режим: transfer #{int(transfer_id)} has {int(count)} records (expected 2)"
         )
 
-    wrong_transfer_types = conn.execute(
+    wrong_transfer_types = sqlite_repo.query_one(
         """
         SELECT
             t.id,
@@ -91,7 +69,7 @@ def _validate_sqlite_integrity_only(sqlite_repo: SQLiteRecordRepository) -> None
         GROUP BY t.id
         HAVING income_count != 1 OR expense_count != 1
         """
-    ).fetchone()
+    )
     if wrong_transfer_types is not None:
         transfer_id, income_count, expense_count = wrong_transfer_types
         raise RuntimeError(
@@ -100,7 +78,7 @@ def _validate_sqlite_integrity_only(sqlite_repo: SQLiteRecordRepository) -> None
             f"(income={int(income_count)}, expense={int(expense_count)})"
         )
 
-    orphan_records = conn.execute(
+    orphan_records = sqlite_repo.query_one(
         """
         SELECT r.id
         FROM records AS r
@@ -108,13 +86,13 @@ def _validate_sqlite_integrity_only(sqlite_repo: SQLiteRecordRepository) -> None
         WHERE w.id IS NULL
         LIMIT 1
         """
-    ).fetchone()
+    )
     if orphan_records is not None:
         raise RuntimeError(
             f"Аварийный режим: record #{int(orphan_records[0])} references missing wallet"
         )
 
-    negative_violation = conn.execute(
+    negative_violation = sqlite_repo.query_one(
         """
         SELECT reason FROM (
             SELECT 'wallet.initial_balance < 0'
@@ -149,7 +127,7 @@ def _validate_sqlite_integrity_only(sqlite_repo: SQLiteRecordRepository) -> None
         )
         LIMIT 1
         """
-    ).fetchone()
+    )
     if negative_violation is not None:
         raise RuntimeError(
             f"Аварийный режим: SQLite CHECK-like violation detected: {negative_violation[0]}"

@@ -33,6 +33,28 @@ class SQLiteStorage(Storage):
         self._conn.executescript(schema)
         self._conn.commit()
 
+    def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
+        return self._conn.execute(sql, params)
+
+    def query_one(self, sql: str, params: tuple = ()):
+        return self._conn.execute(sql, params).fetchone()
+
+    def query_all(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
+        return self._conn.execute(sql, params).fetchall()
+
+    def begin(self) -> None:
+        self._conn.execute("BEGIN")
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+    def rollback(self) -> None:
+        self._conn.rollback()
+
+    def connection_is_available(self) -> bool:
+        self._conn.execute("SELECT 1")
+        return True
+
     def get_wallets(self) -> list[Wallet]:
         rows = self._conn.execute(
             """

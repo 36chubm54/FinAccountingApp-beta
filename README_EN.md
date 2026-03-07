@@ -1,6 +1,6 @@
 # FinAccountingApp
 
-Graphical and web application for personal financial accounting with multicurrency, categories and reports.
+Graphical application for personal financial accounting with multicurrency, categories and reports.
 
 ## 📋 Contents
 
@@ -60,7 +60,7 @@ After launch, the graphical window of the Financial Accounting application will 
 
 ### Main window
 
-After running `python main.py`, a window will open with control tabs and an infographic block.
+After running `python main.py` from the `project` directory, a window will open with control tabs and an infographic block.
 
 Tabs and actions:
 
@@ -240,6 +240,9 @@ Full backup is implemented in `JSON` format in two modes:
 - `Technical backup` (`readonly=False`):
   - legacy-compatible JSON without `meta` and checksum;
   - used by the standard import pipeline without readonly protection.
+- Snapshot metadata:
+  - `meta.app_version` is taken from `version.py`;
+  - `meta.storage` is provided by the caller and is no longer hardcoded to `sqlite`.
 - The `Settings` tab contains the following buttons:
   - `Export Full Backup`
   - `Import Full Backup`
@@ -450,10 +453,9 @@ The project follows a layered architecture:
 - `db/` — SQLite SQL schema.
 - `bootstrap.py` — SQLite initialization and startup validation.
 - `backup.py` — JSON backup and SQLite -> JSON export.
-- `config.py` — storage flag and paths.
+- `config.py` — runtime SQLite and JSON import/export paths.
 - `utils/` — import/export and preparation of data for graphs.
 - `gui/` — GUI layer (Tkinter).
-- `web/` — standalone web application.
 
 Data flow for GUI:
 
@@ -512,7 +514,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `filter_by_period(prefix)` — filtering by date prefix.
 - `filter_by_period_range(start_prefix, end_prefix)` — filtering by date range.
 - `filter_by_category(category)` — filtering by category.
-- `grouped_by_category()` — grouping by categories.
+- `grouped_by_category()` — grouping by categories while preserving report context (`balance_label`, period range).
 - `sorted_by_date()` — sorting by date.
 - `net_profit_fixed()` — net profit at fixed exchange rates.
 - `monthly_income_expense_rows(year=None, up_to_month=None)` — monthly aggregates.
@@ -631,9 +633,9 @@ Below are the key classes and functions synchronized with the actual code.
 - `SettingsTabContext` — context of the settings tab.
 - `build_settings_tab(parent, context, import_formats)` — method for building the interface of the `Settings` tab. This tab allows you to manage wallets and mandatory expenses.
 
-`gui/controllers`
+`gui/controllers.py`
 
-- `FinanceController` — class for managing the business logic of the application.
+- `FinancialController` — class for managing the business logic of the application.
 
 `gui/exporters.py`
 
@@ -662,16 +664,24 @@ Below are the key classes and functions synchronized with the actual code.
 - `FinanceService` protocol used by the import orchestrator (`ImportService`).
 - Defines import-facing methods, rollback wrapper, and ID normalization.
 
+`app/use_case_support.py`
+
+- Shared helper functions for use cases without separate domain logic.
+
 `gui/helpers.py`
 
 - `open_in_file_manager(path)`.
+
+`gui/controller_support.py`
+
+- Support structures and helpers for the GUI controller (`RecordListItem`, list building, import normalization).
 
 ### Utils
 
 `utils/backup_utils.py`
 
 - `compute_checksum(data)` — SHA256 checksum for `data`.
-- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0, readonly=True)`.
+- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0, readonly=True, storage_mode="unknown")`.
 - `import_full_backup_from_json(filepath, force=False)`.
 
 `utils/csv_utils.py`
@@ -691,6 +701,10 @@ Below are the key classes and functions synchronized with the actual code.
 - `import_records_from_xlsx(filepath, policy, currency_service, wallet_ids=None)`.
 - `export_mandatory_expenses_to_xlsx(expenses, filepath)`.
 - `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)`.
+
+`utils/tabular_utils.py`
+
+- Shared helpers for CSV/XLSX row building, type labels, and rate resolver logic.
 
 `utils/pdf_utils.py`
 
@@ -720,11 +734,12 @@ Below are the key classes and functions synchronized with the actual code.
 project/
 │
 ├── main.py                     # Application entry point
-├── config.py                   # Storage configuration (SQLite/JSON)
+├── config.py                   # Runtime SQLite and JSON import/export paths
 ├── bootstrap.py                # SQLite initialization + startup validation
 ├── backup.py                   # JSON backup and SQLite -> JSON export
 ├── migrate_json_to_sqlite.py   # Data migration from JSON to SQLite
-├── data.json                # Optional JSON import/export/backup file
+├── version.py                  # Application version for snapshot metadata
+├── data.json                   # Optional JSON import/export/backup file
 ├── currency_rates.json         # Currency rate cache (use_online=True)
 ├── requirements.txt            # Runtime dependencies
 ├── requirements-dev.txt        # Dev dependencies (tests, coverage)
@@ -740,6 +755,7 @@ project/
 │   ├── finance_service.py      # FinanceService protocol for import orchestration
 │   ├── record_service.py       # Service for records
 │   ├── services.py             # CurrencyService adapter
+│   ├── use_case_support.py     # Shared helpers for use cases
 │   └── use_cases.py            # Use cases
 │
 ├── domain/                     # Domain layer
@@ -778,7 +794,8 @@ project/
 │   ├── charting.py             # Graphs and Aggregations
 │   ├── csv_utils.py
 │   ├── excel_utils.py
-│   └── pdf_utils.py
+│   ├── pdf_utils.py
+│   └── tabular_utils.py        # Shared CSV/XLSX helpers
 │
 ├── gui/                        # GUI layer (Tkinter)
 │   ├── tabs/
@@ -789,6 +806,7 @@ project/
 │   │
 │   ├── __init__.py
 │   ├── tkinter_gui.py          # Main GUI application
+│   ├── controller_support.py   # GUI support helpers
 │   ├── helpers.py              # Helpers for GUI
 │   ├── controllers.py          # GUI controllers
 │   ├── importers.py            # Legacy import wrappers (compatibility/tests)
@@ -796,6 +814,7 @@ project/
 │
 └── tests/                      # Tests
     ├── __init__.py
+    ├── conftest.py             # Local tmp fixture for stable test execution
     ├── test_charting.py
     ├── test_csv.py
     ├── test_currency.py

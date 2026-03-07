@@ -23,6 +23,53 @@ class SQLiteRecordRepository(RecordRepository):
     def close(self) -> None:
         self._storage.close()
 
+    def ensure_schema_meta(self) -> None:
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+        self._conn.commit()
+
+    def get_schema_meta(self, key: str) -> str | None:
+        self.ensure_schema_meta()
+        row = self._conn.execute(
+            "SELECT value FROM schema_meta WHERE key = ?",
+            (str(key),),
+        ).fetchone()
+        if row is None:
+            return None
+        return str(row[0])
+
+    def set_schema_meta(self, key: str, value: str) -> None:
+        self.ensure_schema_meta()
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO schema_meta (key, value)
+            VALUES (?, ?)
+            """,
+            (str(key), str(value)),
+        )
+        self._conn.commit()
+
+    def has_system_wallet_row(self) -> bool:
+        row = self._conn.execute(
+            "SELECT id FROM wallets WHERE system = 1 OR id = 1 ORDER BY id LIMIT 1"
+        ).fetchone()
+        return row is not None
+
+    def foreign_key_issues(self) -> list:
+        return self._conn.execute("PRAGMA foreign_key_check").fetchall()
+
+    def query_all(self, sql: str, params: tuple = ()) -> list:
+        return self._conn.execute(sql, params).fetchall()
+
+    def query_one(self, sql: str, params: tuple = ()):
+        return self._conn.execute(sql, params).fetchone()
+
     @staticmethod
     def _date_as_text(value: dt_date | str) -> str:
         if isinstance(value, dt_date):

@@ -9,7 +9,7 @@ from typing import Any
 from openpyxl import load_workbook
 
 from utils.backup_utils import unwrap_backup_payload
-from utils.import_core import as_float, norm_key
+from utils.import_core import as_float, norm_key, parse_optional_strict_int
 
 MAX_IMPORT_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 MAX_IMPORT_ROWS = 200_000
@@ -126,9 +126,10 @@ def _read_json_payload(path: str, *, force: bool = False) -> ParsedImportData:
 
     rows = [_normalize_row(item) for item in records if isinstance(item, dict)]
     existing_transfer_ids = {
-        int(as_float(item.get("transfer_id"), 0.0) or 0)
+        transfer_id
         for item in rows
-        if int(as_float(item.get("transfer_id"), 0.0) or 0) > 0
+        if (transfer_id := parse_optional_strict_int(item.get("transfer_id"))) is not None
+        and transfer_id > 0
     }
     rows.extend(_transfer_rows_from_aggregates(transfers, existing_transfer_ids))
     mandatory_rows = []
@@ -147,7 +148,7 @@ def _read_json_payload(path: str, *, force: bool = False) -> ParsedImportData:
         for wallet in wallets:
             if not isinstance(wallet, dict):
                 continue
-            wallet_id = int(as_float(wallet.get("id"), 0.0) or 0)
+            wallet_id = parse_optional_strict_int(wallet.get("id")) or 0
             if wallet_id == 1 or bool(wallet.get("system", False)):
                 initial_balance = float(as_float(wallet.get("initial_balance"), 0.0) or 0.0)
                 break
@@ -169,7 +170,7 @@ def _transfer_rows_from_aggregates(
     for item in items:
         if not isinstance(item, dict):
             continue
-        transfer_id = int(as_float(item.get("id"), 0.0) or 0)
+        transfer_id = parse_optional_strict_int(item.get("id")) or 0
         if transfer_id > 0 and transfer_id in existing_transfer_ids:
             continue
         rows.append(

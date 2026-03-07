@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import math
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -110,19 +109,19 @@ def _validate_source_integrity(
         _require_existing_wallet(wallets, int(expense.wallet_id), f"MandatoryExpense #{expense.id}")
 
 
-def _check_target_is_empty(conn: sqlite3.Connection) -> None:
+def _check_target_is_empty(sqlite_storage: SQLiteStorage) -> None:
     tables = ("wallets", "transfers", "records", "mandatory_expenses")
     for table in tables:
-        count = int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+        count = int(sqlite_storage.query_one(f"SELECT COUNT(*) FROM {table}")[0])
         if count > 0:
             raise RuntimeError(
                 f"Target SQLite is not empty: table '{table}' already contains {count} rows"
             )
 
 
-def _has_any_data(conn: sqlite3.Connection) -> bool:
+def _has_any_data(sqlite_storage: SQLiteStorage) -> bool:
     for table in ("wallets", "transfers", "records", "mandatory_expenses"):
-        if int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]) > 0:
+        if int(sqlite_storage.query_one(f"SELECT COUNT(*) FROM {table}")[0]) > 0:
             return True
     return False
 
@@ -132,9 +131,9 @@ def _all_positive_unique_ids(items: list, id_getter) -> bool:
     return all(value > 0 for value in ids) and len(ids) == len(set(ids))
 
 
-def _set_sqlite_sequence(conn: sqlite3.Connection, table: str) -> None:
-    max_id = int(conn.execute(f"SELECT COALESCE(MAX(id), 0) FROM {table}").fetchone()[0])
-    conn.execute(
+def _set_sqlite_sequence(sqlite_storage: SQLiteStorage, table: str) -> None:
+    max_id = int(sqlite_storage.query_one(f"SELECT COALESCE(MAX(id), 0) FROM {table}")[0])
+    sqlite_storage.execute(
         """
         INSERT OR REPLACE INTO sqlite_sequence(name, seq) VALUES(?, ?)
         """,
@@ -142,12 +141,12 @@ def _set_sqlite_sequence(conn: sqlite3.Connection, table: str) -> None:
     )
 
 
-def _insert_wallets(conn: sqlite3.Connection, wallets: list[Wallet]) -> dict[int, int]:
+def _insert_wallets(sqlite_storage: SQLiteStorage, wallets: list[Wallet]) -> dict[int, int]:
     mapping: dict[int, int] = {}
     preserve_ids = _all_positive_unique_ids(wallets, lambda wallet: wallet.id)
     for wallet in wallets:
         if preserve_ids:
-            cursor = conn.execute(
+            cursor = sqlite_storage.execute(
                 """
                 INSERT INTO wallets (
                     id, name, currency, initial_balance, system, allow_negative, is_active)
@@ -165,7 +164,7 @@ def _insert_wallets(conn: sqlite3.Connection, wallets: list[Wallet]) -> dict[int
             )
             mapping[int(wallet.id)] = int(wallet.id)
         else:
-            cursor = conn.execute(
+            cursor = sqlite_storage.execute(
                 """
                 INSERT INTO wallets (
                     name, currency, initial_balance, system, allow_negative, is_active)
@@ -185,12 +184,12 @@ def _insert_wallets(conn: sqlite3.Connection, wallets: list[Wallet]) -> dict[int
                 raise RuntimeError("Failed to insert wallet: no row ID returned")
             mapping[int(wallet.id)] = int(lastrowid)
     if preserve_ids:
-        _set_sqlite_sequence(conn, "wallets")
+        _set_sqlite_sequence(sqlite_storage, "wallets")
     return mapping
 
 
 def _insert_transfers(
-    conn: sqlite3.Connection, transfers: list, wallet_map: dict[int, int]
+    sqlite_storage: SQLiteStorage, transfers: list, wallet_map: dict[int, int]
 ) -> dict[int, int]:
     mapping: dict[int, int] = {}
     preserve_ids = _all_positive_unique_ids(transfers, lambda transfer: transfer.id)
@@ -198,7 +197,7 @@ def _insert_transfers(
         from_wallet_id = wallet_map[int(transfer.from_wallet_id)]
         to_wallet_id = wallet_map[int(transfer.to_wallet_id)]
         if preserve_ids:
-            cursor = conn.execute(
+            cursor = sqlite_storage.execute(
                 """
                 INSERT INTO transfers (
                     id, from_wallet_id, to_wallet_id, date, amount_original, currency,
@@ -224,7 +223,7 @@ def _insert_transfers(
             )
             mapping[int(transfer.id)] = int(transfer.id)
         else:
-            cursor = conn.execute(
+            cursor = sqlite_storage.execute(
                 """
                 INSERT INTO transfers (
                     from_wallet_id, to_wallet_id, date, amount_original, currency,
@@ -252,7 +251,7 @@ def _insert_transfers(
                 raise RuntimeError("Failed to insert transfer: no row ID returned")
             mapping[int(transfer.id)] = int(lastrowid)
     if preserve_ids:
-        _set_sqlite_sequence(conn, "transfers")
+        _set_sqlite_sequence(sqlite_storage, "transfers")
     return mapping
 
 
@@ -283,7 +282,7 @@ def _record_row_payload(
 
 
 def _insert_records(
-    conn: sqlite3.Connection,
+    sqlite_storage: SQLiteStorage,
     records: list[Record],
     wallet_map: dict[int, int],
     transfer_map: dict[int, int],
@@ -293,7 +292,7 @@ def _insert_records(
     for record in records:
         payload = _record_row_payload(record, wallet_map, transfer_map)
         if preserve_ids:
-            cursor = conn.execute(
+            cursor = sqlite_storage.execute(
                 """
                 INSERT INTO records (
                     id, type, date, wallet_id, transfer_id, amount_original,
@@ -318,7 +317,7 @@ def _insert_records(
             )
             mapping[int(record.id)] = int(record.id)
         else:
-            cursor = conn.execute(
+            cursor = sqlite_storage.execute(
                 """
                 INSERT INTO records (
                     type, date, wallet_id, transfer_id, amount_original,
@@ -345,12 +344,12 @@ def _insert_records(
                 raise RuntimeError("Failed to insert record: no row ID returned")
             mapping[int(record.id)] = int(lastrowid)
     if preserve_ids:
-        _set_sqlite_sequence(conn, "records")
+        _set_sqlite_sequence(sqlite_storage, "records")
     return mapping
 
 
 def _insert_mandatory_expenses(
-    conn: sqlite3.Connection,
+    sqlite_storage: SQLiteStorage,
     expenses: list[MandatoryExpenseRecord],
     wallet_map: dict[int, int],
 ) -> dict[int, int]:
@@ -358,7 +357,7 @@ def _insert_mandatory_expenses(
     preserve_ids = _all_positive_unique_ids(expenses, lambda expense: expense.id)
     for expense in expenses:
         if preserve_ids:
-            cursor = conn.execute(
+            cursor = sqlite_storage.execute(
                 """
                 INSERT INTO mandatory_expenses (
                     id, wallet_id, amount_original, currency, rate_at_operation,
@@ -380,7 +379,7 @@ def _insert_mandatory_expenses(
             )
             mapping[int(expense.id)] = int(expense.id)
         else:
-            cursor = conn.execute(
+            cursor = sqlite_storage.execute(
                 """
                 INSERT INTO mandatory_expenses (
                     wallet_id, amount_original, currency, rate_at_operation,
@@ -404,17 +403,17 @@ def _insert_mandatory_expenses(
                 raise RuntimeError("Failed to insert mandatory expense: no row ID returned")
             mapping[int(expense.id)] = int(lastrowid)
     if preserve_ids:
-        _set_sqlite_sequence(conn, "mandatory_expenses")
+        _set_sqlite_sequence(sqlite_storage, "mandatory_expenses")
     return mapping
 
 
-def _counts_from_sqlite(conn: sqlite3.Connection) -> dict[str, int]:
+def _counts_from_sqlite(sqlite_storage: SQLiteStorage) -> dict[str, int]:
     return {
-        "wallets": int(conn.execute("SELECT COUNT(*) FROM wallets").fetchone()[0]),
-        "transfers": int(conn.execute("SELECT COUNT(*) FROM transfers").fetchone()[0]),
-        "records": int(conn.execute("SELECT COUNT(*) FROM records").fetchone()[0]),
+        "wallets": int(sqlite_storage.query_one("SELECT COUNT(*) FROM wallets")[0]),
+        "transfers": int(sqlite_storage.query_one("SELECT COUNT(*) FROM transfers")[0]),
+        "records": int(sqlite_storage.query_one("SELECT COUNT(*) FROM records")[0]),
         "mandatory_expenses": int(
-            conn.execute("SELECT COUNT(*) FROM mandatory_expenses").fetchone()[0]
+            sqlite_storage.query_one("SELECT COUNT(*) FROM mandatory_expenses")[0]
         ),
     }
 
@@ -428,8 +427,8 @@ def _wallet_balances_from_json(wallets: list[Wallet], records: list[Record]) -> 
     return result
 
 
-def _wallet_balances_from_sqlite(conn: sqlite3.Connection) -> dict[int, float]:
-    rows = conn.execute(
+def _wallet_balances_from_sqlite(sqlite_storage: SQLiteStorage) -> dict[int, float]:
+    rows = sqlite_storage.query_all(
         """
         SELECT
             w.id AS wallet_id,
@@ -448,12 +447,12 @@ def _wallet_balances_from_sqlite(conn: sqlite3.Connection) -> dict[int, float]:
         GROUP BY w.id, w.initial_balance
         ORDER BY w.id
         """
-    ).fetchall()
+    )
     return {int(row[0]): float(row[1]) for row in rows}
 
 
 def validate_migration(
-    conn: sqlite3.Connection,
+    sqlite_storage: SQLiteStorage,
     wallets: list[Wallet],
     records: list[Record],
     transfers: list,
@@ -471,7 +470,7 @@ def validate_migration(
         "records": len(records),
         "mandatory_expenses": len(mandatory_expenses),
     }
-    actual_counts = _counts_from_sqlite(conn)
+    actual_counts = _counts_from_sqlite(sqlite_storage)
 
     for name, expected in expected_counts.items():
         actual = actual_counts[name]
@@ -479,7 +478,7 @@ def validate_migration(
             errors.append(f"Count mismatch for {name}: json={expected}, sqlite={actual}")
 
     json_balances = _wallet_balances_from_json(wallets, records)
-    sqlite_balances = _wallet_balances_from_sqlite(conn)
+    sqlite_balances = _wallet_balances_from_sqlite(sqlite_storage)
     for old_wallet_id, json_balance in sorted(json_balances.items()):
         sqlite_wallet_id = wallet_map.get(old_wallet_id)
         if sqlite_wallet_id is None:
@@ -513,7 +512,7 @@ def validate_migration(
 
 
 def _validate_existing_target_equivalence(
-    conn: sqlite3.Connection,
+    sqlite_storage: SQLiteStorage,
     wallets: list[Wallet],
     records: list[Record],
     transfers: list,
@@ -521,7 +520,7 @@ def _validate_existing_target_equivalence(
 ) -> tuple[bool, list[str]]:
     identity_map = {int(wallet.id): int(wallet.id) for wallet in wallets}
     return validate_migration(
-        conn=conn,
+        sqlite_storage=sqlite_storage,
         wallets=wallets,
         records=records,
         transfers=transfers,
@@ -541,7 +540,7 @@ def run_dry_run(args: argparse.Namespace) -> int:
         schema_path = _resolve_schema_path(args.schema_path)
         if not Path(schema_path).exists():
             raise FileNotFoundError(f"schema.sql not found: {schema_path}")
-        sqlite_storage._conn.execute("SELECT 1")
+        sqlite_storage.connection_is_available()
         print(f"[ok] SQLite connection is available: {args.sqlite_path}")
         print(f"[ok] Schema path resolved: {schema_path}")
 
@@ -572,7 +571,6 @@ def run_migration(args: argparse.Namespace) -> int:
     json_storage = JsonStorage(file_path=args.json_path)
     sqlite_storage = SQLiteStorage(db_path=args.sqlite_path)
 
-    conn = sqlite_storage._conn
     try:
         schema_path = _resolve_schema_path(args.schema_path)
         if not Path(schema_path).exists():
@@ -587,9 +585,9 @@ def run_migration(args: argparse.Namespace) -> int:
         print("[ok] Source data integrity passed")
 
         sqlite_storage.initialize_schema(schema_path)
-        if _has_any_data(conn):
+        if _has_any_data(sqlite_storage):
             valid_existing, existing_errors = _validate_existing_target_equivalence(
-                conn,
+                sqlite_storage,
                 wallets=wallets,
                 records=records,
                 transfers=transfers,
@@ -603,20 +601,20 @@ def run_migration(args: argparse.Namespace) -> int:
                 f"Target SQLite is not empty and differs from source JSON: {details}"
             )
 
-        conn.execute("BEGIN")
+        sqlite_storage.begin()
         print("[tx] Transaction started")
 
         print("[1/4] Migrating wallets...")
-        wallet_map = _insert_wallets(conn, wallets)
+        wallet_map = _insert_wallets(sqlite_storage, wallets)
         print("[2/4] Migrating transfers...")
-        transfer_map = _insert_transfers(conn, transfers, wallet_map)
+        transfer_map = _insert_transfers(sqlite_storage, transfers, wallet_map)
         print("[3/4] Migrating records...")
-        record_map = _insert_records(conn, records, wallet_map, transfer_map)
+        record_map = _insert_records(sqlite_storage, records, wallet_map, transfer_map)
         print("[4/4] Migrating mandatory_expenses...")
-        mandatory_map = _insert_mandatory_expenses(conn, mandatory_expenses, wallet_map)
+        mandatory_map = _insert_mandatory_expenses(sqlite_storage, mandatory_expenses, wallet_map)
 
         valid, errors = validate_migration(
-            conn=conn,
+            sqlite_storage=sqlite_storage,
             wallets=wallets,
             records=records,
             transfers=transfers,
@@ -630,17 +628,17 @@ def run_migration(args: argparse.Namespace) -> int:
             print("[error] Validation failed, rollback started")
             for line in errors:
                 print(f"  - {line}")
-            conn.rollback()
+            sqlite_storage.rollback()
             print("[tx] Rollback complete")
             return 1
 
-        conn.commit()
+        sqlite_storage.commit()
         print("[tx] Commit complete")
         print("[ok] Migration finished successfully")
         return 0
     except Exception as exc:
         try:
-            conn.rollback()
+            sqlite_storage.rollback()
             print("[tx] Rollback complete")
         except Exception:
             print("[warn] Rollback failed")

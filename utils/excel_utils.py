@@ -17,8 +17,13 @@ from utils.import_core import (
     ImportSummary,
     norm_key,
     parse_import_row,
-    record_type_name,
     safe_type,
+)
+from utils.tabular_utils import (
+    mandatory_expense_export_rows,
+    record_export_rows,
+    report_record_type_label,
+    resolve_get_rate,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,14 +61,6 @@ def _safe_str(value):
     return "" if value is None else str(value)
 
 
-def _resolve_get_rate(currency_service):
-    if currency_service is None:
-        from app.services import CurrencyService
-
-        currency_service = CurrencyService()
-    return currency_service.get_rate
-
-
 def report_to_xlsx(report: Report, filepath: str) -> None:
     """Export report view (fixed amounts) to XLSX. Read-only format."""
     wb = Workbook()
@@ -81,18 +78,18 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
         report.records(),
         key=lambda r: (0, r.date) if isinstance(r.date, dt_date) else (1, dt_date.max),
     ):
-        typ = record_type_name(record)
-        if typ == "income":
-            record_type = "Income"
-        elif typ == "mandatory_expense":
-            record_type = "Mandatory Expense"
-        else:
-            record_type = "Expense"
         if ws is not None:
             record_date = (
                 record.date.isoformat() if isinstance(record.date, dt_date) else record.date
             )
-            ws.append([record_date, record_type, record.category, f"{record.amount_kzt:.2f}"])
+            ws.append(
+                [
+                    record_date,
+                    report_record_type_label(record),
+                    record.category,
+                    f"{record.amount_kzt:.2f}",
+                ]
+            )
 
     total = report.total_fixed()
     records_total = sum(r.signed_amount_kzt() for r in report.records())
@@ -126,13 +123,6 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
             subreport.records(),
             key=lambda rr: (0, rr.date) if isinstance(rr.date, dt_date) else (1, dt_date.max),
         ):
-            typ = record_type_name(r)
-            if typ == "income":
-                r_type = "Income"
-            elif typ == "mandatory_expense":
-                r_type = "Mandatory Expense"
-            else:
-                r_type = "Expense"
             amt = getattr(r, "amount", 0.0)
             records_total += (
                 getattr(r, "amount", 0.0) if getattr(r, "amount", None) is not None else 0.0
@@ -140,7 +130,7 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
             display_date = getattr(r, "date", "")
             if isinstance(display_date, dt_date):
                 display_date = display_date.isoformat()
-            bycat_ws.append([display_date, r_type, f"{abs(amt):.2f}"])
+            bycat_ws.append([display_date, report_record_type_label(r), f"{abs(amt):.2f}"])
         bycat_ws.append(["SUBTOTAL", "", f"{abs(records_total):.2f}"])
         bycat_ws.append([""])
 
@@ -167,57 +157,15 @@ def export_records_to_xlsx(
 ) -> None:
     del initial_balance  # legacy argument, kept for compatibility
 
-    transfer_map = {transfer.id: transfer for transfer in (transfers or [])}
-
     wb = Workbook()
     ws = wb.active
     if ws is not None:
         ws.title = "Data"
         ws.append(DATA_HEADERS)
 
-    for record in records:
-        if record.transfer_id is not None:
-            continue
-        payload = [
-            record.date.isoformat() if isinstance(record.date, dt_date) else record.date,
-            record_type_name(record),
-            int(getattr(record, "wallet_id", 1)),
-            record.category,
-            record.amount_original,
-            record.currency,
-            record.rate_at_operation,
-            record.amount_kzt,
-            str(getattr(record, "description", "") or ""),
-            getattr(record, "period", "") if isinstance(record, MandatoryExpenseRecord) else "",
-            "",
-            "",
-            "",
-        ]
+    for row in record_export_rows(records, transfers=list(transfers or [])):
         if ws is not None:
-            ws.append(payload)
-
-    for transfer_id in sorted(transfer_map):
-        transfer = transfer_map[transfer_id]
-        if ws is not None:
-            ws.append(
-                [
-                    transfer.date.isoformat()
-                    if isinstance(transfer.date, dt_date)
-                    else transfer.date,
-                    "transfer",
-                    "",
-                    "Transfer",
-                    transfer.amount_original,
-                    transfer.currency,
-                    transfer.rate_at_operation,
-                    transfer.amount_kzt,
-                    transfer.description,
-                    "",
-                    transfer.id,
-                    transfer.from_wallet_id,
-                    transfer.to_wallet_id,
-                ]
-            )
+            ws.append([row.get(header, "") for header in DATA_HEADERS])
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     wb.save(filepath)
@@ -272,7 +220,7 @@ def import_records_from_xlsx(
         is_report_xlsx = {"date", "type", "category", "amount_(kzt)"}.issubset(set(headers))
         get_rate = None
         if policy == ImportPolicy.CURRENT_RATE:
-            get_rate = _resolve_get_rate(currency_service)
+            get_rate = resolve_get_rate(currency_service)
         seen_rows = 0
         seen_initial_balance = False
 
@@ -386,20 +334,9 @@ def export_mandatory_expenses_to_xlsx(
         ws.title = "Mandatory"
         ws.append(MANDATORY_HEADERS)
 
-    for e in expenses:
+    for row in mandatory_expense_export_rows(expenses):
         if ws is not None:
-            ws.append(
-                [
-                    "mandatory_expense",
-                    e.category,
-                    e.amount_original,
-                    e.currency,
-                    e.rate_at_operation,
-                    e.amount_kzt,
-                    e.description,
-                    e.period,
-                ]
-            )
+            ws.append([row.get(header, "") for header in MANDATORY_HEADERS])
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     wb.save(filepath)
@@ -439,7 +376,7 @@ def import_mandatory_expenses_from_xlsx(
 
         get_rate = None
         if policy == ImportPolicy.CURRENT_RATE:
-            get_rate = _resolve_get_rate(currency_service)
+            get_rate = resolve_get_rate(currency_service)
         seen_rows = 0
 
         for idx, row in enumerate(rows_iter, start=2):

@@ -372,3 +372,24 @@ def test_import_service_passes_force_flag_to_parser() -> None:
         )
 
     parse_mock.assert_called_once_with("data.json", force=True)
+
+
+def test_import_service_rejects_fractional_wallet_id_in_wallet_payload() -> None:
+    finance_service = _finance_mock()
+    payload = ParsedImportData(
+        path="data.json",
+        file_type="json",
+        rows=[],
+        wallets=[
+            {
+                "id": "1.5",
+                "name": "Broken",
+                "currency": "KZT",
+                "initial_balance": 0.0,
+            }
+        ],
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        with pytest.raises(ValueError, match="Invalid wallet id in import payload"):
+            ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file("data.json")

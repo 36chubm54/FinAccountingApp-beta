@@ -142,7 +142,7 @@ class MandatoryExpenseRecord(Record):
 
     @property
     def type(self) -> str:
-        return "expense"
+        return "mandatory_expense"
 
     def signed_amount_kzt(self) -> float:
         if self.amount_kzt is None:

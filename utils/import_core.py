@@ -65,6 +65,27 @@ def _parse_wallet_id(raw_value: Any) -> int | None:
     return wallet_id
 
 
+def parse_strict_int(raw_value: Any) -> int | None:
+    parsed = as_float(raw_value, None)
+    if parsed is None:
+        return None
+    try:
+        integer = int(parsed)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if abs(parsed - integer) > 1e-9:
+        return None
+    return integer
+
+
+def parse_optional_strict_int(raw_value: Any) -> int | None:
+    if raw_value in (None, ""):
+        return None
+    if isinstance(raw_value, str) and not raw_value.strip():
+        return None
+    return parse_strict_int(raw_value)
+
+
 def parse_import_row(
     row: dict[str, Any],
     *,
@@ -204,11 +225,8 @@ def parse_import_row(
         "description": description,
     }
     if row_lc.get("transfer_id") not in (None, ""):
-        transfer_raw = as_float(row_lc.get("transfer_id"), None)
-        if transfer_raw is None:
-            return None, None, f"{row_label}: invalid transfer_id '{row_lc.get('transfer_id')}'"
-        transfer_id = int(transfer_raw)
-        if abs(transfer_raw - transfer_id) > 1e-9:
+        transfer_id = parse_optional_strict_int(row_lc.get("transfer_id"))
+        if transfer_id is None:
             return None, None, f"{row_label}: invalid transfer_id '{row_lc.get('transfer_id')}'"
         common["transfer_id"] = transfer_id if transfer_id > 0 else None
 

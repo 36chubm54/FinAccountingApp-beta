@@ -1,6 +1,6 @@
+import json
 import os
 import tempfile
-import json
 
 import pytest
 
@@ -15,6 +15,7 @@ from utils.backup_utils import (
     import_full_backup_from_json,
 )
 from utils.csv_utils import import_records_from_csv
+from version import __version__
 
 
 class DummyCurrency:
@@ -185,7 +186,9 @@ def test_snapshot_checksum_mismatch_raises_integrity_error() -> None:
     try:
         export_full_backup_to_json(
             path,
-            wallets=[Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=0.0, system=True)],
+            wallets=[
+                Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=0.0, system=True)
+            ],
             records=records,
             mandatory_expenses=[],
             transfers=[],
@@ -209,7 +212,9 @@ def test_snapshot_readonly_requires_force() -> None:
     try:
         export_full_backup_to_json(
             path,
-            wallets=[Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=1.0, system=True)],
+            wallets=[
+                Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=1.0, system=True)
+            ],
             records=[],
             mandatory_expenses=[],
             transfers=[],
@@ -227,7 +232,9 @@ def test_snapshot_readonly_force_import_succeeds() -> None:
     try:
         export_full_backup_to_json(
             path,
-            wallets=[Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=42.0, system=True)],
+            wallets=[
+                Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=42.0, system=True)
+            ],
             records=[],
             mandatory_expenses=[],
             transfers=[],
@@ -243,6 +250,35 @@ def test_snapshot_readonly_force_import_succeeds() -> None:
         assert mandatory == []
         assert transfers == []
         assert summary[1] == 0
+    finally:
+        os.unlink(path)
+
+
+def test_snapshot_export_writes_precise_metadata() -> None:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
+        path = tmp.name
+    try:
+        export_full_backup_to_json(
+            path,
+            wallets=[
+                Wallet(
+                    id=1,
+                    name="Main wallet",
+                    currency="KZT",
+                    initial_balance=42.0,
+                    system=True,
+                )
+            ],
+            records=[],
+            mandatory_expenses=[],
+            transfers=[],
+            readonly=True,
+            storage_mode="json",
+        )
+        with open(path, encoding="utf-8") as fp:
+            payload = json.load(fp)
+        assert payload["meta"]["app_version"] == __version__
+        assert payload["meta"]["storage"] == "json"
     finally:
         os.unlink(path)
 
@@ -264,7 +300,9 @@ def test_legacy_json_without_meta_imports_normally() -> None:
         "mandatory_expenses": [],
         "transfers": [],
     }
-    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json", encoding="utf-8") as tmp:
+    with tempfile.NamedTemporaryFile(
+        mode="w", delete=False, suffix=".json", encoding="utf-8"
+    ) as tmp:
         json.dump(payload, tmp, ensure_ascii=False)
         path = tmp.name
     try:
@@ -277,7 +315,9 @@ def test_legacy_json_without_meta_imports_normally() -> None:
 
 def test_snapshot_invalid_structure_raises_backup_format_error() -> None:
     payload = {"meta": {"readonly": True, "checksum": "abc"}, "data": []}
-    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json", encoding="utf-8") as tmp:
+    with tempfile.NamedTemporaryFile(
+        mode="w", delete=False, suffix=".json", encoding="utf-8"
+    ) as tmp:
         json.dump(payload, tmp, ensure_ascii=False)
         path = tmp.name
     try:

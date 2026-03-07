@@ -12,7 +12,12 @@ from domain.transfers import Transfer
 from domain.wallets import Wallet
 from services.import_parser import ParsedImportData, parse_import_file
 from utils.csv_utils import _parse_transfer_row
-from utils.import_core import as_float, parse_import_row, safe_type
+from utils.import_core import (
+    as_float,
+    parse_import_row,
+    parse_optional_strict_int,
+    safe_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -664,7 +669,10 @@ class ImportService:
     def _wallets_from_payload(raw_wallets: list[dict[str, Any]]) -> list[Wallet]:
         wallets: list[Wallet] = []
         for item in raw_wallets:
-            wallet_id = int(as_float(item.get("id"), 0.0) or 0)
+            wallet_id = parse_optional_strict_int(item.get("id"))
+            if item.get("id") not in (None, "") and wallet_id is None:
+                raise ValueError(f"Invalid wallet id in import payload: {item.get('id')}")
+            wallet_id = wallet_id or 0
             if wallet_id <= 0:
                 continue
             wallets.append(
@@ -757,7 +765,10 @@ class ImportService:
 
     @staticmethod
     def _map_wallet_id(value: Any, wallet_id_map: dict[int, int]) -> int | None:
-        wallet_id = int(as_float(value, 0.0) or 0)
+        wallet_id = parse_optional_strict_int(value)
+        if value not in (None, "") and wallet_id is None:
+            raise ValueError(f"Invalid wallet id in import payload: {value}")
+        wallet_id = wallet_id or 0
         if wallet_id <= 0:
             return None
         return wallet_id_map.get(wallet_id, wallet_id)

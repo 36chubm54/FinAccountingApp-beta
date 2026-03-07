@@ -1,6 +1,6 @@
 # FinAccountingApp
 
-Графическое и веб‑приложение для персонального финансового учёта с мультивалютностью, категориями и отчётами.
+Графическое приложение для персонального финансового учёта с мультивалютностью, категориями и отчётами.
 
 ## 📋 Оглавление
 
@@ -60,7 +60,7 @@ python main.py
 
 ### Главное окно
 
-После запуска `python main.py` откроется окно с вкладками управления и блоком инфографики.
+После запуска `python main.py` из каталога `project` откроется окно с вкладками управления и блоком инфографики.
 
 Вкладки и действия:
 
@@ -240,6 +240,9 @@ python main.py
 - `Technical backup` (`readonly=False`):
   - legacy-совместимый JSON без `meta` и без checksum;
   - используется для обычного pipeline без readonly-ограничения.
+- Метаданные snapshot:
+  - `meta.app_version` берётся из `version.py`;
+  - `meta.storage` задаётся вызывающим кодом и не хардкодится в `sqlite`.
 - Вкладка `Settings` содержит кнопки:
   - `Export Full Backup`
   - `Import Full Backup`
@@ -450,10 +453,9 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `db/` — SQL-схема для SQLite.
 - `bootstrap.py` — инициализация SQLite и стартовая валидация.
 - `backup.py` — backup JSON и экспорт SQLite -> JSON.
-- `config.py` — флаг и пути storage.
+- `config.py` — пути runtime SQLite и JSON import/export.
 - `utils/` — импорт/экспорт и подготовка данных для графиков.
 - `gui/` — GUI слой (Tkinter).
-- `web/` — автономное веб-приложение.
 
 Поток данных для GUI:
 
@@ -512,7 +514,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `filter_by_period(prefix)` — фильтрация по префиксу даты.
 - `filter_by_period_range(start_prefix, end_prefix)` — фильтрация по диапазону дат.
 - `filter_by_category(category)` — фильтрация по категории.
-- `grouped_by_category()` — группировка по категориям.
+- `grouped_by_category()` — группировка по категориям с сохранением контекста отчёта (`balance_label`, диапазон периода).
 - `sorted_by_date()` — сортировка по дате.
 - `net_profit_fixed()` — чистая прибыль по фиксированным курсам.
 - `monthly_income_expense_rows(year=None, up_to_month=None)` — агрегаты по месяцам.
@@ -520,7 +522,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `as_table(summary_mode="full"|"total_only")` — табличный вывод.
 - `to_csv(filepath)` и `from_csv(filepath)` — экспорт отчёта и backward-compatible импорт.
 
-`domain/wallets/py`
+`domain/wallets.py`
 
 - `Wallet` — кошелёк (`allow_negative`, `is_active`).
 
@@ -631,9 +633,9 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `SettingsTabContext` — контекст вкладки настроек.
 - `build_settings_tab(parent, context, import_formats)` — метод для построения интерфейса вкладки `Settings`. Эта вкладка позволяет управлять кошельками и обязательными расходами.
 
-`gui/controllers`
+`gui/controllers.py`
 
-- `FinanceController` — класс управления бизнес-логикой приложения.
+- `FinancialController` — класс управления бизнес-логикой приложения.
 
 `gui/exporters.py`
 
@@ -662,16 +664,24 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - Протокол `FinanceService` для import-оркестратора (`ImportService`).
 - Явно описывает методы импорта, rollback и нормализации идентификаторов.
 
+`app/use_case_support.py`
+
+- Общие helper'ы для сценариев use case без собственной доменной логики.
+
 `gui/helpers.py`
 
 - `open_in_file_manager(path)`.
+
+`gui/controller_support.py`
+
+- Вспомогательные структуры и helper'ы для GUI-контроллера (`RecordListItem`, list-building, import normalization).
 
 ### Utils
 
 `utils/backup_utils.py`
 
 - `compute_checksum(data)` — SHA256 для `data`.
-- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0, readonly=True)`.
+- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0, readonly=True, storage_mode="unknown")`.
 - `import_full_backup_from_json(filepath, force=False)`.
 
 `utils/csv_utils.py`
@@ -691,6 +701,10 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `import_records_from_xlsx(filepath, policy, currency_service, wallet_ids=None)`.
 - `export_mandatory_expenses_to_xlsx(expenses, filepath)`.
 - `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)`.
+
+`utils/tabular_utils.py`
+
+- Общие helper'ы для CSV/XLSX row-building, type label formatting и rate resolver.
 
 `utils/pdf_utils.py`
 
@@ -720,11 +734,12 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 project/
 │
 ├── main.py                     # Точка входа приложения
-├── config.py                   # Конфигурация storage (SQLite/JSON)
+├── config.py                   # Пути runtime SQLite и JSON import/export
 ├── bootstrap.py                # Инициализация SQLite + стартовая валидация
 ├── backup.py                   # Backup JSON и экспорт SQLite -> JSON
 ├── migrate_json_to_sqlite.py   # Миграция данных из JSON в SQLite
-├── data.json                # JSON import/export/backup файл (опционально)
+├── version.py                  # Версия приложения для snapshot metadata
+├── data.json                   # JSON import/export/backup файл (опционально)
 ├── currency_rates.json         # Кэш курсов валют (use_online=True)
 ├── requirements.txt            # Runtime-зависимости
 ├── requirements-dev.txt        # Dev-зависимости (тесты, coverage)
@@ -740,6 +755,7 @@ project/
 │   ├── finance_service.py      # Протокол FinanceService для import-сервиса
 │   ├── record_service.py       # Сервис записей
 │   ├── services.py             # CurrencyService адаптер
+│   ├── use_case_support.py     # Общие helper'ы для use cases
 │   └── use_cases.py            # Сценарии использования
 │
 ├── domain/                     # Domain layer
@@ -778,7 +794,8 @@ project/
 │   ├── charting.py             # Графики и агрегации
 │   ├── csv_utils.py
 │   ├── excel_utils.py
-│   └── pdf_utils.py
+│   ├── pdf_utils.py
+│   └── tabular_utils.py        # Общие helper'ы CSV/XLSX
 │
 ├── gui/                        # GUI слой (Tkinter)
 │   ├── tabs/
@@ -789,6 +806,7 @@ project/
 │   │
 │   ├── __init__.py
 │   ├── tkinter_gui.py          # Основное GUI-приложение
+│   ├── controller_support.py   # Вспомогательные GUI helper'ы
 │   ├── helpers.py              # Помощники для GUI
 │   ├── controllers.py          # Контроллеры GUI
 │   ├── importers.py            # Legacy-обёртки импортеров (совместимость/тесты)
@@ -796,6 +814,7 @@ project/
 │
 └── tests/                      # Тесты
     ├── __init__.py
+    ├── conftest.py             # Локальная tmp-fixture для стабильных тестов
     ├── test_charting.py
     ├── test_csv.py
     ├── test_currency.py

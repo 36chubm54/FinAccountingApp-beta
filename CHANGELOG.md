@@ -7,6 +7,47 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.2.2] - 2026-03-07
+
+### Fixed
+
+- Enforce strict integer validation for `wallet_id` and `transfer_id` across JSON/CSV/XLSX import paths
+- Stop silent coercion of malformed IDs in import, repository loading, and legacy JSON migration flows
+- Fix SQLite schema path resolution during bootstrap
+- Remove direct internal storage access from bootstrap, backup, and migration code
+- Preserve report metadata in `grouped_by_category()` subreports while keeping zero initial balance
+
+### Refactor
+
+- Add public admin/query APIs for SQLite storage and repository bootstrap operations
+- Extract shared helpers from `use_cases.py` and `controllers.py` to reduce responsibility overlap
+- Refactor `migrate_json_to_sqlite.py` to use public storage APIs and explicit transactions
+- Extract shared CSV/XLSX tabular export helpers
+- Remove redundant `sys.path` bootstrapping from entry and GUI modules
+
+### Changed
+
+- Strengthen SQLite constraints for currency codes and date-shaped fields
+- Make snapshot metadata use `version.py` and caller-provided storage mode
+- Treat `MandatoryExpenseRecord.type` consistently as `mandatory_expense`
+- Align CSV/XLSX export labeling and row-building through shared helpers
+
+### Tests
+
+- Stabilize pytest temp-path handling for the current Windows/OneDrive workspace
+- Add regression coverage for strict import ID contracts and malformed payload handling
+- Add coverage for bootstrap/runtime SQLite integrity flows
+- Add regression coverage for grouped report metadata preservation
+- Add contract coverage for snapshot metadata and mandatory record type
+
+### Docs
+
+- Update `README.md` and `README_EN.md` for import validation, launch mode, report grouping, and snapshot metadata
+
+No breaking changes.
+
+---
+
 ## [1.2.1] - 2026-03-07
 
 ### Refactor

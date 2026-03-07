@@ -12,14 +12,10 @@ from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, 
 from domain.transfers import Transfer
 from domain.wallets import Wallet
 from utils.import_core import ImportSummary, parse_import_row, record_type_name
+from version import __version__
 
 logger = logging.getLogger(__name__)
 SYSTEM_WALLET_ID = 1
-
-try:
-    from version import __version__  # pyright: ignore[reportMissingImports]
-except Exception:
-    __version__ = "0.0.0"
 
 
 class BackupFormatError(ValueError):
@@ -89,10 +85,6 @@ def compute_checksum(data: dict) -> str:
         separators=(",", ":"),
     )
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-
-
-def _storage_mode() -> str:
-    return "sqlite"
 
 
 def _now_utc_iso8601() -> str:
@@ -245,6 +237,7 @@ def export_full_backup_to_json(
     transfers: Sequence[Transfer] = (),
     initial_balance: float = 0.0,
     readonly: bool = True,
+    storage_mode: str = "unknown",
 ) -> None:
     normalized_wallets = list(wallets or [])
     if not normalized_wallets:
@@ -274,7 +267,7 @@ def export_full_backup_to_json(
             "meta": {
                 "created_at": _now_utc_iso8601(),
                 "app_version": __version__,
-                "storage": _storage_mode(),
+                "storage": str(storage_mode or "unknown"),
                 "readonly": True,
                 "checksum": compute_checksum(data_payload),
             },
@@ -500,6 +493,7 @@ def create_backup(
     transfers: Sequence[Transfer] = (),
     initial_balance: float = 0.0,
     readonly: bool = True,
+    storage_mode: str = "unknown",
 ) -> None:
     export_full_backup_to_json(
         filepath,
@@ -509,6 +503,7 @@ def create_backup(
         transfers=transfers,
         initial_balance=initial_balance,
         readonly=readonly,
+        storage_mode=storage_mode,
     )
 
 

@@ -13,8 +13,14 @@ from utils.import_core import (
     as_float,
     norm_key,
     parse_import_row,
-    record_type_name,
+    parse_optional_strict_int,
     safe_type,
+)
+from utils.tabular_utils import (
+    mandatory_expense_export_rows,
+    record_export_rows,
+    report_record_type_label,
+    resolve_get_rate,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,14 +56,6 @@ MANDATORY_HEADERS = [
 ]
 
 
-def _resolve_get_rate(currency_service):
-    if currency_service is None:
-        from app.services import CurrencyService
-
-        currency_service = CurrencyService()
-    return currency_service.get_rate
-
-
 def _validate_currency(currency: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z]{3}", currency or ""))
 
@@ -75,8 +73,8 @@ def _parse_transfer_row(
     if not date_value:
         return None, None, next_transfer_id, f"{row_label}: missing required field 'date'"
 
-    from_wallet_id = int(as_float(row_lc.get("from_wallet_id"), 0.0) or 0)
-    to_wallet_id = int(as_float(row_lc.get("to_wallet_id"), 0.0) or 0)
+    from_wallet_id = parse_optional_strict_int(row_lc.get("from_wallet_id")) or 0
+    to_wallet_id = parse_optional_strict_int(row_lc.get("to_wallet_id")) or 0
     if from_wallet_id <= 0 or to_wallet_id <= 0:
         return (
             None,
@@ -142,7 +140,7 @@ def _parse_transfer_row(
         if amount_kzt is None:
             return None, None, next_transfer_id, f"{row_label}: missing required field 'amount_kzt'"
 
-    transfer_id = int(as_float(row_lc.get("transfer_id"), 0.0) or 0)
+    transfer_id = parse_optional_strict_int(row_lc.get("transfer_id")) or 0
     if transfer_id <= 0:
         transfer_id = next_transfer_id
         next_transfer_id += 1
@@ -333,16 +331,17 @@ def report_to_csv(report: Report, filepath: str) -> None:
             )
 
         for record in sorted_records:
-            if record_type_name(record) == "income":
-                record_type = "Income"
-            elif record_type_name(record) == "mandatory_expense":
-                record_type = "Mandatory Expense"
-            else:
-                record_type = "Expense"
             record_date = (
                 record.date.isoformat() if isinstance(record.date, dt_date) else record.date
             )
-            writer.writerow([record_date, record_type, record.category, f"{record.amount_kzt:.2f}"])
+            writer.writerow(
+                [
+                    record_date,
+                    report_record_type_label(record),
+                    record.category,
+                    f"{record.amount_kzt:.2f}",
+                ]
+            )
 
         records_total = sum(r.signed_amount_kzt() for r in report.records())
         writer.writerow(["SUBTOTAL", "", "", f"{records_total:.2f}"])
@@ -364,55 +363,7 @@ def export_records_to_csv(
     """Export full operation dataset (wallet-based model) to CSV."""
     del initial_balance  # legacy argument, kept for compatibility
 
-    transfer_map = {transfer.id: transfer for transfer in (transfers or [])}
-    rows: list[dict] = []
-
-    for record in records:
-        if record.transfer_id is not None:
-            continue
-        rows.append(
-            {
-                "date": record.date.isoformat()
-                if isinstance(record.date, dt_date)
-                else record.date,
-                "type": record_type_name(record),
-                "wallet_id": int(getattr(record, "wallet_id", 1)),
-                "category": record.category,
-                "amount_original": record.amount_original,
-                "currency": record.currency,
-                "rate_at_operation": record.rate_at_operation,
-                "amount_kzt": record.amount_kzt,
-                "description": str(getattr(record, "description", "") or ""),
-                "period": getattr(record, "period", "")
-                if isinstance(record, MandatoryExpenseRecord)
-                else "",
-                "transfer_id": "",
-                "from_wallet_id": "",
-                "to_wallet_id": "",
-            }
-        )
-
-    for transfer_id in sorted(transfer_map):
-        transfer = transfer_map[transfer_id]
-        rows.append(
-            {
-                "date": transfer.date.isoformat()
-                if isinstance(transfer.date, dt_date)
-                else transfer.date,
-                "type": "transfer",
-                "wallet_id": "",
-                "category": "Transfer",
-                "amount_original": transfer.amount_original,
-                "currency": transfer.currency,
-                "rate_at_operation": transfer.rate_at_operation,
-                "amount_kzt": transfer.amount_kzt,
-                "description": transfer.description,
-                "period": "",
-                "transfer_id": transfer.id,
-                "from_wallet_id": transfer.from_wallet_id,
-                "to_wallet_id": transfer.to_wallet_id,
-            }
-        )
+    rows = record_export_rows(records, transfers=list(transfers or []))
 
     with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=DATA_HEADERS)
@@ -445,7 +396,7 @@ def import_records_from_csv(
 
     get_rate = None
     if policy == ImportPolicy.CURRENT_RATE:
-        get_rate = _resolve_get_rate(currency_service)
+        get_rate = resolve_get_rate(currency_service)
     csv.field_size_limit(MAX_CSV_FIELD_SIZE)
     seen_rows = 0
     seen_initial_balance = False
@@ -575,19 +526,8 @@ def export_mandatory_expenses_to_csv(expenses: list[MandatoryExpenseRecord], fil
     with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=MANDATORY_HEADERS)
         writer.writeheader()
-        for expense in expenses:
-            writer.writerow(
-                {
-                    "type": "mandatory_expense",
-                    "category": expense.category,
-                    "amount_original": expense.amount_original,
-                    "currency": expense.currency,
-                    "rate_at_operation": expense.rate_at_operation,
-                    "amount_kzt": expense.amount_kzt,
-                    "description": expense.description,
-                    "period": expense.period,
-                }
-            )
+        for row in mandatory_expense_export_rows(expenses):
+            writer.writerow(row)
 
 
 def import_mandatory_expenses_from_csv(
@@ -605,7 +545,7 @@ def import_mandatory_expenses_from_csv(
 
     get_rate = None
     if policy == ImportPolicy.CURRENT_RATE:
-        get_rate = _resolve_get_rate(currency_service)
+        get_rate = resolve_get_rate(currency_service)
 
     with open(filepath, newline="", encoding="utf-8") as csvfile:
         while True:

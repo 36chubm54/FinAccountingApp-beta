@@ -1,10 +1,8 @@
 import logging
-import sys
 import tkinter as tk
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, datetime
-from pathlib import Path
 from tkinter import Listbox, messagebox, ttk
 from typing import Any
 
@@ -27,12 +25,6 @@ from utils.charting import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-# Ensure project package root is on sys.path so imports work regardless of CWD
-_ROOT = Path(__file__).resolve().parent.parent
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
 
 IMPORT_FORMATS = {
     "CSV": {"ext": ".csv", "desc": "CSV"},

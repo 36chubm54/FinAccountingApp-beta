@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
 
-from infrastructure.repositories import JsonFileRecordRepository
 from storage.json_storage import JsonStorage
 from storage.sqlite_storage import SQLiteStorage
+
+logger = logging.getLogger(__name__)
 
 
 def create_backup(json_path: str) -> str | None:
@@ -18,7 +20,7 @@ def create_backup(json_path: str) -> str | None:
     backup_dir.mkdir(exist_ok=True)
     backup_path = backup_dir / f"{source.stem}_backup_{stamp}{source.suffix}"
     shutil.copy2(source, backup_path)
-    print(f"[backup] JSON backup created: {backup_path}")
+    logger.info("JSON backup created: %s", backup_path)
     return str(backup_path)
 
 
@@ -32,15 +34,12 @@ def export_to_json(sqlite_path: str, json_path: str, schema_path: str | None = N
         mandatory_expenses = sqlite_storage.get_mandatory_expenses()
 
         writer = JsonStorage(json_path)
-        writer_repo = writer._repo
-        if not isinstance(writer_repo, JsonFileRecordRepository):
-            raise RuntimeError("JsonStorage writer is not backed by JsonFileRecordRepository")
-        writer_repo.replace_all_data(
+        writer.replace_all_data(
             wallets=wallets,
             records=records,
             mandatory_expenses=mandatory_expenses,
             transfers=transfers,
         )
-        print(f"[backup] SQLite exported to JSON: {json_path}")
+        logger.info("SQLite exported to JSON: %s", json_path)
     finally:
         sqlite_storage.close()

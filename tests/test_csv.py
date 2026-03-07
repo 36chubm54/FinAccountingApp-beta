@@ -192,3 +192,26 @@ date,type,wallet_id,category,amount_original,currency,rate_at_operation,amount_k
         assert len(summary[2]) == 1
     finally:
         os.unlink(tmp_path)
+
+
+def test_import_records_from_csv_rejects_fractional_transfer_wallet_ids():
+    from domain.import_policy import ImportPolicy
+    from utils.csv_utils import import_records_from_csv
+
+    csv_content = """
+date,type,from_wallet_id,to_wallet_id,amount_original,currency,rate_at_operation,amount_kzt
+2025-01-01,transfer,1.5,2,10,KZT,1,10
+"""
+    with tempfile.NamedTemporaryFile(
+        mode="w", delete=False, suffix=".csv", newline="", encoding="utf-8"
+    ) as tmp:
+        tmp.write(csv_content)
+        tmp_path = tmp.name
+    try:
+        records, _, summary = import_records_from_csv(tmp_path, policy=ImportPolicy.FULL_BACKUP)
+        assert records == []
+        assert summary[0] == 0
+        assert summary[1] == 1
+        assert "invalid transfer wallets" in summary[2][0]
+    finally:
+        os.unlink(tmp_path)

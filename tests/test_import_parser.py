@@ -1,6 +1,6 @@
+import json
 from pathlib import Path
 
-import json
 import pytest
 
 from services import import_parser
@@ -77,3 +77,37 @@ def test_parse_import_file_accepts_readonly_snapshot_with_force(tmp_path: Path) 
     parsed = import_parser.parse_import_file(str(json_path), force=True)
     assert parsed.file_type == "json"
     assert parsed.rows == []
+
+
+def test_parse_import_file_keeps_fractional_transfer_aggregate_id_verbatim(tmp_path: Path) -> None:
+    payload = {
+        "wallets": [
+            {
+                "id": 1,
+                "name": "Main",
+                "currency": "KZT",
+                "initial_balance": 0.0,
+                "system": True,
+            }
+        ],
+        "records": [],
+        "mandatory_expenses": [],
+        "transfers": [
+            {
+                "id": "1.5",
+                "from_wallet_id": 1,
+                "to_wallet_id": 2,
+                "date": "2026-03-05",
+                "amount_original": 10,
+                "currency": "KZT",
+                "rate_at_operation": 1,
+                "amount_kzt": 10,
+            }
+        ],
+    }
+    json_path = tmp_path / "payload.json"
+    json_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    parsed = import_parser.parse_import_file(str(json_path))
+
+    assert parsed.rows[0]["transfer_id"] == "1.5"

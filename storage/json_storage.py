@@ -34,3 +34,20 @@ class JsonStorage(Storage):
 
     def get_mandatory_expenses(self) -> list[MandatoryExpenseRecord]:
         return self._repo.load_mandatory_expenses()
+
+    def replace_all_data(
+        self,
+        *,
+        initial_balance: float = 0.0,
+        wallets: list[Wallet] | None = None,
+        records: list[Record],
+        mandatory_expenses: list[MandatoryExpenseRecord],
+        transfers: list[Transfer] | None = None,
+    ) -> None:
+        self._repo.replace_all_data(
+            initial_balance=initial_balance,
+            wallets=wallets,
+            records=records,
+            mandatory_expenses=mandatory_expenses,
+            transfers=transfers,
+        )

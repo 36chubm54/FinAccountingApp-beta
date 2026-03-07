@@ -174,7 +174,7 @@ class TestJsonFileRecordRepository:
             json.dump(json_data, f)
 
         expenses = self.repo.load_mandatory_expenses()
-        assert len(expenses) == 2
+        assert len(expenses) == 1
 
     def test_save_mandatory_expenses_ids_start_from_one(self):
         self.repo.save(IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"))
@@ -392,3 +392,51 @@ class TestJsonFileRecordRepository:
 
         records = self.repo.load_all()
         assert len(records) == 60
+
+    def test_load_all_skips_record_with_fractional_wallet_id_in_json(self):
+        json_data = {
+            "wallets": [
+                {
+                    "id": 1,
+                    "name": "Main wallet",
+                    "currency": "KZT",
+                    "initial_balance": 0.0,
+                    "system": True,
+                    "allow_negative": False,
+                    "is_active": True,
+                }
+            ],
+            "records": [
+                {
+                    "id": 1,
+                    "type": "income",
+                    "date": "2025-01-01",
+                    "wallet_id": 1,
+                    "amount_original": 10.0,
+                    "currency": "KZT",
+                    "rate_at_operation": 1.0,
+                    "amount_kzt": 10.0,
+                    "category": "Salary",
+                },
+                {
+                    "id": 2,
+                    "type": "income",
+                    "date": "2025-01-02",
+                    "wallet_id": "1.5",
+                    "amount_original": 20.0,
+                    "currency": "KZT",
+                    "rate_at_operation": 1.0,
+                    "amount_kzt": 20.0,
+                    "category": "Bonus",
+                },
+            ],
+            "mandatory_expenses": [],
+            "transfers": [],
+        }
+        with open(self.temp_file.name, "w", encoding="utf-8") as f:
+            json.dump(json_data, f)
+
+        records = self.repo.load_all()
+
+        assert len(records) == 1
+        assert records[0].category == "Salary"

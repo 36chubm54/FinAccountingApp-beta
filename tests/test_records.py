@@ -117,6 +117,16 @@ class TestMandatoryExpenseRecord:
             )
             assert record.period == period
 
+    def test_type_is_mandatory_expense(self):
+        record = MandatoryExpenseRecord(
+            date="",
+            _amount_init=100.0,
+            category="Mandatory",
+            description="Test",
+            period="monthly",
+        )
+        assert record.type == "mandatory_expense"
+
 
 class TestRecord:
     def test_record_is_abstract(self):

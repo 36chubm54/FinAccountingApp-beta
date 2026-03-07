@@ -2,6 +2,13 @@ import logging
 from dataclasses import replace
 from datetime import date as dt_date
 
+from app.use_case_support import (
+    build_rate,
+    commission_marker,
+    is_commission_for_transfer,
+    wallet_balance_kzt,
+    wallet_by_id,
+)
 from domain.errors import DomainError
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
@@ -14,27 +21,6 @@ from .services import CurrencyService
 
 logger = logging.getLogger(__name__)
 SYSTEM_WALLET_ID = 1
-
-
-def _build_rate(amount: float, amount_kzt: float, currency: str) -> float:
-    if currency.upper() == "KZT":
-        return 1.0
-    if amount == 0:
-        return 1.0
-    return amount_kzt / amount
-
-
-def _commission_marker(transfer_id: int) -> str:
-    return f"[transfer:{transfer_id}]"
-
-
-def _is_commission_for_transfer(record, transfer_id: int) -> bool:
-    if record.transfer_id is not None:
-        return False
-    if str(record.category or "").strip().lower() != "commission":
-        return False
-    marker = _commission_marker(transfer_id)
-    return marker in str(getattr(record, "description", "") or "")
 
 
 class CreateIncome:
@@ -55,13 +41,13 @@ class CreateIncome:
         rate_at_operation: float | None = None,
     ) -> None:
         """Create and persist an income record."""
-        wallet = _wallet_by_id(self._repository, wallet_id)
+        wallet = wallet_by_id(self._repository, wallet_id)
         if not wallet.is_active:
             raise ValueError("Cannot create operation for inactive wallet")
         if amount_kzt is None:
             amount_kzt = self._currency.convert(amount, currency)
         if rate_at_operation is None:
-            rate_at_operation = _build_rate(amount, amount_kzt, currency)
+            rate_at_operation = build_rate(amount, amount_kzt, currency)
         record = IncomeRecord(
             date=date,
             wallet_id=wallet_id,
@@ -100,15 +86,15 @@ class CreateExpense:
         rate_at_operation: float | None = None,
     ) -> None:
         """Create and persist an expense record."""
-        wallet = _wallet_by_id(self._repository, wallet_id)
+        wallet = wallet_by_id(self._repository, wallet_id)
         if not wallet.is_active:
             raise ValueError("Cannot create operation for inactive wallet")
         if amount_kzt is None:
             amount_kzt = self._currency.convert(amount, currency)
         if rate_at_operation is None:
-            rate_at_operation = _build_rate(amount, amount_kzt, currency)
+            rate_at_operation = build_rate(amount, amount_kzt, currency)
         if not wallet.allow_negative:
-            balance = _wallet_balance_kzt(wallet, self._repository.load_all())
+            balance = wallet_balance_kzt(wallet, self._repository.load_all())
             if balance - amount_kzt < 0:
                 raise ValueError("Insufficient funds in wallet")
         record = ExpenseRecord(
@@ -156,21 +142,6 @@ class GenerateReport:
             initial_balance,
             wallet_id=wallet_id,
         )
-
-
-def _wallet_balance_kzt(wallet: Wallet, records: list) -> float:
-    total = float(wallet.initial_balance)
-    for record in records:
-        if record.wallet_id == wallet.id:
-            total += record.signed_amount_kzt()
-    return total
-
-
-def _wallet_by_id(repository: RecordRepository, wallet_id: int) -> Wallet:
-    wallet = next((w for w in repository.load_wallets() if w.id == wallet_id), None)
-    if wallet is None:
-        raise ValueError(f"Wallet not found: {wallet_id}")
-    return wallet
 
 
 class CreateWallet:
@@ -222,10 +193,10 @@ class SoftDeleteWallet:
         self._repository = repository
 
     def execute(self, wallet_id: int) -> None:
-        wallet = _wallet_by_id(self._repository, wallet_id)
+        wallet = wallet_by_id(self._repository, wallet_id)
         if wallet.system:
             raise ValueError("System wallet cannot be deleted")
-        balance = _wallet_balance_kzt(wallet, self._repository.load_all())
+        balance = wallet_balance_kzt(wallet, self._repository.load_all())
         if abs(balance) > 1e-9:
             raise ValueError("Wallet with non-zero balance cannot be deleted")
         if not self._repository.soft_delete_wallet(wallet_id):
@@ -242,7 +213,7 @@ class CalculateWalletBalance:
         wallet = next((w for w in wallets if w.id == wallet_id), None)
         if wallet is None:
             raise ValueError(f"Wallet not found: {wallet_id}")
-        return _wallet_balance_kzt(wallet, self._repository.load_all())
+        return wallet_balance_kzt(wallet, self._repository.load_all())
 
 
 class CalculateNetWorth:
@@ -253,7 +224,7 @@ class CalculateNetWorth:
     def execute_fixed(self) -> float:
         wallets = self._repository.load_active_wallets()
         records = self._repository.load_all()
-        return sum(_wallet_balance_kzt(wallet, records) for wallet in wallets)
+        return sum(wallet_balance_kzt(wallet, records) for wallet in wallets)
 
     def execute_current(self) -> float:
         wallets = self._repository.load_active_wallets()
@@ -310,7 +281,7 @@ class CreateTransfer:
         else:
             transfer_kzt = float(amount_kzt)
         if rate_at_operation is None:
-            transfer_rate = _build_rate(amount_original, transfer_kzt, currency)
+            transfer_rate = build_rate(amount_original, transfer_kzt, currency)
         else:
             transfer_rate = float(rate_at_operation)
 
@@ -319,10 +290,10 @@ class CreateTransfer:
         commission_rate = 1.0
         if commission_amount > 0:
             commission_kzt = float(self._currency.convert(commission_amount, commission_ccy))
-            commission_rate = _build_rate(commission_amount, commission_kzt, commission_ccy)
+            commission_rate = build_rate(commission_amount, commission_kzt, commission_ccy)
 
         records = self._repository.load_all()
-        from_balance = _wallet_balance_kzt(from_wallet, records)
+        from_balance = wallet_balance_kzt(from_wallet, records)
         projected_balance = from_balance - transfer_kzt - commission_kzt
         if not from_wallet.allow_negative and projected_balance < 0:
             raise ValueError("Insufficient funds in source wallet")
@@ -367,7 +338,7 @@ class CreateTransfer:
         updated_transfers = list(self._repository.load_transfers()) + [transfer]
 
         if commission_amount > 0:
-            marker = _commission_marker(transfer_id)
+            marker = commission_marker(transfer_id)
             commission_record = ExpenseRecord(
                 id=next_record_id + 2,
                 date=transfer_date,
@@ -429,7 +400,7 @@ class DeleteTransfer:
             record
             for record in records
             if record.transfer_id != transfer_id
-            and not _is_commission_for_transfer(record, transfer_id)
+            and not is_commission_for_transfer(record, transfer_id)
         ]
         new_transfers = [item for item in transfers if item.id != transfer_id]
 
@@ -549,7 +520,7 @@ class CreateMandatoryExpense:
         if amount_kzt is None:
             amount_kzt = self._currency.convert(amount, currency)
         if rate_at_operation is None:
-            rate_at_operation = _build_rate(amount, amount_kzt, currency)
+            rate_at_operation = build_rate(amount, amount_kzt, currency)
         expense = MandatoryExpenseRecord(
             wallet_id=SYSTEM_WALLET_ID,
             amount_original=amount,
@@ -564,7 +535,7 @@ class CreateMandatoryExpense:
         logger.info(
             "Mandatory expense created amount=%s category=%s description=%s period=%s",
             amount,
-            currency,
+            category,
             description,
             period,
         )
@@ -591,16 +562,16 @@ class CreateMandatoryExpenseRecord:
         from domain.validation import ensure_valid_period
 
         ensure_valid_period(period)
-        wallet = _wallet_by_id(self._repository, wallet_id)
+        wallet = wallet_by_id(self._repository, wallet_id)
         if not wallet.is_active:
             raise ValueError("Cannot create operation for inactive wallet")
 
         if amount_kzt is None:
             amount_kzt = self._currency.convert(amount, currency)
         if rate_at_operation is None:
-            rate_at_operation = _build_rate(amount, amount_kzt, currency)
+            rate_at_operation = build_rate(amount, amount_kzt, currency)
         if not wallet.allow_negative:
-            balance = _wallet_balance_kzt(wallet, self._repository.load_all())
+            balance = wallet_balance_kzt(wallet, self._repository.load_all())
             if balance - amount_kzt < 0:
                 raise ValueError("Insufficient funds in wallet")
 

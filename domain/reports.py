@@ -111,7 +111,18 @@ class Report:
             if record.category not in groups:
                 groups[record.category] = []
             groups[record.category].append(record)
-        return {cat: Report(recs, 0.0, wallet_id=None) for cat, recs in groups.items()}
+        return {
+            cat: Report(
+                recs,
+                0.0,
+                wallet_id=None,
+                balance_label=self._balance_label,
+                opening_start_date=self._opening_start_date,
+                period_start_date=self._period_start_date,
+                period_end_date=self._period_end_date,
+            )
+            for cat, recs in groups.items()
+        }
 
     def sorted_by_date(self) -> "Report":
         return Report(
@@ -163,7 +174,7 @@ class Report:
         for record in self._profit_records():
             record_date = self._record_date(record)
             if record_date is not None and record_date < start:
-                total += record.signed_amount()
+                total += record.signed_amount_kzt()
         return total
 
     def net_profit_fixed(self) -> float:

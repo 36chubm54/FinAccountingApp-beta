@@ -224,16 +224,20 @@ class JsonFileRecordRepository(RecordRepository):
             transfer_raw = record.get("transfer_id")
             if transfer_raw in (None, ""):
                 continue
-            transfer_id = int(self._as_float(transfer_raw, 0.0))
+            transfer_id = self._as_strict_int(transfer_raw)
+            if transfer_id is None:
+                raise DomainError(f"Invalid transfer_id in record: {transfer_raw}")
             if transfer_id <= 0:
                 raise DomainError(f"Invalid transfer_id in record: {transfer_raw}")
             records_by_transfer.setdefault(transfer_id, []).append(record)
 
-        transfer_ids = {
-            int(self._as_float(transfer.get("id"), 0.0))
-            for transfer in transfers
-            if int(self._as_float(transfer.get("id"), 0.0)) > 0
-        }
+        transfer_ids: set[int] = set()
+        for transfer in transfers:
+            transfer_id = self._as_strict_int(transfer.get("id"))
+            if transfer_id is None:
+                raise DomainError(f"Invalid transfer id: {transfer.get('id')}")
+            if transfer_id > 0:
+                transfer_ids.add(transfer_id)
 
         # Records referencing missing transfers are forbidden.
         for transfer_id in records_by_transfer:
@@ -242,7 +246,9 @@ class JsonFileRecordRepository(RecordRepository):
 
         # Each transfer must have exactly 2 linked records: one expense and one income.
         for transfer in transfers:
-            transfer_id = int(self._as_float(transfer.get("id"), 0.0))
+            transfer_id = self._as_strict_int(transfer.get("id"))
+            if transfer_id is None:
+                raise DomainError(f"Invalid transfer id: {transfer.get('id')}")
             linked = records_by_transfer.get(transfer_id, [])
             if len(linked) != 2:
                 raise DomainError(
@@ -315,7 +321,10 @@ class JsonFileRecordRepository(RecordRepository):
                     logger.warning("Skipping non-dict wallet at index %s", index)
                     migrated = True
                     continue
-                wallet_id = int(self._as_float(wallet_item.get("id"), 0.0))
+                wallet_id = self._as_strict_int(wallet_item.get("id"))
+                if wallet_id is None:
+                    migrated = True
+                    continue
                 if wallet_id <= 0:
                     migrated = True
                     continue
@@ -356,7 +365,7 @@ class JsonFileRecordRepository(RecordRepository):
         next_record_id = self._next_record_id_from_items(data["records"])
         for item in data["records"]:
             if isinstance(item, dict):
-                raw_id = self._as_int(item.get("id"), 0)
+                raw_id = self._as_strict_int(item.get("id"), 0) or 0
                 if raw_id <= 0 or raw_id in seen_record_ids:
                     item["id"] = next_record_id
                     next_record_id += 1
@@ -373,7 +382,11 @@ class JsonFileRecordRepository(RecordRepository):
                 and item.get("transfer_id") not in (None, "")
                 and self._is_transfer_commission(item)
             ):
-                transfer_id = int(self._as_float(item.get("transfer_id"), 0.0))
+                transfer_id = self._as_strict_int(item.get("transfer_id"))
+                if transfer_id is None:
+                    item["transfer_id"] = None
+                    migrated = True
+                    continue
                 if transfer_id > 0:
                     description = str(item.get("description", "") or "")
                     marker = f"[transfer:{transfer_id}]"
@@ -462,12 +475,31 @@ class JsonFileRecordRepository(RecordRepository):
             return default
 
     @staticmethod
+    def _as_strict_int(value, default: int | None = None) -> int | None:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return default
+        if not parsed.is_integer():
+            return default
+        return int(parsed)
+
+    @classmethod
+    def _require_strict_int(cls, value, field_name: str) -> int:
+        parsed = cls._as_strict_int(value)
+        if parsed is None:
+            raise ValueError(f"Invalid integer value for {field_name}: {value}")
+        return parsed
+
+    @staticmethod
     def _next_record_id_from_items(items: list[dict]) -> int:
         max_id = 0
         for item in items:
             if not isinstance(item, dict):
                 continue
-            max_id = max(max_id, int(JsonFileRecordRepository._as_float(item.get("id"), 0.0)))
+            parsed_id = JsonFileRecordRepository._as_strict_int(item.get("id"))
+            if parsed_id is not None:
+                max_id = max(max_id, parsed_id)
         return max_id + 1
 
     @staticmethod
@@ -476,7 +508,9 @@ class JsonFileRecordRepository(RecordRepository):
         for item in items:
             if not isinstance(item, dict):
                 continue
-            max_id = max(max_id, int(JsonFileRecordRepository._as_float(item.get("id"), 0.0)))
+            parsed_id = JsonFileRecordRepository._as_strict_int(item.get("id"))
+            if parsed_id is not None:
+                max_id = max(max_id, parsed_id)
         return max_id + 1
 
     def _ensure_unique_record_id(self, record: T, data: dict) -> T:
@@ -532,11 +566,13 @@ class JsonFileRecordRepository(RecordRepository):
             rate_at_operation = 1.0
 
         return {
-            "id": int(self._as_float(item.get("id"), 0.0)),
+            "id": self._require_strict_int(item.get("id"), "record.id"),
             "date": str(item.get("date", "") or ""),
-            "wallet_id": int(self._as_float(item.get("wallet_id"), float(SYSTEM_WALLET_ID))),
+            "wallet_id": self._require_strict_int(
+                item.get("wallet_id", SYSTEM_WALLET_ID), "record.wallet_id"
+            ),
             "transfer_id": (
-                int(self._as_float(item.get("transfer_id"), 0.0))
+                self._require_strict_int(item.get("transfer_id"), "record.transfer_id")
                 if item.get("transfer_id") not in (None, "")
                 else None
             ),
@@ -555,7 +591,10 @@ class JsonFileRecordRepository(RecordRepository):
             if not isinstance(item, dict):
                 logger.warning("Skipping non-dict wallet at index %s", index)
                 continue
-            wallet_id = int(self._as_float(item.get("id"), 0.0))
+            wallet_id = self._as_strict_int(item.get("id"))
+            if wallet_id is None:
+                logger.warning("Skipping wallet with invalid id at index %s", index)
+                continue
             if wallet_id <= 0:
                 continue
             wallets.append(
@@ -586,7 +625,7 @@ class JsonFileRecordRepository(RecordRepository):
         with self._lock:
             data = self._load_data()
             existing_ids = [
-                int(self._as_float(item.get("id"), 0.0))
+                self._require_strict_int(item.get("id"), "wallet.id")
                 for item in data.get("wallets", [])
                 if isinstance(item, dict)
             ]
@@ -689,9 +728,13 @@ class JsonFileRecordRepository(RecordRepository):
             try:
                 transfers.append(
                     Transfer(
-                        id=int(self._as_float(item.get("id"), 0.0)),
-                        from_wallet_id=int(self._as_float(item.get("from_wallet_id"), 0.0)),
-                        to_wallet_id=int(self._as_float(item.get("to_wallet_id"), 0.0)),
+                        id=self._require_strict_int(item.get("id"), "transfer.id"),
+                        from_wallet_id=self._require_strict_int(
+                            item.get("from_wallet_id"), "transfer.from_wallet_id"
+                        ),
+                        to_wallet_id=self._require_strict_int(
+                            item.get("to_wallet_id"), "transfer.to_wallet_id"
+                        ),
                         date=str(item.get("date", "") or ""),
                         amount_original=self._as_float(item.get("amount_original"), 0.0),
                         currency=str(item.get("currency", "KZT") or "KZT").upper(),

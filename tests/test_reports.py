@@ -248,6 +248,29 @@ def test_filter_by_category_does_not_carry_initial_balance() -> None:
     assert filtered.total_fixed() == 100.0
 
 
+def test_grouped_by_category_preserves_report_metadata() -> None:
+    report = Report(
+        [
+            IncomeRecord(date="2025-01-01", wallet_id=2, _amount_init=100.0, category="Salary"),
+            ExpenseRecord(date="2025-01-02", wallet_id=2, _amount_init=50.0, category="Food"),
+        ],
+        initial_balance=25.0,
+        wallet_id=2,
+        balance_label="Opening balance",
+        opening_start_date="2025-01-01",
+        period_start_date="2025-01-01",
+        period_end_date="2025-01-31",
+    )
+    groups = report.grouped_by_category()
+    salary = groups["Salary"]
+    assert salary.initial_balance == 0.0
+    assert salary.balance_label == "Opening balance"
+    assert salary.opening_start_date == "2025-01-01"
+    assert salary.period_start_date == "2025-01-01"
+    assert salary.period_end_date == "2025-01-31"
+    assert salary.statement_title == "Transaction statement (2025-01-01 - 2025-01-31)"
+
+
 def test_filter_by_period_raises_for_future_date():
     report = _build_opening_balance_test_report()
     with pytest.raises(ValueError):
