@@ -183,19 +183,24 @@ Import architecture:
 - `ImportService -> FinancialController (FinanceService) -> RecordRepository/Storage`.
 - Import does not create records directly through `JsonStorage/SQLiteStorage`.
 - Transfers are created only via `create_transfer(...)` (the `1 transfer = 2 record` invariant is preserved).
-- Import runs as an atomic service transaction with rollback to snapshot on failure.
+- Before any write, the application performs a dry-run: full parse and validation without touching SQLite.
+- In the `Operations` tab, the dry-run result is shown in a modal preview dialog; the user either confirms or cancels the real import.
+- The real import runs inside the service transaction and returns a structured `ImportResult`.
 - `Full Backup` preserves source `amount_kzt` and `rate_at_operation` values.
 - `Current Rate` recalculates values using `CurrencyService.get_rate(...)`.
 - Parser-level guardrails are enabled (file size, row limit, CSV field size).
-- `initial_balance` is allowed only once per import file. Duplicate rows are treated as an error and abort the import.
+- Invalid rows are not written to the database and are returned in `ImportResult.errors`; valid rows may still be imported.
+- If the dry-run finds no valid rows (`imported == 0`), the preview dialog does not allow the user to continue.
+- `initial_balance` is allowed only once per import file. Duplicate rows are reported in the preview/result.
 - `wallet_id` in import data must be a positive integer (no fractional part).
 - Non-numeric and non-finite values (`NaN`, `inf`) in numeric import fields are rejected.
 
 Formats:
 
 - `JSON`, `CSV`, `XLSX`.
-- Import pipeline: `parser -> domain validation -> SQLite transaction -> commit / rollback`.
-- All existing runtime data is replaced inside a single SQLite transaction.
+- Import pipeline: `parser -> dry-run validation -> user confirmation -> SQLite transaction`.
+- For `CSV/XLSX`, the real import replaces runtime data with valid rows from the file; invalid rows remain only in the import report.
+- For readonly `JSON` snapshots, `force=True` is required; readonly/checksum validation happens before the commit stage.
 
 Data format:
 
@@ -226,8 +231,14 @@ There are 3 modes available for importing records:
   The old `date,type,category,amount` format is automatically migrated to the new one:
   `currency="KZT"`, `rate_at_operation=1.0`, `amount_kzt=amount`.
 
-All modes perform line-by-line validation and generate a report:
-`(imported, skipped, errors)`.
+All modes perform line-by-line validation and return `ImportResult`
+(`imported`, `skipped`, `errors`, `dry_run`).
+
+### Dry-run Mode
+
+- Before writing to the database, the application performs a full dry-run: the file is parsed and validated without modifying any records.
+- A preview dialog shows the number of records to import, skipped rows, and any errors.
+- The user explicitly confirms or cancels before data is changed.
 
 ### Backup
 
@@ -494,6 +505,11 @@ Below are the key classes and functions synchronized with the actual code.
 
 - `ImportPolicy` — import policy (enum).
 
+`domain/import_result.py`
+
+- `ImportResult(imported, skipped, errors, dry_run=False)` — immutable result of a dry-run or real import.
+- `summary()` — compact result string; adds the `[DRY-RUN]` prefix for previews.
+
 `domain/records.py`
 
 - `Record` — base record (abstract class). It includes mandatory `wallet_id` and optional `transfer_id`.
@@ -617,7 +633,8 @@ Below are the key classes and functions synchronized with the actual code.
 
 - `OperationsTabContext` — the context of the operations tab.
 - `OperationsTabBindings` — class for binding events to interface elements of the `Operations` tab.
-- `build_operations_tab(parent, context, import_formats)` — method for building the interface of the `Operations` tab. This tab supports adding and deleting records, as well as editing currency values ​​with mathematical conversion of the exchange rate. Also supports the creation of translations import/export records.
+- `show_import_preview_dialog(parent, filepath, policy_label, preview, force=False)` — modal dry-run preview dialog for imports.
+- `build_operations_tab(parent, context, import_formats)` — builds the `Operations` tab. The tab supports adding/deleting records, editing currency values, creating transfers, and the two-step import flow `dry-run -> preview -> commit`.
 
 `gui/tabs/reports_tab.py`
 
@@ -636,6 +653,8 @@ Below are the key classes and functions synchronized with the actual code.
 `gui/controllers.py`
 
 - `FinancialController` — class for managing the business logic of the application.
+- `import_records(fmt, filepath, policy, force=False, dry_run=False)` — single entry point for dry-run and real record imports.
+- `import_mandatory(fmt, filepath)` — imports mandatory templates and returns `ImportResult`.
 
 `gui/exporters.py`
 
@@ -655,8 +674,9 @@ Below are the key classes and functions synchronized with the actual code.
 
 `services/import_service.py`
 
-- `ImportService.import_file(path, force=False)` — imports operations through `FinancialController` methods.
-- `ImportService.import_mandatory_file(path)` — imports mandatory templates through the service layer.
+- `ImportService.import_file(path, force=False, dry_run=False)` — dry-run or real operation import; returns `ImportResult`.
+- `ImportService.import_mandatory_file(path)` — imports mandatory templates and returns `ImportResult`.
+- Dry-run uses the same parse/validation pipeline but performs no SQLite writes.
 - `Full Backup` keeps fixed `amount_kzt/rate_at_operation`; `Current Rate` recalculates values.
 
 `app/finance_service.py`
@@ -767,7 +787,8 @@ project/
 │   ├── transfers.py            # Transfers
 │   ├── validation.py           # Validation of dates and periods
 │   ├── errors.py               # Application errors 
-│   └── import_policy.py        # Import policies
+│   ├── import_policy.py        # Import policies
+│   └── import_result.py        # Import results
 │
 ├── infrastructure/             # Infrastructure layer
 │   ├── repositories.py         # JSON repository
@@ -825,6 +846,7 @@ project/
     ├── test_bootstrap_migration_verification.py
     ├── test_migrate_json_to_sqlite.py
     ├── test_import_core.py
+    ├── test_import_dry_run.py
     ├── test_import_parser.py
     ├── test_import_policy_and_backup.py
     ├── test_import_security.py

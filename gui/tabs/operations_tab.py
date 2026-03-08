@@ -5,10 +5,12 @@ import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
 from tkinter import VERTICAL, Listbox, filedialog, messagebox, ttk
 from typing import Any, Protocol
 
 from domain.import_policy import ImportPolicy
+from domain.import_result import ImportResult
 from gui.helpers import open_in_file_manager
 
 
@@ -40,6 +42,97 @@ class OperationsTabBindings:
     records_listbox: Listbox
     refresh_operation_wallet_menu: Callable[[], None]
     refresh_transfer_wallet_menus: Callable[[], None]
+
+
+def show_import_preview_dialog(
+    parent: tk.Misc,
+    *,
+    filepath: str,
+    policy_label: str,
+    preview: ImportResult,
+    force: bool = False,
+) -> bool:
+    dialog = tk.Toplevel(parent)
+    dialog.title("Import Preview (Dry-Run)")
+    dialog.transient(parent.winfo_toplevel())
+    dialog.resizable(False, False)
+
+    result = {"confirmed": False}
+    content = ttk.Frame(dialog, padding=12)
+    content.grid(row=0, column=0, sticky="nsew")
+    content.grid_columnconfigure(0, weight=1)
+
+    ttk.Label(content, text="Import Preview (Dry-Run)", font=("Segoe UI", 11, "bold")).grid(
+        row=0, column=0, sticky="w"
+    )
+    ttk.Label(content, text=f"File: {Path(filepath).name}").grid(
+        row=1, column=0, sticky="w", pady=(8, 0)
+    )
+    ttk.Label(content, text=f"Policy: {policy_label}").grid(row=2, column=0, sticky="w")
+
+    if force:
+        ttk.Label(
+            content,
+            text="Readonly snapshot: force override is active.",
+            foreground="#b45309",
+        ).grid(row=3, column=0, sticky="w", pady=(8, 0))
+        stats_row = 4
+    else:
+        stats_row = 3
+
+    stats = ttk.Frame(content)
+    stats.grid(row=stats_row, column=0, sticky="ew", pady=(10, 0))
+    stats.grid_columnconfigure(1, weight=1)
+    ttk.Label(stats, text="Records to import:").grid(row=0, column=0, sticky="w")
+    ttk.Label(stats, text=str(preview.imported)).grid(row=0, column=1, sticky="e")
+    ttk.Label(stats, text="Skipped rows:").grid(row=1, column=0, sticky="w")
+    ttk.Label(stats, text=str(preview.skipped)).grid(row=1, column=1, sticky="e")
+    ttk.Label(stats, text="Errors:").grid(row=2, column=0, sticky="w")
+    ttk.Label(stats, text=str(len(preview.errors))).grid(row=2, column=1, sticky="e")
+
+    ttk.Label(content, text="Errors:").grid(row=stats_row + 1, column=0, sticky="w", pady=(10, 4))
+    errors_frame = ttk.Frame(content)
+    errors_frame.grid(row=stats_row + 2, column=0, sticky="ew")
+    errors_frame.grid_columnconfigure(0, weight=1)
+    errors_list = Listbox(errors_frame, height=min(max(len(preview.errors), 1), 5), width=72)
+    errors_list.grid(row=0, column=0, sticky="nsew")
+    errors_scroll = ttk.Scrollbar(errors_frame, orient=VERTICAL, command=errors_list.yview)
+    errors_scroll.grid(row=0, column=1, sticky="ns")
+    errors_list.config(yscrollcommand=errors_scroll.set)
+    for error in preview.errors or ["No validation errors."]:
+        errors_list.insert(tk.END, error)
+
+    buttons = ttk.Frame(content)
+    buttons.grid(row=stats_row + 3, column=0, sticky="e", pady=(12, 0))
+
+    def close() -> None:
+        dialog.destroy()
+
+    def proceed() -> None:
+        result["confirmed"] = True
+        dialog.destroy()
+
+    ttk.Button(buttons, text="Cancel", command=close).pack(side=tk.LEFT, padx=(0, 8))
+    if preview.imported > 0:
+        ttk.Button(buttons, text="Proceed with Import", command=proceed).pack(side=tk.LEFT)
+
+    dialog.protocol("WM_DELETE_WINDOW", close)
+    dialog.update_idletasks()
+
+    parent_window = parent.winfo_toplevel()
+    parent_x = parent_window.winfo_rootx()
+    parent_y = parent_window.winfo_rooty()
+    parent_w = parent_window.winfo_width()
+    parent_h = parent_window.winfo_height()
+    width = dialog.winfo_width()
+    height = dialog.winfo_height()
+    pos_x = parent_x + max((parent_w - width) // 2, 0)
+    pos_y = parent_y + max((parent_h - height) // 2, 0)
+    dialog.geometry(f"+{pos_x}+{pos_y}")
+
+    dialog.grab_set()
+    parent.wait_window(dialog)
+    return bool(result["confirmed"])
 
 
 def build_operations_tab(
@@ -442,26 +535,21 @@ def build_operations_tab(
                 "For CURRENT_RATE mode, exchange rates will be fixed at import time.",
             )
 
-        if not messagebox.askyesno(
-            "Confirm Import",
-            f"Are you sure you want to import from file '{filepath}'?"
-            "\nThis will replace all existing records.",
-        ):
-            return
+        def preview_task() -> ImportResult:
+            return context.controller.import_records(fmt, filepath, policy, dry_run=True)
 
-        def task() -> tuple[int, int, list[str]]:
-            return context.controller.import_records(fmt, filepath, policy)
+        def commit_task() -> ImportResult:
+            return context.controller.import_records(fmt, filepath, policy, dry_run=False)
 
-        def on_success(result: tuple[int, int, list[str]]) -> None:
-            imported_count, skipped_count, errors = result
+        def on_commit_success(result: ImportResult) -> None:
             details = ""
-            if skipped_count:
-                details = f"\nSkipped: {skipped_count} rows.\nFirst errors:\n- " + "\n- ".join(
-                    errors[:5]
+            if result.skipped or result.errors:
+                details = f"\nSkipped: {result.skipped} rows.\nFirst errors:\n- " + "\n- ".join(
+                    result.errors[:5]
                 )
             messagebox.showinfo(
                 "Success",
-                f"Successfully imported {imported_count} records from {cfg['desc']} file."
+                f"Successfully imported {result.imported} records from {cfg['desc']} file."
                 "\nAll existing records have been replaced." + details,
             )
             context._refresh_list()
@@ -473,11 +561,28 @@ def build_operations_tab(
                 return
             messagebox.showerror("Error", f"Failed to import {cfg['desc']}: {str(exc)}")
 
+        def on_preview_success(preview: ImportResult) -> None:
+            confirmed = show_import_preview_dialog(
+                parent=parent,
+                filepath=filepath,
+                policy_label=import_mode_var.get(),
+                preview=preview,
+                force=False,
+            )
+            if not confirmed:
+                return
+            context._run_background(
+                commit_task,
+                on_success=on_commit_success,
+                on_error=on_error,
+                busy_message=f"Importing {cfg['desc']}...",
+            )
+
         context._run_background(
-            task,
-            on_success=on_success,
+            preview_task,
+            on_success=on_preview_success,
             on_error=on_error,
-            busy_message=f"Importing {cfg['desc']}...",
+            busy_message=f"Validating {cfg['desc']} import...",
         )
 
     def export_records_data() -> None:

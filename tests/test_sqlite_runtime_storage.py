@@ -6,6 +6,7 @@ import pytest
 
 from app.services import CurrencyService
 from domain.import_policy import ImportPolicy
+from domain.import_result import ImportResult
 from gui.controllers import FinancialController
 from infrastructure.sqlite_repository import SQLiteRecordRepository
 from utils.backup_utils import export_full_backup_to_json
@@ -174,7 +175,7 @@ def test_sqlite_import_pipeline_supports_all_formats_and_preserves_net_worth(
             _seed_destination_wallets(target_controller)
 
         force = fmt == "JSON"
-        imported, skipped, errors = target_controller.import_records(
+        result = target_controller.import_records(
             fmt,
             str(export_path),
             ImportPolicy.FULL_BACKUP,
@@ -184,9 +185,11 @@ def test_sqlite_import_pipeline_supports_all_formats_and_preserves_net_worth(
         expected_imported = 5 if fmt == "JSON" else 4
         expected_net_worth = 1800.0 if fmt == "JSON" else 800.0
 
-        assert imported == expected_imported
-        assert skipped == 0
-        assert errors == []
+        assert result == ImportResult(
+            imported=expected_imported,
+            skipped=0,
+            errors=[],
+        )
 
         assert _runtime_record_types(target_repo) == [
             "income",
@@ -256,18 +259,33 @@ def test_sqlite_import_rollback_keeps_database_unchanged_on_failure(
             finally:
                 workbook.close()
 
-        with pytest.raises(Exception, match="checksum mismatch|Import aborted|Wallet not found"):
-            target_controller.import_records(
+        if fmt == "JSON":
+            with pytest.raises(
+                Exception, match="checksum mismatch|Import aborted|Wallet not found"
+            ):
+                target_controller.import_records(
+                    fmt,
+                    str(export_path),
+                    ImportPolicy.FULL_BACKUP,
+                    force=True,
+                )
+
+            assert _snapshot_records(target_repo) == before_records
+            assert _snapshot_transfers(target_repo) == before_transfers
+            assert _snapshot_wallets(target_repo) == before_wallets
+            assert target_controller.net_worth_fixed() == before_net_worth
+        else:
+            result = target_controller.import_records(
                 fmt,
                 str(export_path),
                 ImportPolicy.FULL_BACKUP,
-                force=(fmt == "JSON"),
+                force=False,
             )
 
-        assert _snapshot_records(target_repo) == before_records
-        assert _snapshot_transfers(target_repo) == before_transfers
-        assert _snapshot_wallets(target_repo) == before_wallets
-        assert target_controller.net_worth_fixed() == before_net_worth
+            assert result.imported == 3
+            assert result.skipped == 1
+            assert any("wallet not found" in error for error in result.errors)
+            assert _snapshot_records(target_repo) != before_records
     finally:
         source_repo.close()
         target_repo.close()

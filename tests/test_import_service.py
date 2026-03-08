@@ -3,6 +3,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from domain.import_policy import ImportPolicy
+from domain.import_result import ImportResult
 from domain.wallets import Wallet
 from services.import_parser import ParsedImportData
 from services.import_service import ImportService
@@ -66,14 +67,14 @@ def test_import_service_groups_two_transfer_records_into_single_transfer() -> No
             "data.csv"
         )
 
-    assert summary == (3, 0, [])
+    assert summary == ImportResult(imported=3, skipped=0, errors=[])
     finance_service.reset_operations_for_import.assert_called_once_with(initial_balance=0.0)
     finance_service.create_income.assert_called_once()
     finance_service.create_transfer.assert_called_once()
     finance_service.create_expense.assert_not_called()
 
 
-def test_import_service_raises_on_missing_wallet_and_does_not_apply_changes() -> None:
+def test_import_service_skips_missing_wallet_and_does_not_apply_changes() -> None:
     finance_service = _finance_mock()
     payload = ParsedImportData(
         path="data.csv",
@@ -93,9 +94,15 @@ def test_import_service_raises_on_missing_wallet_and_does_not_apply_changes() ->
     )
 
     with patch("services.import_service.parse_import_file", return_value=payload):
-        with pytest.raises(ValueError, match="Import aborted"):
-            ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file("data.csv")
+        summary = ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file(
+            "data.csv"
+        )
 
+    assert summary == ImportResult(
+        imported=0,
+        skipped=1,
+        errors=["row 2: wallet not found (999)"],
+    )
     finance_service.reset_operations_for_import.assert_not_called()
     finance_service.create_income.assert_not_called()
     finance_service.create_expense.assert_not_called()
@@ -124,7 +131,7 @@ def test_import_service_mandatory_import_uses_finance_service_only() -> None:
     with patch("services.import_service.parse_import_file", return_value=payload):
         summary = ImportService(finance_service).import_mandatory_file("mandatory.csv")
 
-    assert summary == (1, 0, [])
+    assert summary == ImportResult(imported=1, skipped=0, errors=[])
     finance_service.reset_mandatory_for_import.assert_called_once_with()
     finance_service.create_mandatory_expense.assert_called_once()
 
@@ -155,7 +162,7 @@ def test_import_service_fills_empty_mandatory_description() -> None:
             "data.csv"
         )
 
-    assert summary == (1, 0, [])
+    assert summary == ImportResult(imported=1, skipped=0, errors=[])
     finance_service.create_mandatory_expense_record.assert_called_once_with(
         date="2026-01-01",
         wallet_id=1,
@@ -205,7 +212,7 @@ def test_import_service_json_backup_imports_mandatory_templates() -> None:
             "data_backup.json"
         )
 
-    assert summary == (1, 0, [])
+    assert summary == ImportResult(imported=1, skipped=0, errors=[])
     finance_service.reset_all_for_import.assert_called_once()
     finance_service.create_mandatory_expense.assert_called_once_with(
         amount=12.0,
@@ -243,7 +250,7 @@ def test_import_service_full_backup_passes_fixed_rate_values() -> None:
             "data.csv"
         )
 
-    assert summary == (1, 0, [])
+    assert summary == ImportResult(imported=1, skipped=0, errors=[])
     finance_service.create_income.assert_called_once_with(
         date="2026-01-01",
         wallet_id=1,
@@ -279,14 +286,14 @@ def test_import_service_current_rate_does_not_pass_fixed_values() -> None:
             "data.csv"
         )
 
-    assert summary == (1, 0, [])
+    assert summary == ImportResult(imported=1, skipped=0, errors=[])
     finance_service.create_income.assert_called_once()
     kwargs = finance_service.create_income.call_args.kwargs
     assert kwargs["amount_kzt"] is None
     assert kwargs["rate_at_operation"] is None
 
 
-def test_import_service_rejects_duplicate_initial_balance_rows() -> None:
+def test_import_service_reports_duplicate_initial_balance_rows() -> None:
     finance_service = _finance_mock()
     payload = ParsedImportData(
         path="data.csv",
@@ -298,8 +305,16 @@ def test_import_service_rejects_duplicate_initial_balance_rows() -> None:
     )
 
     with patch("services.import_service.parse_import_file", return_value=payload):
-        with pytest.raises(ValueError, match="duplicate initial_balance"):
-            ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file("data.csv")
+        summary = ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file(
+            "data.csv"
+        )
+
+    assert summary == ImportResult(
+        imported=0,
+        skipped=1,
+        errors=["row 3: duplicate initial_balance row"],
+    )
+    finance_service.reset_operations_for_import.assert_not_called()
 
 
 def test_import_service_bulk_replace_normalizes_mandatory_ids_from_one() -> None:
@@ -353,7 +368,7 @@ def test_import_service_bulk_replace_normalizes_mandatory_ids_from_one() -> None
             "data.json"
         )
 
-    assert summary == (2, 0, [])
+    assert summary == ImportResult(imported=2, skipped=0, errors=[])
     finance_service.replace_all_for_import.assert_called_once()
     mandatory_templates = finance_service.replace_all_for_import.call_args.kwargs[
         "mandatory_templates"
@@ -372,6 +387,37 @@ def test_import_service_passes_force_flag_to_parser() -> None:
         )
 
     parse_mock.assert_called_once_with("data.json", force=True)
+
+
+def test_import_service_dry_run_returns_preview_without_writing() -> None:
+    finance_service = _finance_mock()
+    payload = ParsedImportData(
+        path="data.csv",
+        file_type="csv",
+        rows=[
+            {
+                "date": "2026-01-01",
+                "type": "income",
+                "wallet_id": "1",
+                "category": "Salary",
+                "amount_original": "100",
+                "currency": "KZT",
+                "rate_at_operation": "1",
+                "amount_kzt": "100",
+            }
+        ],
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        summary = ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file(
+            "data.csv",
+            dry_run=True,
+        )
+
+    assert summary == ImportResult(imported=1, skipped=0, errors=[], dry_run=True)
+    finance_service.run_import_transaction.assert_not_called()
+    finance_service.reset_operations_for_import.assert_not_called()
+    finance_service.create_income.assert_not_called()
 
 
 def test_import_service_rejects_fractional_wallet_id_in_wallet_payload() -> None:

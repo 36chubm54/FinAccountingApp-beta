@@ -7,6 +7,7 @@ from tkinter import Listbox, filedialog, messagebox, ttk
 from typing import Any, Protocol
 
 from domain.import_policy import ImportPolicy
+from domain.import_result import ImportResult
 from gui.helpers import open_in_file_manager
 
 
@@ -422,20 +423,19 @@ def build_settings_tab(
         ):
             return
 
-        def task() -> tuple[int, int, list[str]]:
+        def task() -> ImportResult:
             return context.controller.import_mandatory(fmt, filepath)
 
-        def on_success(result: tuple[int, int, list[str]]) -> None:
-            imported_count, skipped_count, errors = result
+        def on_success(result: ImportResult) -> None:
             details = ""
-            if skipped_count:
-                details = f"\nSkipped: {skipped_count} rows.\nFirst errors:\n- " + "\n- ".join(
-                    errors[:5]
+            if result.skipped:
+                details = f"\nSkipped: {result.skipped} rows.\nFirst errors:\n- " + "\n- ".join(
+                    result.errors[:5]
                 )
 
             messagebox.showinfo(
                 "Success",
-                f"Successfully imported {imported_count} mandatory expenses from {cfg['desc']} file."
+                f"Successfully imported {result.imported} mandatory expenses from {cfg['desc']} file."
                 "\nAll existing mandatory expenses have been replaced." + details,
             )
             refresh_mandatory()
@@ -506,7 +506,7 @@ def build_settings_tab(
         ):
             return
 
-        def task(force: bool) -> tuple[int, int, list[str]]:
+        def task(force: bool) -> ImportResult:
             return context.controller.import_records(
                 "JSON",
                 filepath,
@@ -514,20 +514,19 @@ def build_settings_tab(
                 force=force,
             )
 
-        def on_success(result: tuple[int, int, list[str]]) -> None:
-            imported, skipped, errors = result
+        def on_success(result: ImportResult) -> None:
             details = ""
-            if skipped:
-                details = f"\nSkipped: {skipped}\n- " + "\n- ".join(errors[:5])
+            if result.skipped:
+                details = f"\nSkipped: {result.skipped}\n- " + "\n- ".join(result.errors[:5])
             messagebox.showinfo(
-                "Success", f"Backup imported. Imported entities: {imported}.{details}"
+                "Success", f"Backup imported. Imported entities: {result.imported}.{details}"
             )
             refresh_mandatory()
             context._refresh_list()
             context._refresh_charts()
 
         def run_import(force: bool) -> None:
-            def current_task() -> tuple[int, int, list[str]]:
+            def current_task() -> ImportResult:
                 return task(force)
 
             def on_error(exc: BaseException) -> None:

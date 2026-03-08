@@ -183,19 +183,24 @@ python main.py
 - `ImportService -> FinancialController (FinanceService) -> RecordRepository/Storage`.
 - Импорт не создаёт записи напрямую через `JsonStorage/SQLiteStorage`.
 - Переводы создаются только через `create_transfer(...)` сервиса (инвариант `1 transfer = 2 record` сохраняется).
-- Импорт выполняется как атомарная сервисная транзакция: при ошибке выполняется rollback к снимку состояния.
+- Перед записью приложение выполняет dry-run: полный parse и validation без записи в SQLite.
+- Во вкладке `Operations` после dry-run показывается модальный preview-диалог; пользователь подтверждает или отменяет реальный импорт.
+- Реальный импорт выполняется в сервисной транзакции и возвращает структурированный `ImportResult`.
 - Для `Full Backup` сохраняются исходные `amount_kzt` и `rate_at_operation` из файла.
 - Для `Current Rate` применяется пересчёт через `CurrencyService.get_rate(...)`.
 - В parser-слое действуют лимиты безопасности (размер файла, число строк, размер CSV-поля).
-- `initial_balance` в импортируемом файле допускается только один раз. Повторные строки считаются ошибкой и импорт откатывается.
+- Ошибочные строки не записываются в базу и попадают в `ImportResult.errors`; валидные строки могут быть импортированы.
+- Если dry-run не нашёл ни одной валидной строки (`imported == 0`), диалог preview не позволяет продолжить импорт.
+- `initial_balance` в импортируемом файле допускается только один раз. Повторные строки считаются ошибкой и попадают в preview/result.
 - `wallet_id` в импортируемых данных должен быть целым положительным числом (без дробной части).
 - Нечисловые и нефинитные значения (`NaN`, `inf`) в числовых полях импорта отклоняются.
 
 Форматы:
 
 - `JSON`, `CSV`, `XLSX`.
-- Pipeline импорта: `parser -> domain validation -> SQLite transaction -> commit / rollback`.
-- Все существующие runtime-данные заменяются данными из файла внутри транзакции SQLite.
+- Pipeline импорта: `parser -> dry-run validation -> user confirmation -> SQLite transaction`.
+- Для `CSV/XLSX` реальный импорт заменяет runtime-данные валидными строками из файла; ошибочные строки остаются только в отчёте импорта.
+- Для readonly `JSON` snapshot требуется `force=True`; проверка readonly/checksum выполняется ещё до этапа commit.
 
 Формат данных:
 
@@ -226,8 +231,14 @@ python main.py
   Старый формат `date,type,category,amount` автоматически мигрируется в новый:
   `currency="KZT"`, `rate_at_operation=1.0`, `amount_kzt=amount`.
 
-Все режимы выполняют построчную валидацию и формируют отчёт:
-`(imported, skipped, errors)`.
+Все режимы выполняют построчную валидацию и формируют `ImportResult`
+(`imported`, `skipped`, `errors`, `dry_run`).
+
+### Dry-run Mode
+
+- Перед записью в базу данных приложение выполняет полный dry-run: файл анализируется и проверяется без изменения каких-либо записей.
+- Диалоговое окно предварительного просмотра показывает количество записей для импорта, пропущенные строки и любые ошибки.
+- Пользователь явно подтверждает или отменяет изменение данных.
 
 ### Backup
 
@@ -494,6 +505,11 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 
 - `ImportPolicy` — import policy (enum).
 
+`domain/import_result.py`
+
+- `ImportResult(imported, skipped, errors, dry_run=False)` — неизменяемый результат dry-run или реального импорта.
+- `summary()` — краткая строка результата; для dry-run добавляет префикс `[DRY-RUN]`.
+
 `domain/records.py`
 
 - `Record` — базовая запись (абстрактный класс). Cодержит обязательный `wallet_id` и опциональный `transfer_id`.
@@ -617,7 +633,8 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 
 - `OperationsTabContext` — контекст вкладки операций.
 - `OperationsTabBindings` — класс для привязки событий к элементам интерфейса вкладки `Operations`.
-- `build_operations_tab(parent, context, import_formats)` — метод для построения интерфейса вкладки `Operations`. Эта вкладка поддерживает добавление и удаление записей, а также редактирование валютных значений с математическим пересчётом курса. Также поддерживает создание переводов импорт/экспорт записей.
+- `show_import_preview_dialog(parent, filepath, policy_label, preview, force=False)` — модальный preview-диалог dry-run импорта.
+- `build_operations_tab(parent, context, import_formats)` — метод для построения интерфейса вкладки `Operations`. Эта вкладка поддерживает добавление и удаление записей, редактирование валютных значений, создание переводов и двухшаговый import flow `dry-run -> preview -> commit`.
 
 `gui/tabs/reports_tab.py`
 
@@ -636,6 +653,8 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 `gui/controllers.py`
 
 - `FinancialController` — класс управления бизнес-логикой приложения.
+- `import_records(fmt, filepath, policy, force=False, dry_run=False)` — единая точка входа для dry-run и реального импорта операций.
+- `import_mandatory(fmt, filepath)` — импорт шаблонов обязательных расходов с результатом `ImportResult`.
 
 `gui/exporters.py`
 
@@ -655,8 +674,9 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 
 `services/import_service.py`
 
-- `ImportService.import_file(path, force=False)` — импорт операций через методы `FinancialController`.
-- `ImportService.import_mandatory_file(path)` — импорт шаблонов обязательных расходов через сервис.
+- `ImportService.import_file(path, force=False, dry_run=False)` — dry-run или реальный импорт операций; возвращает `ImportResult`.
+- `ImportService.import_mandatory_file(path)` — импорт шаблонов обязательных расходов; возвращает `ImportResult`.
+- Dry-run использует тот же parse/validation pipeline, но не пишет в SQLite.
 - `Full Backup` сохраняет фиксированные `amount_kzt/rate_at_operation`; `Current Rate` пересчитывает значения.
 
 `app/finance_service.py`
@@ -767,7 +787,8 @@ project/
 │   ├── transfers.py            # Переводы
 │   ├── validation.py           # Валидация дат и периодов
 │   ├── errors.py               # Ошибки приложения
-│   └── import_policy.py        # Политики импорта
+│   ├── import_policy.py        # Политики импорта
+│   └── import_result.py        # Результаты импорта
 │
 ├── infrastructure/             # Infrastructure layer
 │   ├── repositories.py         # JSON-репозиторий
@@ -825,6 +846,7 @@ project/
     ├── test_bootstrap_migration_verification.py
     ├── test_migrate_json_to_sqlite.py
     ├── test_import_core.py
+    ├── test_import_dry_run.py
     ├── test_import_parser.py
     ├── test_import_policy_and_backup.py
     ├── test_import_security.py

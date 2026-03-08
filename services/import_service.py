@@ -7,6 +7,7 @@ from typing import Any
 
 from app.finance_service import FinanceService
 from domain.import_policy import ImportPolicy
+from domain.import_result import ImportResult
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 from domain.transfers import Transfer
 from domain.wallets import Wallet
@@ -29,6 +30,19 @@ class ImportCounters:
     transfers: int = 0
 
 
+@dataclass(frozen=True)
+class PreparedImportPayload:
+    parsed: ParsedImportData
+    initial_balance: float
+    wallets: list[Wallet]
+    parsed_records: list[Record]
+    parsed_mandatory_templates: list[MandatoryExpenseRecord]
+    raw_transfer_ops: list[dict[str, Any]]
+    imported: int
+    skipped: int
+    errors: list[str]
+
+
 class ImportService:
     def __init__(
         self,
@@ -39,19 +53,27 @@ class ImportService:
         self._finance_service = finance_service
         self._policy = policy
 
-    def import_file(self, path: str, *, force: bool = False) -> tuple[int, int, list[str]]:
+    def import_file(self, path: str, *, force: bool = False, dry_run: bool = False) -> ImportResult:
         parsed = parse_import_file(path, force=force)
+        prepared = self._prepare_records_payload(parsed)
+        if dry_run:
+            return ImportResult(
+                imported=prepared.imported,
+                skipped=prepared.skipped,
+                errors=list(prepared.errors),
+                dry_run=True,
+            )
         return self._finance_service.run_import_transaction(
-            lambda: self._import_records_payload(parsed)
+            lambda: self._commit_prepared_records_payload(prepared)
         )
 
-    def import_mandatory_file(self, path: str) -> tuple[int, int, list[str]]:
+    def import_mandatory_file(self, path: str) -> ImportResult:
         parsed = parse_import_file(path)
         return self._finance_service.run_import_transaction(
             lambda: self._import_mandatory_payload(parsed)
         )
 
-    def _import_records_payload(self, parsed: ParsedImportData) -> tuple[int, int, list[str]]:
+    def _prepare_records_payload(self, parsed: ParsedImportData) -> PreparedImportPayload:
         initial_balance = (
             float(parsed.initial_balance)
             if parsed.initial_balance is not None
@@ -61,7 +83,7 @@ class ImportService:
         if wallets:
             wallets, wallet_id_map = self._normalize_wallet_ids(wallets)
             parsed = self._remap_parsed_wallet_ids(parsed, wallet_id_map)
-        imported_wallets = len(wallets)
+        _ = len(wallets)
 
         wallet_ids = (
             {wallet.id for wallet in wallets}
@@ -166,8 +188,37 @@ class ImportService:
                 parsed_mandatory_templates.append(record)
                 imported += 1
 
-        if errors:
-            raise ValueError(self._build_error(errors))
+        return PreparedImportPayload(
+            parsed=parsed,
+            initial_balance=initial_balance,
+            wallets=wallets,
+            parsed_records=parsed_records,
+            parsed_mandatory_templates=parsed_mandatory_templates,
+            raw_transfer_ops=raw_transfer_ops,
+            imported=imported,
+            skipped=skipped,
+            errors=errors,
+        )
+
+    def _commit_prepared_records_payload(self, prepared: PreparedImportPayload) -> ImportResult:
+        parsed = prepared.parsed
+        initial_balance = prepared.initial_balance
+        wallets = list(prepared.wallets)
+        imported_wallets = len(wallets)
+        parsed_records = list(prepared.parsed_records)
+        parsed_mandatory_templates = list(prepared.parsed_mandatory_templates)
+        raw_transfer_ops = list(prepared.raw_transfer_ops)
+        imported = prepared.imported
+        skipped = prepared.skipped
+        errors = list(prepared.errors)
+
+        if (
+            imported == 0
+            and not wallets
+            and not parsed_mandatory_templates
+            and not raw_transfer_ops
+        ):
+            return ImportResult(imported=0, skipped=skipped, errors=errors)
 
         replace_all_for_import = getattr(self._finance_service, "replace_all_for_import", None)
         fast_replace_enabled = (
@@ -206,7 +257,7 @@ class ImportService:
                 counters.records,
                 counters.transfers,
             )
-            return imported, skipped, []
+            return ImportResult(imported=imported, skipped=skipped, errors=errors)
 
         if wallets:
             self._finance_service.reset_all_for_import(
@@ -234,7 +285,7 @@ class ImportService:
             counters.transfers,
         )
         self._finance_service.normalize_operation_ids_for_import()
-        return imported, skipped, []
+        return ImportResult(imported=imported, skipped=skipped, errors=errors)
 
     def _build_import_operations(
         self,
@@ -450,7 +501,7 @@ class ImportService:
                 rate_at_operation=self._fixed_rate(template.rate_at_operation),
             )
 
-    def _import_mandatory_payload(self, parsed: ParsedImportData) -> tuple[int, int, list[str]]:
+    def _import_mandatory_payload(self, parsed: ParsedImportData) -> ImportResult:
         source_rows = parsed.mandatory_rows if parsed.file_type == "json" else parsed.rows
         self._finance_service.reset_mandatory_for_import()
         get_rate = (
@@ -492,14 +543,12 @@ class ImportService:
                 rate_at_operation=self._fixed_rate(record.rate_at_operation),
             )
             imported += 1
-        if errors:
-            raise ValueError(self._build_error(errors))
         logger.info(
             "Mandatory import completed file=%s wallets=0 records=0 transfers=0 templates=%s",
             parsed.path,
             imported,
         )
-        return imported, skipped, []
+        return ImportResult(imported=imported, skipped=skipped, errors=errors)
 
     def _apply_records(
         self, parsed_records: list[Record], counters: ImportCounters

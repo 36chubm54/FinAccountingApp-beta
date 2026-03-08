@@ -3,11 +3,15 @@ from __future__ import annotations
 import csv
 import os
 import tempfile
+from pathlib import Path
 
 import pytest
 from openpyxl import Workbook
 
+from app.services import CurrencyService
 from domain.import_policy import ImportPolicy
+from gui.controllers import FinancialController
+from infrastructure.sqlite_repository import SQLiteRecordRepository
 from utils import csv_utils, excel_utils
 from utils.csv_utils import DATA_HEADERS, import_records_from_csv
 from utils.excel_utils import import_records_from_xlsx
@@ -18,6 +22,10 @@ def _write_csv(path, rows: list[dict]) -> None:
         writer = csv.DictWriter(fh, fieldnames=DATA_HEADERS)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _schema_path() -> str:
+    return str(Path(__file__).resolve().parents[1] / "db" / "schema.sql")
 
 
 def test_import_csv_rejects_transfer_with_invalid_currency() -> None:
@@ -241,3 +249,66 @@ def test_import_xlsx_enforces_row_limit(monkeypatch) -> None:
             os.unlink(path)
         except PermissionError:
             pass
+
+
+def test_import_controller_dry_run_enforces_parser_row_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = SQLiteRecordRepository(str(tmp_path / "security.db"), schema_path=_schema_path())
+    controller = FinancialController(repo, CurrencyService(use_online=False))
+    controller.set_system_initial_balance(0.0)
+    wallet = controller.create_wallet(
+        name="Cash",
+        currency="KZT",
+        initial_balance=0.0,
+        allow_negative=False,
+    )
+    path = tmp_path / "security.csv"
+    _write_csv(
+        path,
+        [
+            {
+                "date": "2025-01-01",
+                "type": "income",
+                "wallet_id": wallet.id,
+                "category": "Salary",
+                "amount_original": 1,
+                "currency": "KZT",
+                "rate_at_operation": 1,
+                "amount_kzt": 1,
+                "description": "",
+                "period": "",
+                "transfer_id": "",
+                "from_wallet_id": "",
+                "to_wallet_id": "",
+            },
+            {
+                "date": "2025-01-02",
+                "type": "income",
+                "wallet_id": wallet.id,
+                "category": "Salary",
+                "amount_original": 1,
+                "currency": "KZT",
+                "rate_at_operation": 1,
+                "amount_kzt": 1,
+                "description": "",
+                "period": "",
+                "transfer_id": "",
+                "from_wallet_id": "",
+                "to_wallet_id": "",
+            },
+        ],
+    )
+    monkeypatch.setattr("services.import_parser.MAX_IMPORT_ROWS", 1)
+
+    try:
+        with pytest.raises(ValueError, match="row limit"):
+            controller.import_records(
+                "CSV",
+                str(path),
+                ImportPolicy.FULL_BACKUP,
+                dry_run=True,
+            )
+        assert repo.load_all() == []
+    finally:
+        repo.close()

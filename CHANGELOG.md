@@ -7,6 +7,34 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.2.3] - 2026-03-08
+
+### Added
+
+- Import Dry-run Mode: full parse and validation cycle without writing to SQLite
+- `ImportResult` dataclass (`domain/import_result.py`) with fields `imported`, `skipped`, `errors`, `dry_run`; replaces bare tuple returns from `ImportService`
+- Import preview dialog in `Operations` tab: displays record count, skipped rows, and errors before the user confirms the operation
+- `dry_run: bool = False` parameter in `ImportService.import_file(...)` and `FinanceService` protocol
+
+### Changed
+
+- `ImportService.import_file(...)` now returns `ImportResult` instead of a plain tuple
+- `Operations` tab import now executes a two-step flow: dry-run preview, user confirmation, then real import
+- All callers of `import_file` updated to use `ImportResult` field access
+
+### Tests
+
+- Add dry-run coverage to import service and SQLite import pipeline tests
+- Update import controller and runtime storage tests to use `ImportResult` field access
+
+### Docs
+
+- Update `README.md` and `README_EN.md` with dry-run mode description under the import section
+
+No breaking changes.
+
+---
+
 ## [1.2.2] - 2026-03-07
 
 ### Fixed

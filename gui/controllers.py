@@ -27,6 +27,7 @@ from app.use_cases import (
     SoftDeleteWallet,
 )
 from domain.import_policy import ImportPolicy
+from domain.import_result import ImportResult
 from domain.records import MandatoryExpenseRecord, Record
 from domain.reports import Report
 from domain.transfers import Transfer
@@ -360,16 +361,20 @@ class FinancialController:
         self._repository.replace_records_and_transfers(normalized_records, normalized_transfers)
 
     def import_records(
-        self, fmt: str, filepath: str, policy: ImportPolicy, *, force: bool = False
-    ) -> tuple[int, int, list[str]]:
+        self,
+        fmt: str,
+        filepath: str,
+        policy: ImportPolicy,
+        *,
+        force: bool = False,
+        dry_run: bool = False,
+    ) -> ImportResult:
         if fmt not in {"CSV", "XLSX", "JSON"}:
             raise ValueError(f"Unsupported format: {fmt}")
         service = ImportService(self, policy=policy)
-        if force:
-            return service.import_file(filepath, force=True)
-        return service.import_file(filepath)
+        return service.import_file(filepath, force=force, dry_run=dry_run)
 
-    def import_mandatory(self, fmt: str, filepath: str) -> tuple[int, int, list[str]]:
+    def import_mandatory(self, fmt: str, filepath: str) -> ImportResult:
         if fmt not in {"CSV", "XLSX", "JSON"}:
             raise ValueError(f"Unsupported format: {fmt}")
         return ImportService(self, policy=ImportPolicy.FULL_BACKUP).import_mandatory_file(filepath)
