@@ -7,6 +7,35 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.3.0] - 2026-03-09
+
+### Added
+
+- Data Audit Engine: on-demand, read-only diagnostic of the SQLite database
+- `AuditReport`, `AuditFinding`, `AuditSeverity` dataclasses in `domain/audit.py`
+- `AuditService` in `services/audit_service.py` with 9 integrity and consistency checks:
+  transfer pair integrity, orphan records, amount consistency, rate positivity,
+  date validity, wallet references, currency codes, record types,
+  mandatory expense date absence
+- `RunAudit` use case in `app/use_cases.py`
+- `run_audit()` method in `FinancialController`
+- `Finance Audit` block in `Settings` tab with `Run Audit` button
+- Modal audit report dialog with color-coded Errors, Warnings, and Passed sections
+
+### Tests
+
+- Add `tests/test_audit_engine.py` with 17 scenarios covering all checks,
+  commission exclusion logic, and read-only guarantee
+
+### Docs
+
+- Update `README.md` and `README_EN.md` with Data Audit Engine description
+  under the Settings tab section
+
+No breaking changes.
+
+---
+
 ## [1.2.3] - 2026-03-08
 
 ### Added

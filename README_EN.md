@@ -174,6 +174,26 @@ Import/export of mandatory expenses:
 - Export: `CSV`, `XLSX`.
 - `date` is no longer stored/exported for `mandatory_expenses` templates.
 
+### Finance Audit
+
+In the `Settings` tab, the `Finance Audit` block provides a `Run Audit` button.
+
+Clicking it runs a read-only diagnostic of the SQLite database.
+The audit checks:
+
+- Transfer pair integrity (exactly 2 linked records: income + expense per transfer)
+- Absence of orphan records (wallet_id without a matching wallet)
+- Amount consistency (amount_kzt equals amount_original × rate_at_operation)
+- Rate positivity (rate_at_operation > 0 for all records)
+- Date validity (YYYY-MM-DD format, not in the future)
+- Wallet reference integrity in transfers (from_wallet_id, to_wallet_id)
+- Currency code presence (currency not empty)
+- Record type validity (income, expense, mandatory_expense)
+- Absence of date field in mandatory expense templates
+
+Results are shown in a modal dialog grouped into three sections:
+`Errors`, `Warnings`, `Passed`. The database is never modified.
+
 ### Importing financial records
 
 Import is performed via `Import` in the `Operations` tab.
@@ -354,117 +374,21 @@ SQLite behavior by identifiers:
 - After clearing tables, `sqlite_sequence` is reset so that new records start at `1` again.
 - Data equality checks before/after import should be performed on business fields and invariants, not on specific `id` values.
 
-Format:
-
-```json
-{
-  "records": [
-    {
-      "id": 1,
-      "type": "income",
-      "date": "2025-01-15",
-      "amount_original": 700.0,
-      "currency": "USD",
-      "rate_at_operation": 500.0,
-      "amount_kzt": 350000.0,
-      "category": "Salary",
-      "description": ""
-    },
-    {
-      "id": 2,
-      "type": "expense",
-      "date": "2025-01-16",
-      "amount_original": 25000.0,
-      "currency": "KZT",
-      "rate_at_operation": 1.0,
-      "amount_kzt": 25000.0,
-      "category": "Products",
-      "description": ""
-    },
-    {
-      "id": 3,
-      "type": "mandatory_expense",
-      "date": "2025-01-20",
-      "amount_original": 300.0,
-      "currency": "USD",
-      "rate_at_operation": 500.0,
-      "amount_kzt": 150000.0,
-      "category": "Mandatory",
-      "description": "Monthly rent",
-      "period": "monthly"
-    },
-    {
-      "id": 4,
-      "type": "expense",
-      "date": "2026-02-20",
-      "wallet_id": 1,
-      "transfer_id": 1,
-      "amount_original": 5000.0,
-      "currency": "KZT",
-      "rate_at_operation": 1.0,
-      "amount_kzt": 5000.0,
-      "category": "Transfer",
-      "description": ""
-    },
-    {
-      "id": 5,
-      "type": "income",
-      "date": "2026-02-20",
-      "wallet_id": 2,
-      "transfer_id": 1,
-      "amount_original": 5000.0,
-      "currency": "KZT",
-      "rate_at_operation": 1.0,
-      "amount_kzt": 5000.0,
-      "category": "Transfer",
-      "description": ""
-    }
-  ],
-  "mandatory_expenses": [
-    {
-      "id": 1,
-      "wallet_id": 1,
-      "transfer_id": null,
-      "amount_original": 300.0,
-      "currency": "USD",
-      "rate_at_operation": 500.0,
-      "amount_kzt": 150000.0,
-      "category": "Mandatory",
-      "description": "Monthly rent",
-      "period": "monthly"
-    }
-  ],
-  "transfers": [
-    {
-      "id": 1,
-      "from_wallet_id": 1,
-      "to_wallet_id": 2,
-      "date": "2026-02-20",
-      "amount_original": 5000.0,
-      "currency": "KZT",
-      "rate_at_operation": 1.0,
-      "amount_kzt": 5000.0,
-      "description": ""
-    }
-  ]
-}
-```
-
 ---
 
 ## 🏗️ Project architecture
 
 The project follows a layered architecture:
 
-- `domain/` — business models and rules (records, reports, date/period validation, currencies, wallets, transfers).
-- `app/` — use cases and currency service adapter.
-- `infrastructure/` — data storage (JSON repository).
+- `domain/` — business models and rules (records, reports, data audit, date/period validation, currencies, wallets, transfers).
+- `app/` — use cases, including audit execution, and the currency service adapter.
 - `infrastructure/` — JSON and SQLite `RecordRepository` implementations.
 - `storage/` — storage abstraction and JSON/SQLite adapters.
 - `db/` — SQLite SQL schema.
 - `bootstrap.py` — SQLite initialization and startup validation.
 - `backup.py` — JSON backup and SQLite -> JSON export.
 - `config.py` — runtime SQLite and JSON import/export paths.
+- `services/` — service layer for import orchestration and read-only SQLite audit.
 - `utils/` — import/export and preparation of data for graphs.
 - `gui/` — GUI layer (Tkinter).
 
@@ -496,6 +420,13 @@ Below are the key classes and functions synchronized with the actual code.
 `domain/currency.py`
 
 - `CurrencyService` — conversion of currencies to base (`KZT`).
+
+`domain/audit.py`
+
+- `AuditSeverity` — severity enum for audit results (`ok`, `warning`, `error`).
+- `AuditFinding(check, severity, message, detail="")` — a single audit observation.
+- `AuditReport(findings, db_path)` — full audit result with grouped `errors`, `warnings`, and `passed`.
+- `summary()` — compact human-readable audit summary.
 
 `domain/errors.py`
 
@@ -583,6 +514,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `DeleteMandatoryExpense.execute(index)`.
 - `DeleteAllMandatoryExpenses.execute()`.
 - `AddMandatoryExpenseToReport.execute(index, date)`.
+- `RunAudit.execute()` — runs the read-only data audit and returns an `AuditReport`.
 
 `app/record_service.py`
 
@@ -598,6 +530,8 @@ Below are the key classes and functions synchronized with the actual code.
 `infrastructure/sqlite_repository.py`
 
 - `SQLiteRecordRepository(db_path="finance.db")` — SQLite `RecordRepository` implementation used by service layer.
+- `db_path` — path to the active SQLite database, exposed for audit reporting.
+- `query_all(...)` / `query_one(...)` — public read-only query APIs used by bootstrap and audit flows.
 
 `storage/base.py`
 
@@ -648,13 +582,15 @@ Below are the key classes and functions synchronized with the actual code.
 `gui/tabs/settings_tab.py`
 
 - `SettingsTabContext` — context of the settings tab.
-- `build_settings_tab(parent, context, import_formats)` — method for building the interface of the `Settings` tab. This tab allows you to manage wallets and mandatory expenses.
+- `build_settings_tab(parent, context, import_formats)` — method for building the interface of the `Settings` tab. This tab allows you to manage wallets, mandatory expenses, backups, and launch the audit.
+- `show_audit_report_dialog(report, parent)` — modal audit dialog with `Errors`, `Warnings`, and `Passed` sections.
 
 `gui/controllers.py`
 
 - `FinancialController` — class for managing the business logic of the application.
 - `import_records(fmt, filepath, policy, force=False, dry_run=False)` — single entry point for dry-run and real record imports.
 - `import_mandatory(fmt, filepath)` — imports mandatory templates and returns `ImportResult`.
+- `run_audit()` — runs the Data Audit Engine through a use case and returns `AuditReport`.
 
 `gui/exporters.py`
 
@@ -678,6 +614,12 @@ Below are the key classes and functions synchronized with the actual code.
 - `ImportService.import_mandatory_file(path)` — imports mandatory templates and returns `ImportResult`.
 - Dry-run uses the same parse/validation pipeline but performs no SQLite writes.
 - `Full Backup` keeps fixed `amount_kzt/rate_at_operation`; `Current Rate` recalculates values.
+
+`services/audit_service.py`
+
+- `AuditService(repository)` — read-only diagnostic service for SQLite data.
+- `run()` — loads an in-memory snapshot and executes 9 integrity/consistency checks.
+- Each check returns `AuditFinding` entries and emits one `OK` finding when no violations are found.
 
 `app/finance_service.py`
 
@@ -780,6 +722,7 @@ project/
 │
 ├── domain/                     # Domain layer
 │   ├── __init__.py
+│   ├── audit.py                # Audit models and logic
 │   ├── records.py              # Records
 │   ├── reports.py              # Reports
 │   ├── currency.py             # Domain CurrencyService
@@ -796,15 +739,16 @@ project/
 │
 ├── storage/                    # Storage abstraction and JSON/SQLite adapters
 │   ├── __init__.py
-│   ├── base.py
-│   ├── json_storage.py
-│   └── sqlite_storage.py
+│   ├── base.py                 # Base storage class
+│   ├── json_storage.py         # JSON storage adapter
+│   └── sqlite_storage.py       # SQLite storage adapter
 │
 ├── db/                         # SQL schema for SQLite
 │   └── schema.sql
 │
 ├── services/                   # Import service layer
 │   ├── __init__.py
+│   ├── audit_service.py        # Audit service
 │   ├── import_parser.py        # CSV/XLSX/JSON parser -> DTO
 │   └── import_service.py       # Import orchestration via FinanceService
 │
@@ -836,6 +780,7 @@ project/
 └── tests/                      # Tests
     ├── __init__.py
     ├── conftest.py             # Local tmp fixture for stable test execution
+    ├── test_audit_engine.py
     ├── test_charting.py
     ├── test_csv.py
     ├── test_currency.py

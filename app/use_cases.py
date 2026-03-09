@@ -9,6 +9,7 @@ from app.use_case_support import (
     wallet_balance_kzt,
     wallet_by_id,
 )
+from domain.audit import AuditReport
 from domain.errors import DomainError
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
@@ -16,6 +17,7 @@ from domain.reports import Report
 from domain.transfers import Transfer
 from domain.wallets import Wallet
 from infrastructure.repositories import RecordRepository
+from services.audit_service import AuditService
 
 from .services import CurrencyService
 
@@ -647,3 +649,11 @@ class AddMandatoryExpenseToReport:
             )
             return True
         return False
+
+
+class RunAudit:
+    def __init__(self, audit_service: AuditService) -> None:
+        self._service = audit_service
+
+    def execute(self) -> AuditReport:
+        return self._service.run()

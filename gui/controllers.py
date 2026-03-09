@@ -24,8 +24,10 @@ from app.use_cases import (
     GetActiveWallets,
     GetMandatoryExpenses,
     GetWallets,
+    RunAudit,
     SoftDeleteWallet,
 )
+from domain.audit import AuditReport
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
 from domain.records import MandatoryExpenseRecord, Record
@@ -39,6 +41,8 @@ from gui.controller_support import (
     wallets_with_system_initial_balance,
 )
 from infrastructure.repositories import RecordRepository
+from infrastructure.sqlite_repository import SQLiteRecordRepository
+from services.audit_service import AuditService
 from services.import_service import ImportService
 
 logger = logging.getLogger(__name__)
@@ -378,3 +382,9 @@ class FinancialController:
         if fmt not in {"CSV", "XLSX", "JSON"}:
             raise ValueError(f"Unsupported format: {fmt}")
         return ImportService(self, policy=ImportPolicy.FULL_BACKUP).import_mandatory_file(filepath)
+
+    def run_audit(self) -> AuditReport:
+        if not isinstance(self._repository, SQLiteRecordRepository):
+            raise TypeError("Audit is supported only for SQLite repository")
+        use_case = RunAudit(AuditService(self._repository))
+        return use_case.execute()

@@ -23,6 +23,10 @@ class SQLiteRecordRepository(RecordRepository):
     def close(self) -> None:
         self._storage.close()
 
+    @property
+    def db_path(self) -> str:
+        return str(self._storage._db_path)
+
     def ensure_schema_meta(self) -> None:
         self._conn.execute(
             """
