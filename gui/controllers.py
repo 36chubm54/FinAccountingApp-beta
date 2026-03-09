@@ -43,6 +43,7 @@ from gui.controller_support import (
 from infrastructure.repositories import RecordRepository
 from infrastructure.sqlite_repository import SQLiteRecordRepository
 from services.audit_service import AuditService
+from services.balance_service import BalanceService, CashflowResult, WalletBalance
 from services.import_service import ImportService
 
 logger = logging.getLogger(__name__)
@@ -388,3 +389,26 @@ class FinancialController:
             raise TypeError("Audit is supported only for SQLite repository")
         use_case = RunAudit(AuditService(self._repository))
         return use_case.execute()
+
+    def _balance_service(self) -> BalanceService:
+        if not isinstance(self._repository, SQLiteRecordRepository):
+            raise TypeError("Balance Engine is supported only for SQLite repository")
+        return BalanceService(self._repository)
+
+    def get_wallet_balance(self, wallet_id: int, date: str | None = None) -> float:
+        return self._balance_service().get_wallet_balance(wallet_id, date=date)
+
+    def get_wallet_balances(self, date: str | None = None) -> list[WalletBalance]:
+        return self._balance_service().get_wallet_balances(date=date)
+
+    def get_total_balance(self, date: str | None = None) -> float:
+        return self._balance_service().get_total_balance(date=date)
+
+    def get_cashflow(self, start_date: str, end_date: str) -> CashflowResult:
+        return self._balance_service().get_cashflow(start_date, end_date)
+
+    def get_income(self, start_date: str, end_date: str) -> float:
+        return self._balance_service().get_income(start_date, end_date)
+
+    def get_expenses(self, start_date: str, end_date: str) -> float:
+        return self._balance_service().get_expenses(start_date, end_date)

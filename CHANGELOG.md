@@ -7,6 +7,33 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.3.2] - 2026-03-09
+
+### Added
+
+- Balance Engine: read-only analytical service for derived financial state
+- `BalanceService` in `services/balance_service.py` with 6 methods:
+  `get_wallet_balance`, `get_wallet_balances`, `get_total_balance`,
+  `get_cashflow`, `get_income`, `get_expenses`
+- `WalletBalance` and `CashflowResult` frozen dataclasses as result types
+- Balance delegation methods in `FinancialController`:
+  `get_wallet_balance`, `get_wallet_balances`, `get_total_balance`,
+  `get_cashflow`, `get_income`, `get_expenses`
+- Index `idx_records_wallet_date` on `records(wallet_id, date)` in `db/schema.sql`
+
+### Tests
+
+- Add `tests/test_balance_service.py` with 13 scenarios covering wallet balance,
+  historical balance, transfer neutrality, cashflow, and read-only guarantee
+
+### Docs
+
+- Update `README.md` and `README_EN.md` with Balance Engine description
+
+No breaking changes.
+
+---
+
 ## [1.3.1] - 2026-03-09
 
 ### Changed

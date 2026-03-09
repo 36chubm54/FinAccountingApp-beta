@@ -193,6 +193,23 @@ The audit checks:
 Results are shown in a modal dialog grouped into three sections:
 `Errors`, `Warnings`, `Passed`. The database is never modified.
 
+### Balance Engine
+
+`BalanceService` is a read-only analytical service that derives financial state from the record history.
+Balance is never stored in the database — it is always computed dynamically.
+
+Available methods:
+
+- `get_wallet_balance(wallet_id, date=None)` — wallet balance (optionally at a given date)
+- `get_wallet_balances(date=None)` — balances of all active wallets
+- `get_total_balance(date=None)` — total system net worth
+- `get_cashflow(start_date, end_date)` — income, expenses, and net cashflow for a period
+- `get_income(start_date, end_date)` — income for a period
+- `get_expenses(start_date, end_date)` — expenses for a period
+
+The service is strictly read-only and never modifies the database.
+Transfer records (`category='Transfer'`) are excluded from cashflow calculations to prevent double-counting.
+
 ### Importing financial records
 
 Import is performed via `Import` in the `Operations` tab.
@@ -387,7 +404,7 @@ The project follows a layered architecture:
 - `bootstrap.py` — SQLite initialization and startup validation.
 - `backup.py` — JSON backup and SQLite -> JSON export.
 - `config.py` — runtime SQLite and JSON import/export paths.
-- `services/` — service layer for import orchestration and read-only SQLite audit.
+- `services/` — service layer for import orchestration, read-only SQLite audit, and balance analytics.
 - `utils/` — import/export and preparation of data for graphs.
 - `gui/` — GUI layer (Tkinter).
 
@@ -620,6 +637,18 @@ Below are the key classes and functions synchronized with the actual code.
 - `run()` — loads an in-memory snapshot and executes 8 integrity/consistency checks.
 - Each check returns `AuditFinding` entries and emits one `OK` finding when no violations are found.
 
+`services/balance_service.py`
+
+- `WalletBalance(wallet_id, name, currency, balance)` — immutable wallet balance snapshot.
+- `CashflowResult(income, expenses, cashflow)` — immutable period aggregate.
+- `BalanceService(repository)` — read-only analytics over `wallets` + `records`.
+- `get_wallet_balance(wallet_id, date=None)` — wallet balance at a date or over full history.
+- `get_wallet_balances(date=None)` — balances of all active wallets.
+- `get_total_balance(date=None)` — total system balance.
+- `get_cashflow(start_date, end_date)` — income, expenses, and net cashflow without transfer double-counting.
+- `get_income(start_date, end_date)` — income for a period without transfers.
+- `get_expenses(start_date, end_date)` — expenses for a period, including `mandatory_expense`.
+
 `app/finance_service.py`
 
 - `FinanceService` protocol used by the import orchestrator (`ImportService`).
@@ -748,6 +777,7 @@ project/
 ├── services/                   # Import service layer
 │   ├── __init__.py
 │   ├── audit_service.py        # Audit service
+│   ├── balance_service.py      # Read-only balance and cashflow service
 │   ├── import_parser.py        # CSV/XLSX/JSON parser -> DTO
 │   └── import_service.py       # Import orchestration via FinanceService
 │
@@ -780,6 +810,7 @@ project/
     ├── __init__.py
     ├── conftest.py             # Local tmp fixture for stable test execution
     ├── test_audit_engine.py
+    ├── test_balance_service.py
     ├── test_charting.py
     ├── test_csv.py
     ├── test_currency.py

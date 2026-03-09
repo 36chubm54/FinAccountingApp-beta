@@ -193,6 +193,23 @@ python main.py
 Результат отображается в модальном диалоге с разбивкой на три секции:
 `Errors`, `Warnings`, `Passed`. База данных не изменяется.
 
+### Balance Engine
+
+`BalanceService` — аналитический сервис, вычисляющий финансовое состояние системы из истории операций.
+Баланс никогда не хранится в базе — он всегда вычисляется динамически.
+
+Доступные методы:
+
+- `get_wallet_balance(wallet_id, date=None)` — баланс кошелька (опционально на дату)
+- `get_wallet_balances(date=None)` — балансы всех активных кошельков
+- `get_total_balance(date=None)` — общий баланс системы (net worth)
+- `get_cashflow(start_date, end_date)` — доходы, расходы и cashflow за период
+- `get_income(start_date, end_date)` — доходы за период
+- `get_expenses(start_date, end_date)` — расходы за период
+
+Сервис строго только читает данные — база никогда не изменяется.
+Переводы (`category='Transfer'`) исключаются из cashflow-расчётов во избежание двойного счёта.
+
 ### Импорт финансовых записей
 
 Импорт выполняется через `Import` во вкладке `Operations`.
@@ -387,7 +404,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `bootstrap.py` — инициализация SQLite и стартовая валидация.
 - `backup.py` — backup JSON и экспорт SQLite -> JSON.
 - `config.py` — пути runtime SQLite и JSON import/export.
-- `services/` — сервисный слой для импорта и read-only аудита SQLite.
+- `services/` — сервисный слой для импорта, read-only аудита и балансовой аналитики SQLite.
 - `utils/` — импорт/экспорт и подготовка данных для графиков.
 - `gui/` — GUI слой (Tkinter).
 
@@ -620,6 +637,18 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `run()` — загружает snapshot данных и выполняет 8 проверок целостности и консистентности.
 - Все проверки возвращают `AuditFinding`, а при отсутствии нарушений формируют один `OK` finding на check.
 
+`services/balance_service.py`
+
+- `WalletBalance(wallet_id, name, currency, balance)` — immutable snapshot баланса кошелька.
+- `CashflowResult(income, expenses, cashflow)` — immutable агрегат по периоду.
+- `BalanceService(repository)` — read-only аналитика по `wallets` + `records`.
+- `get_wallet_balance(wallet_id, date=None)` — баланс кошелька на дату или по полной истории.
+- `get_wallet_balances(date=None)` — список балансов всех активных кошельков.
+- `get_total_balance(date=None)` — суммарный баланс системы.
+- `get_cashflow(start_date, end_date)` — доходы, расходы и net cashflow без double-counting transfer.
+- `get_income(start_date, end_date)` — доходы за период без transfer.
+- `get_expenses(start_date, end_date)` — расходы за период, включая `mandatory_expense`.
+
 `app/finance_service.py`
 
 - Протокол `FinanceService` для import-оркестратора (`ImportService`).
@@ -748,6 +777,7 @@ project/
 ├── services/                   # Сервисный импортный слой
 │   ├── __init__.py
 │   ├── audit_service.py        # Сервис аудита
+│   ├── balance_service.py      # Read-only сервис балансов и cashflow
 │   ├── import_parser.py        # Парсер CSV/XLSX/JSON -> DTO
 │   └── import_service.py       # Оркестрация импорта через FinanceService
 │
@@ -780,6 +810,7 @@ project/
     ├── __init__.py
     ├── conftest.py             # Локальная tmp-fixture для стабильных тестов
     ├── test_audit_engine.py
+    ├── test_balance_service.py
     ├── test_charting.py
     ├── test_csv.py
     ├── test_currency.py
