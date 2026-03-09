@@ -182,13 +182,12 @@ python main.py
 Аудит проверяет:
 
 - целостность пар transfer-записей (ровно 2 связанных записи: income + expense)
-- отсутствие orphan-записей (wallet_id без соответствующего кошелька)
+- согласованность агрегата `transfers` с привязанными `expense`/`income` записями
 - корректность расчёта amount_kzt (amount_original × rate_at_operation)
+- положительность amount_original и amount_kzt в records / transfers / mandatory_expenses
 - положительность rate_at_operation для всех записей
 - валидность поля date (формат YYYY-MM-DD, не в будущем)
-- корректность ссылок кошельков в переводах (from_wallet_id, to_wallet_id)
 - наличие кода валюты (currency не пустой)
-- допустимость типа записи (income, expense, mandatory_expense)
 - отсутствие поля date в шаблонах обязательных расходов
 
 Результат отображается в модальном диалоге с разбивкой на три секции:
@@ -618,7 +617,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 `services/audit_service.py`
 
 - `AuditService(repository)` — read-only сервис диагностики SQLite.
-- `run()` — загружает snapshot данных и выполняет 9 проверок целостности и консистентности.
+- `run()` — загружает snapshot данных и выполняет 8 проверок целостности и консистентности.
 - Все проверки возвращают `AuditFinding`, а при отсутствии нарушений формируют один `OK` finding на check.
 
 `app/finance_service.py`

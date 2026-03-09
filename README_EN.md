@@ -182,13 +182,12 @@ Clicking it runs a read-only diagnostic of the SQLite database.
 The audit checks:
 
 - Transfer pair integrity (exactly 2 linked records: income + expense per transfer)
-- Absence of orphan records (wallet_id without a matching wallet)
+- Alignment of `transfers` aggregates with linked `expense`/`income` records
 - Amount consistency (amount_kzt equals amount_original × rate_at_operation)
+- Positivity of amount_original and amount_kzt in records / transfers / mandatory_expenses
 - Rate positivity (rate_at_operation > 0 for all records)
 - Date validity (YYYY-MM-DD format, not in the future)
-- Wallet reference integrity in transfers (from_wallet_id, to_wallet_id)
 - Currency code presence (currency not empty)
-- Record type validity (income, expense, mandatory_expense)
 - Absence of date field in mandatory expense templates
 
 Results are shown in a modal dialog grouped into three sections:
@@ -618,7 +617,7 @@ Below are the key classes and functions synchronized with the actual code.
 `services/audit_service.py`
 
 - `AuditService(repository)` — read-only diagnostic service for SQLite data.
-- `run()` — loads an in-memory snapshot and executes 9 integrity/consistency checks.
+- `run()` — loads an in-memory snapshot and executes 8 integrity/consistency checks.
 - Each check returns `AuditFinding` entries and emits one `OK` finding when no violations are found.
 
 `app/finance_service.py`

@@ -7,6 +7,34 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.3.1] - 2026-03-09
+
+### Changed
+
+- Removed pure schema-level duplicate checks from the Data Audit Engine
+- Narrowed audit scope from 9 checks to 8 business-level checks
+- Kept the audit strictly read-only
+
+### Added
+
+- Transfer amount alignment check between `transfers` rows and linked `expense` / `income` records
+- Amount positivity check for records, transfers, and mandatory expense templates
+
+### Tests
+
+- Updated `tests/test_audit_engine.py`
+- Audit coverage now includes 16 scenarios
+- Kept commission exclusion logic and read-only guarantee coverage
+
+### Docs
+
+- Updated `README.md` and `README_EN.md` to reflect the refined audit scope
+- Updated `CHANGELOG.md` for `v1.3.1`
+
+No breaking changes.
+
+---
+
 ## [1.3.0] - 2026-03-09
 
 ### Added

@@ -283,8 +283,8 @@ def test_clean_db_all_checks_pass(tmp_path: Path) -> None:
     repo, report = _run_audit(tmp_path)
     try:
         assert report.is_clean is True
-        assert len(report.findings) == 9
-        assert len(report.passed) == 9
+        assert len(report.findings) == 8
+        assert len(report.passed) == 8
         assert all(finding.severity == AuditSeverity.OK for finding in report.findings)
     finally:
         repo.close()
@@ -346,12 +346,12 @@ def test_commission_record_is_excluded_from_transfer_pair_count(tmp_path: Path) 
         repo.close()
 
 
-def test_orphan_record_reports_error(tmp_path: Path) -> None:
-    records = _clean_records()
-    records[0]["wallet_id"] = 999
-    repo, report = _run_audit(tmp_path, records=records)
+def test_transfer_amount_alignment_reports_error(tmp_path: Path) -> None:
+    transfers = _clean_transfers()
+    transfers[0]["amount_kzt"] = 101.0
+    repo, report = _run_audit(tmp_path, transfers=transfers)
     try:
-        findings = _findings_by_check(report, "orphan_records")
+        findings = _findings_by_check(report, "transfer_amount_alignment")
         assert any(finding.severity == AuditSeverity.ERROR for finding in findings)
     finally:
         repo.close()
@@ -390,6 +390,17 @@ def test_negative_rate_reports_error(tmp_path: Path) -> None:
         repo.close()
 
 
+def test_non_positive_amount_reports_error(tmp_path: Path) -> None:
+    mandatory_expenses = _clean_mandatory_expenses()
+    mandatory_expenses[0]["amount_kzt"] = 0.0
+    repo, report = _run_audit(tmp_path, mandatory_expenses=mandatory_expenses)
+    try:
+        findings = _findings_by_check(report, "amount_positivity")
+        assert any(finding.severity == AuditSeverity.ERROR for finding in findings)
+    finally:
+        repo.close()
+
+
 def test_future_date_reports_error(tmp_path: Path) -> None:
     records = _clean_records()
     records[0]["date"] = "2099-01-01"
@@ -412,17 +423,6 @@ def test_invalid_date_format_reports_error(tmp_path: Path) -> None:
         repo.close()
 
 
-def test_missing_transfer_wallet_reports_error(tmp_path: Path) -> None:
-    transfers = _clean_transfers()
-    transfers[0]["from_wallet_id"] = 999
-    repo, report = _run_audit(tmp_path, transfers=transfers)
-    try:
-        findings = _findings_by_check(report, "wallet_references")
-        assert any(finding.severity == AuditSeverity.ERROR for finding in findings)
-    finally:
-        repo.close()
-
-
 def test_empty_currency_on_record_reports_warning(tmp_path: Path) -> None:
     records = _clean_records()
     records[0]["currency"] = ""
@@ -430,17 +430,6 @@ def test_empty_currency_on_record_reports_warning(tmp_path: Path) -> None:
     try:
         findings = _findings_by_check(report, "currency_codes")
         assert any(finding.severity == AuditSeverity.WARNING for finding in findings)
-    finally:
-        repo.close()
-
-
-def test_invalid_record_type_reports_error(tmp_path: Path) -> None:
-    records = _clean_records()
-    records[0]["type"] = "unknown_type"
-    repo, report = _run_audit(tmp_path, records=records)
-    try:
-        findings = _findings_by_check(report, "record_types")
-        assert any(finding.severity == AuditSeverity.ERROR for finding in findings)
     finally:
         repo.close()
 
@@ -470,7 +459,7 @@ def test_audit_report_summary_format(tmp_path: Path) -> None:
 
 def test_audit_report_is_clean_false_when_errors_exist(tmp_path: Path) -> None:
     records = _clean_records()
-    records[0]["type"] = "unknown_type"
+    records[0]["amount_kzt"] = 0.0
     repo, report = _run_audit(tmp_path, records=records)
     try:
         assert report.is_clean is False
