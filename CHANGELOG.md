@@ -7,6 +7,44 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.4.0] - 2026-03-11
+
+### Added
+
+- `date` field (optional, YYYY-MM-DD) and `auto_pay` flag in mandatory expense templates
+- Inline editing of `amount_kzt` and `date` templates directly in the settings list
+- `Description` field in the `Add operation` form (Operations tab)
+- `Description` field in the `Transfer` form (Operations tab)
+- `date` support for `mandatory_expenses` in CSV/XLSX import-export and JSON backup/export flows
+- Coloring of text in the list of operations by type income/expense/mandatory/transfer
+
+### Changed
+
+- The `Edit Amount KZT` button has been renamed to `Edit` (Operations tab)
+- `auto_pay` is calculated automatically from `date`: non-empty date → `auto_pay=True`
+- The form for adding a mandatory expense has been expanded with the `Date (optional)` field
+- `data.json` startup export now keeps `mandatory_expenses.date` instead of dropping it
+- Startup JSON backups are now pruned via `JSON_BACKUP_KEEP_LAST`
+
+### Removed
+
+- `mandatory_expense_no_date` check removed from Data Audit Engine (date field is now valid)
+
+### Tests
+
+- Added `tests/test_mandatory_ux.py` covering template dates, inline edits, and auto-pay behavior
+- Added `tests/test_schema_contracts.py` to enforce schema/domain period constraints
+- Updated `tests/test_audit_engine.py`: removed outdated assertions, check count = 10
+- Added round-trip coverage for `mandatory_expenses.date` in CSV/XLSX, backup JSON, startup export, and JSON -> SQLite migration
+
+### Docs
+
+- Updated `README.md` and `README_EN.md`
+
+No breaking changes.
+
+---
+
 ## [1.3.2] - 2026-03-09
 
 ### Added

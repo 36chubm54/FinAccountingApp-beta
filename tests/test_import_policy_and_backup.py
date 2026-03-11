@@ -130,7 +130,7 @@ def test_full_backup_roundtrip():
     ]
     mandatory = [
         MandatoryExpenseRecord(
-            date="",
+            date="2026-03-11",
             amount_original=50.0,
             currency="KZT",
             rate_at_operation=1.0,
@@ -138,6 +138,7 @@ def test_full_backup_roundtrip():
             category="Mandatory",
             description="Rent",
             period="monthly",
+            auto_pay=True,
         )
     ]
     with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
@@ -163,7 +164,52 @@ def test_full_backup_roundtrip():
         assert wallets[0].initial_balance == 123.0
         assert len(imported_records) == 1
         assert len(imported_mandatory) == 1
+        assert str(imported_mandatory[0].date) == "2026-03-11"
+        assert imported_mandatory[0].auto_pay is True
         assert transfers == []
+        assert summary[1] == 0
+    finally:
+        os.unlink(path)
+
+
+def test_technical_backup_preserves_mandatory_date() -> None:
+    mandatory = [
+        MandatoryExpenseRecord(
+            date="2026-03-14",
+            wallet_id=1,
+            amount_original=75.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=75.0,
+            category="Mandatory",
+            description="Phone",
+            period="monthly",
+            auto_pay=True,
+        )
+    ]
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
+        path = tmp.name
+    try:
+        export_full_backup_to_json(
+            path,
+            wallets=[
+                Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=0.0, system=True)
+            ],
+            records=[],
+            mandatory_expenses=mandatory,
+            transfers=[],
+            readonly=False,
+            storage_mode="sqlite",
+        )
+        wallets, records, imported_mandatory, transfers, summary = import_full_backup_from_json(
+            path
+        )
+        assert len(wallets) == 1
+        assert records == []
+        assert transfers == []
+        assert len(imported_mandatory) == 1
+        assert str(imported_mandatory[0].date) == "2026-03-14"
+        assert imported_mandatory[0].auto_pay is True
         assert summary[1] == 0
     finally:
         os.unlink(path)

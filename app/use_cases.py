@@ -1,4 +1,5 @@
 import logging
+from calendar import monthrange
 from dataclasses import replace
 from datetime import date as dt_date
 
@@ -511,13 +512,18 @@ class CreateMandatoryExpense:
         category: str,
         description: str,
         period: str,
+        date: str = "",
         amount_kzt: float | None = None,
         rate_at_operation: float | None = None,
     ) -> None:
         """Create and persist a mandatory expense template."""
-        from domain.validation import ensure_valid_period
+        from domain.validation import ensure_valid_period, parse_ymd
 
         ensure_valid_period(period)
+        normalized_date = date.strip()
+        if normalized_date:
+            parse_ymd(normalized_date)
+        auto_pay = bool(normalized_date)
 
         if amount_kzt is None:
             amount_kzt = self._currency.convert(amount, currency)
@@ -532,14 +538,17 @@ class CreateMandatoryExpense:
             category=category,
             description=description,
             period=period,  # type: ignore
+            date=normalized_date,
+            auto_pay=auto_pay,
         )
         self._repository.save_mandatory_expense(expense)
         logger.info(
-            "Mandatory expense created amount=%s category=%s description=%s period=%s",
+            "Mandatory expense created amount=%s category=%s description=%s period=%s date=%s",
             amount,
             category,
             description,
             period,
+            normalized_date,
         )
 
 
@@ -638,6 +647,7 @@ class AddMandatoryExpenseToReport:
                 category=expense.category,
                 description=expense.description,
                 period=expense.period,
+                auto_pay=expense.auto_pay,
             )
             self._repository.save(record)
             logging.info(
@@ -649,6 +659,76 @@ class AddMandatoryExpenseToReport:
             )
             return True
         return False
+
+
+class ApplyMandatoryAutoPayments:
+    def __init__(self, repository: RecordRepository):
+        self._repository = repository
+
+    def execute(self, *, today: dt_date | None = None) -> int:
+        current_date = today or dt_date.today()
+        created = 0
+        records = self._repository.load_all()
+        templates = self._repository.load_mandatory_expenses()
+
+        for template in templates:
+            if not bool(getattr(template, "auto_pay", False)):
+                continue
+            if str(getattr(template, "period", "")) != "monthly":
+                continue
+
+            template_date = getattr(template, "date", "")
+            if isinstance(template_date, dt_date):
+                template_day = template_date.day
+            else:
+                normalized_template_date = str(template_date or "").strip()
+                if not normalized_template_date:
+                    continue
+                from domain.validation import parse_ymd
+
+                template_day = parse_ymd(normalized_template_date).day
+
+            last_day = monthrange(current_date.year, current_date.month)[1]
+            target_day = min(template_day, last_day)
+            target_date = dt_date(current_date.year, current_date.month, target_day)
+            if current_date < target_date:
+                continue
+
+            exists = any(
+                isinstance(record, MandatoryExpenseRecord)
+                and int(record.wallet_id) == int(template.wallet_id)
+                and str(record.category) == str(template.category)
+                and str(record.description or "") == str(template.description or "")
+                and str(record.period) == str(template.period)
+                and (
+                    record.date == target_date
+                    or (
+                        not isinstance(record.date, dt_date)
+                        and str(record.date) == target_date.isoformat()
+                    )
+                )
+                for record in records
+            )
+            if exists:
+                continue
+
+            record = MandatoryExpenseRecord(
+                date=target_date.isoformat(),
+                wallet_id=int(template.wallet_id),
+                amount_original=template.amount_original,
+                currency=template.currency,
+                rate_at_operation=template.rate_at_operation,
+                amount_kzt=template.amount_kzt,
+                category=template.category,
+                description=template.description,
+                period=template.period,
+                auto_pay=template.auto_pay,
+            )
+            self._repository.save(record)
+            records.append(record)
+            created += 1
+
+        return created
 
 
 class RunAudit:

@@ -151,8 +151,7 @@ def _snapshot_wallets(repo: SQLiteRecordRepository) -> list[tuple[int, str, floa
 
 
 def _runtime_record_types(repo: SQLiteRecordRepository) -> list[str]:
-    rows = repo._conn.execute("SELECT type FROM records ORDER BY id").fetchall()
-    return [str(row[0]) for row in rows]
+    return [str(row[0]) for row in repo.query_all("SELECT type FROM records ORDER BY id")]
 
 
 @pytest.mark.parametrize(
@@ -188,7 +187,7 @@ def test_sqlite_import_pipeline_supports_all_formats_and_preserves_net_worth(
         assert result == ImportResult(
             imported=expected_imported,
             skipped=0,
-            errors=[],
+            errors=tuple(),
         )
 
         assert _runtime_record_types(target_repo) == [
@@ -302,13 +301,13 @@ def test_sqlite_transfer_delete_cascades_linked_records(tmp_path: Path) -> None:
         ]
         assert len(linked_ids) == 2
 
-        with repo._conn:
-            repo._conn.execute("DELETE FROM transfers WHERE id = ?", (int(transfer.id),))
+        with repo.transaction():
+            repo.execute("DELETE FROM transfers WHERE id = ?", (int(transfer.id),))
 
-        remaining_linked = repo._conn.execute(
+        remaining_linked = repo.query_one(
             "SELECT COUNT(*) FROM records WHERE transfer_id = ?",
             (int(transfer.id),),
-        ).fetchone()
+        )
         assert remaining_linked is not None
         assert int(remaining_linked[0]) == 0
         assert controller.net_worth_fixed() == 1800.0

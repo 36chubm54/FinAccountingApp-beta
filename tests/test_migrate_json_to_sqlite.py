@@ -55,7 +55,7 @@ def _build_json_fixture(json_path: str) -> None:
     mandatory_expenses = [
         MandatoryExpenseRecord(
             id=1,
-            date="",
+            date="2026-03-15",
             wallet_id=1,
             amount_original=50.0,
             currency="KZT",
@@ -64,6 +64,7 @@ def _build_json_fixture(json_path: str) -> None:
             category="Mandatory",
             description="Rent",
             period="monthly",
+            auto_pay=True,
         )
     ]
     repo.replace_all_data(
@@ -122,6 +123,11 @@ def test_migration_moves_all_data_and_preserves_ids(tmp_path) -> None:
     assert sqlite_storage.query_one("SELECT COUNT(*) FROM transfers")[0] == 1
     assert sqlite_storage.query_one("SELECT COUNT(*) FROM records")[0] == 2
     assert sqlite_storage.query_one("SELECT COUNT(*) FROM mandatory_expenses")[0] == 1
+    row = sqlite_storage.query_one(
+        "SELECT date, auto_pay FROM mandatory_expenses ORDER BY id LIMIT 1"
+    )
+    assert row[0] == "2026-03-15"
+    assert row[1] == 1
 
     wallet_ids = [row[0] for row in sqlite_storage.query_all("SELECT id FROM wallets ORDER BY id")]
     transfer_ids = [

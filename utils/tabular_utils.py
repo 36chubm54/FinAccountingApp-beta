@@ -88,6 +88,9 @@ def mandatory_expense_export_rows(
     return [
         {
             "type": "mandatory_expense",
+            "date": expense.date.isoformat()
+            if isinstance(expense.date, dt_date)
+            else expense.date,
             "category": expense.category,
             "amount_original": expense.amount_original,
             "currency": expense.currency,

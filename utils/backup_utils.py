@@ -255,10 +255,7 @@ def export_full_backup_to_json(
     data_payload = {
         "wallets": [_wallet_to_payload(wallet) for wallet in normalized_wallets],
         "records": [_record_to_payload(record) for record in records],
-        "mandatory_expenses": [
-            {key: value for key, value in _record_to_payload(expense).items() if key != "date"}
-            for expense in mandatory_expenses
-        ],
+        "mandatory_expenses": [_record_to_payload(expense) for expense in mandatory_expenses],
         "transfers": [_transfer_to_payload(transfer) for transfer in transfers],
     }
     payload: dict[str, Any]

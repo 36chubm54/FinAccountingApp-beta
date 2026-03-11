@@ -28,9 +28,6 @@ def build_test_db(
         conn.execute("PRAGMA foreign_keys = OFF")
         conn.execute("PRAGMA ignore_check_constraints = ON")
 
-        if mandatory_expenses and any("date" in row for row in mandatory_expenses):
-            conn.execute("ALTER TABLE mandatory_expenses ADD COLUMN date TEXT")
-
         for wallet in wallets:
             conn.execute(
                 """
@@ -95,18 +92,13 @@ def build_test_db(
             )
 
         for expense in mandatory_expenses:
-            has_date = "date" in expense
-            columns = (
-                "id, wallet_id, amount_original, currency, rate_at_operation, amount_kzt, "
-                "category, description, period, date"
-                if has_date
-                else "id, wallet_id, amount_original, currency, rate_at_operation, amount_kzt, "
-                "category, description, period"
-            )
-            placeholders = (
-                "?, ?, ?, ?, ?, ?, ?, ?, ?, ?" if has_date else "?, ?, ?, ?, ?, ?, ?, ?, ?"
-            )
-            values = (
+            conn.execute(
+                """
+                INSERT INTO mandatory_expenses (
+                    id, wallet_id, amount_original, currency, rate_at_operation, amount_kzt,
+                    category, description, period, date, auto_pay
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                 (
                     expense["id"],
                     expense["wallet_id"],
@@ -118,23 +110,8 @@ def build_test_db(
                     expense.get("description", "Template"),
                     expense.get("period", "monthly"),
                     expense.get("date"),
-                )
-                if has_date
-                else (
-                    expense["id"],
-                    expense["wallet_id"],
-                    expense["amount_original"],
-                    expense["currency"],
-                    expense["rate_at_operation"],
-                    expense["amount_kzt"],
-                    expense.get("category", "Mandatory"),
-                    expense.get("description", "Template"),
-                    expense.get("period", "monthly"),
-                )
-            )
-            conn.execute(
-                f"INSERT INTO mandatory_expenses ({columns}) VALUES ({placeholders})",
-                values,
+                    expense.get("auto_pay", 0),
+                ),
             )
 
         conn.commit()
@@ -171,7 +148,7 @@ def _clean_transfers() -> list[dict]:
             "id": 1,
             "from_wallet_id": 1,
             "to_wallet_id": 2,
-            "date": "2026-03-01",
+            "date": "2026-03-04",
             "amount_original": 100.0,
             "currency": "KZT",
             "rate_at_operation": 1.0,
@@ -283,8 +260,8 @@ def test_clean_db_all_checks_pass(tmp_path: Path) -> None:
     repo, report = _run_audit(tmp_path)
     try:
         assert report.is_clean is True
-        assert len(report.findings) == 8
-        assert len(report.passed) == 8
+        assert len(report.findings) == 10
+        assert len(report.passed) == 10
         assert all(finding.severity == AuditSeverity.OK for finding in report.findings)
     finally:
         repo.close()
@@ -434,13 +411,74 @@ def test_empty_currency_on_record_reports_warning(tmp_path: Path) -> None:
         repo.close()
 
 
-def test_mandatory_expense_date_reports_warning(tmp_path: Path) -> None:
+def test_system_wallet_flag_reports_error(tmp_path: Path) -> None:
+    wallets = [
+        {
+            "id": 1,
+            "name": "Main wallet",
+            "currency": "KZT",
+            "initial_balance": 0.0,
+            "system": 0,
+            "allow_negative": 0,
+            "is_active": 1,
+        }
+    ]
+    repo, report = _run_audit(
+        tmp_path,
+        wallets=wallets,
+        records=[],
+        transfers=[],
+        mandatory_expenses=[],
+    )
+    try:
+        findings = _findings_by_check(report, "system_wallet_sanity")
+        assert any(finding.severity == AuditSeverity.ERROR for finding in findings)
+    finally:
+        repo.close()
+
+
+def test_transfer_linked_record_wrong_category_reports_error(tmp_path: Path) -> None:
+    records = _clean_records()
+    records[2]["category"] = "Food"
+    repo, report = _run_audit(tmp_path, records=records)
+    try:
+        findings = _findings_by_check(report, "transfer_record_invariants")
+        assert any(finding.severity == AuditSeverity.ERROR for finding in findings)
+    finally:
+        repo.close()
+
+
+def test_transfer_linked_record_wallet_mismatch_reports_error(tmp_path: Path) -> None:
+    records = _clean_records()
+    records[2]["wallet_id"] = 2
+    repo, report = _run_audit(tmp_path, records=records)
+    try:
+        findings = _findings_by_check(report, "transfer_record_invariants")
+        assert any(finding.severity == AuditSeverity.ERROR for finding in findings)
+    finally:
+        repo.close()
+
+
+def test_mandatory_autopay_mismatch_reports_error(tmp_path: Path) -> None:
     mandatory_expenses = _clean_mandatory_expenses()
-    mandatory_expenses[0]["date"] = "2026-03-01"
+    mandatory_expenses[0]["date"] = "2026-03-05"
+    mandatory_expenses[0]["auto_pay"] = 0
     repo, report = _run_audit(tmp_path, mandatory_expenses=mandatory_expenses)
     try:
-        findings = _findings_by_check(report, "mandatory_expense_no_date")
-        assert any(finding.severity == AuditSeverity.WARNING for finding in findings)
+        findings = _findings_by_check(report, "mandatory_template_date_and_autopay")
+        assert any(finding.severity == AuditSeverity.ERROR for finding in findings)
+    finally:
+        repo.close()
+
+
+def test_mandatory_invalid_date_reports_error(tmp_path: Path) -> None:
+    mandatory_expenses = _clean_mandatory_expenses()
+    mandatory_expenses[0]["date"] = "not-a-date"
+    mandatory_expenses[0]["auto_pay"] = 1
+    repo, report = _run_audit(tmp_path, mandatory_expenses=mandatory_expenses)
+    try:
+        findings = _findings_by_check(report, "mandatory_template_date_and_autopay")
+        assert any(finding.severity == AuditSeverity.ERROR for finding in findings)
     finally:
         repo.close()
 

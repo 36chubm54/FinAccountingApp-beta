@@ -83,11 +83,12 @@ def test_report_xlsx_uses_opening_balance_label_for_filtered_report():
 def test_mandatory_xlsx_roundtrip():
     expenses = [
         MandatoryExpenseRecord(
-            date="",
+            date="2026-03-09",
             _amount_init=10.0,
             category="Sub",
             description="d1",
             period="monthly",
+            auto_pay=True,
         ),
         MandatoryExpenseRecord(
             date="",
@@ -105,6 +106,8 @@ def test_mandatory_xlsx_roundtrip():
         imported, _ = import_mandatory_expenses_from_xlsx(tmp_path)
         assert len(imported) == 2
         assert imported[0].amount == 10.0
+        assert str(imported[0].date) == "2026-03-09"
+        assert imported[0].auto_pay is True
         assert imported[1].period == "yearly"
     finally:
         os.unlink(tmp_path)
@@ -113,7 +116,12 @@ def test_mandatory_xlsx_roundtrip():
 def test_mandatory_csv_roundtrip():
     expenses = [
         MandatoryExpenseRecord(
-            date="", _amount_init=5.0, category="A", description="x", period="daily"
+            date="2026-03-21",
+            _amount_init=5.0,
+            category="A",
+            description="x",
+            period="daily",
+            auto_pay=True,
         ),
     ]
     with tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="w", newline="") as tmp:
@@ -123,6 +131,8 @@ def test_mandatory_csv_roundtrip():
         imported, _ = import_mandatory_expenses_from_csv(tmp_path)
         assert len(imported) == 1
         assert imported[0].amount == 5.0
+        assert str(imported[0].date) == "2026-03-21"
+        assert imported[0].auto_pay is True
         assert imported[0].period == "daily"
     finally:
         os.unlink(tmp_path)

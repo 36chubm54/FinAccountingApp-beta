@@ -12,7 +12,7 @@ from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, 
 from domain.transfers import Transfer
 from domain.wallets import Wallet
 from services.import_parser import ParsedImportData, parse_import_file
-from utils.csv_utils import _parse_transfer_row
+from utils.csv_utils import parse_transfer_row
 from utils.import_core import (
     as_float,
     parse_import_row,
@@ -60,7 +60,7 @@ class ImportService:
             return ImportResult(
                 imported=prepared.imported,
                 skipped=prepared.skipped,
-                errors=list(prepared.errors),
+                errors=tuple(prepared.errors),
                 dry_run=True,
             )
         return self._finance_service.run_import_transaction(
@@ -109,7 +109,7 @@ class ImportService:
             row_type = safe_type(str(row.get("type", "") or "")).lower()
             row_label = f"row {index}"
             if row_type == "transfer":
-                parsed_row, transfer, next_transfer_id, error = _parse_transfer_row(
+                parsed_row, transfer, next_transfer_id, error = parse_transfer_row(
                     {str(k): str(v) if v is not None else "" for k, v in row.items()},
                     row_label=row_label,
                     policy=self._policy,
@@ -210,7 +210,7 @@ class ImportService:
         raw_transfer_ops = list(prepared.raw_transfer_ops)
         imported = prepared.imported
         skipped = prepared.skipped
-        errors = list(prepared.errors)
+        errors = tuple(prepared.errors)
 
         if (
             imported == 0
@@ -442,6 +442,7 @@ class ImportService:
                 MandatoryExpenseRecord(
                     id=index,
                     wallet_id=1,
+                    date=str(template.date or ""),
                     amount_original=float(template.amount_original or 0.0),
                     currency=str(template.currency).upper(),
                     rate_at_operation=float(template.rate_at_operation),
@@ -449,6 +450,7 @@ class ImportService:
                     category=str(template.category),
                     description=description,
                     period=str(template.period),  # type: ignore[arg-type]
+                    auto_pay=bool(str(template.date or "").strip()),
                 )
             )
         return normalized
@@ -497,6 +499,7 @@ class ImportService:
                 category=str(template.category),
                 description=description,
                 period=str(template.period),
+                date=str(template.date or ""),
                 amount_kzt=self._fixed_amount_kzt(template.amount_kzt),
                 rate_at_operation=self._fixed_rate(template.rate_at_operation),
             )
@@ -539,6 +542,7 @@ class ImportService:
                 category=str(record.category),
                 description=description,
                 period=str(record.period),
+                date=str(record.date or ""),
                 amount_kzt=self._fixed_amount_kzt(record.amount_kzt),
                 rate_at_operation=self._fixed_rate(record.rate_at_operation),
             )
@@ -548,7 +552,7 @@ class ImportService:
             parsed.path,
             imported,
         )
-        return ImportResult(imported=imported, skipped=skipped, errors=errors)
+        return ImportResult(imported=imported, skipped=skipped, errors=tuple(errors))
 
     def _apply_records(
         self, parsed_records: list[Record], counters: ImportCounters

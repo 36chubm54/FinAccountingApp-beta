@@ -7,8 +7,15 @@ from dataclasses import dataclass, field
 class ImportResult:
     imported: int
     skipped: int
-    errors: list[str] = field(default_factory=list)
+    errors: tuple[str, ...] = field(default_factory=tuple)
     dry_run: bool = False
+
+    def __post_init__(self) -> None:
+        # dataclass(frozen=True) + list field would be a "frozen-but-mutable" footgun.
+        # Normalize to an immutable tuple even if callers pass a list.
+        errors = self.errors
+        if not isinstance(errors, tuple):
+            object.__setattr__(self, "errors", tuple(errors))
 
     def summary(self) -> str:
         prefix = "[DRY-RUN] " if self.dry_run else ""

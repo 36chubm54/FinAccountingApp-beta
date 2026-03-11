@@ -4,3 +4,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 
 SQLITE_PATH = str(PROJECT_ROOT / "finance.db")
 JSON_PATH = str(PROJECT_ROOT / "data.json")
+
+# How many timestamped JSON backups to keep in `project/backups/`.
+# Older backups are pruned on startup after creating a new one.
+JSON_BACKUP_KEEP_LAST = 30

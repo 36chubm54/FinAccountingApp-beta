@@ -2,10 +2,14 @@ import calendar
 import re
 from datetime import date
 
+VALID_PERIODS: tuple[str, ...] = ("daily", "weekly", "monthly", "yearly")
+
 
 def parse_ymd(value: str | date) -> date:
     if isinstance(value, date):
         return value
+    if not value:
+        raise ValueError("Date value is empty")
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
         raise ValueError("Invalid date format")
     parts = value.split("-")
@@ -15,10 +19,6 @@ def parse_ymd(value: str | date) -> date:
     last_day = calendar.monthrange(year, month)[1]
     if not (1 <= day <= last_day):
         raise ValueError("Invalid day")
-    if len(str(year)) != 4:
-        raise ValueError("Year must be 4 digits")
-    if not value:
-        raise ValueError("Date value is empty")
     return date(year, month, day)
 
 
@@ -28,9 +28,8 @@ def ensure_not_future(value: date) -> None:
 
 
 def ensure_valid_period(period: str) -> None:
-    valid_periods = ["daily", "weekly", "monthly", "yearly"]
-    if period not in valid_periods:
-        raise ValueError(f"Invalid period: {period}. Must be one of {valid_periods}")
+    if period not in VALID_PERIODS:
+        raise ValueError(f"Invalid period: {period}. Must be one of {list(VALID_PERIODS)}")
 
 
 def parse_report_period_start(value: str) -> str:

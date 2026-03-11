@@ -139,6 +139,20 @@ class MandatoryExpenseRecord(Record):
     date: dt_date | str = ""
     description: str = ""
     period: Literal["daily", "weekly", "monthly", "yearly"] = "monthly"
+    auto_pay: bool = False
+
+    def with_updated_amount_kzt(self, new_amount_kzt: float) -> "MandatoryExpenseRecord":
+        if new_amount_kzt <= 0:
+            raise ValueError("amount_kzt должен быть положительным")
+        if self.amount_original and self.amount_original > 0:
+            new_rate = new_amount_kzt / self.amount_original
+        else:
+            new_rate = self.rate_at_operation
+        return replace(self, amount_kzt=new_amount_kzt, rate_at_operation=new_rate)
+
+    def with_updated_date(self, new_date: str) -> "MandatoryExpenseRecord":
+        normalized_date = (new_date or "").strip()
+        return replace(self, date=normalized_date, auto_pay=bool(normalized_date))
 
     @property
     def type(self) -> str:

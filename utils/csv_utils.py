@@ -46,6 +46,7 @@ DATA_HEADERS = [
 ]
 MANDATORY_HEADERS = [
     "type",
+    "date",
     "category",
     "amount_original",
     "currency",
@@ -186,6 +187,27 @@ def _parse_transfer_row(
         description=description,
     )
     return [expense_record, income_record], transfer, next_transfer_id, None
+
+
+def parse_transfer_row(
+    row_lc: dict[str, str],
+    *,
+    row_label: str,
+    policy: ImportPolicy,
+    get_rate,
+    next_transfer_id: int,
+    wallet_ids: set[int] | None,
+) -> tuple[list[Record] | None, Transfer | None, int, str | None]:
+    """Public wrapper around transfer-row parsing (avoid importing private helpers)."""
+
+    return _parse_transfer_row(
+        row_lc,
+        row_label=row_label,
+        policy=policy,
+        get_rate=get_rate,
+        next_transfer_id=next_transfer_id,
+        wallet_ids=wallet_ids,
+    )
 
 
 def _restore_missing_transfers(records: list[Record], transfers: dict[int, Transfer]) -> None:

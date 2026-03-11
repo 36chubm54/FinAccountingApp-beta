@@ -49,7 +49,13 @@ def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _read_csv_rows(path: str) -> list[dict[str, Any]]:
-    csv.field_size_limit(MAX_CSV_FIELD_SIZE)
+    # Guardrail: prevent pathological CSV fields from allocating huge amounts of memory.
+    # (This is a process-global limit in the stdlib csv module.)
+    try:
+        csv.field_size_limit(MAX_CSV_FIELD_SIZE)
+    except (OverflowError, ValueError):
+        # Extremely defensive fallback (shouldn't happen for sane MAX_CSV_FIELD_SIZE values).
+        csv.field_size_limit(1_000_000)
     with open(path, newline="", encoding="utf-8") as csv_file:
         first_pos = csv_file.tell()
         first_line = ""

@@ -30,20 +30,19 @@ def test_migration_verified_flag_roundtrip(tmp_path) -> None:
 def test_validate_sqlite_integrity_only_detects_broken_transfer(tmp_path) -> None:
     repo = _make_repo(tmp_path / "finance.db")
     try:
-        conn = repo._conn
-        conn.execute(
+        repo.execute(
             """
             INSERT INTO wallets (name, currency, initial_balance, system, allow_negative, is_active)
             VALUES ('W1', 'KZT', 0, 1, 0, 1)
             """
         )
-        conn.execute(
+        repo.execute(
             """
             INSERT INTO wallets (name, currency, initial_balance, system, allow_negative, is_active)
             VALUES ('W2', 'KZT', 0, 0, 0, 1)
             """
         )
-        conn.execute(
+        repo.execute(
             """
             INSERT INTO transfers (
                 from_wallet_id, to_wallet_id, date, amount_original, currency,
@@ -52,7 +51,7 @@ def test_validate_sqlite_integrity_only_detects_broken_transfer(tmp_path) -> Non
             VALUES (1, 2, '2026-03-01', 100, 'KZT', 1, 100, '')
             """
         )
-        conn.execute(
+        repo.execute(
             """
             INSERT INTO records (
                 type, date, wallet_id, transfer_id, amount_original, currency,
@@ -61,7 +60,7 @@ def test_validate_sqlite_integrity_only_detects_broken_transfer(tmp_path) -> Non
             VALUES ('expense', '2026-03-01', 1, 1, 100, 'KZT', 1, 100, 'Transfer', '', NULL)
             """
         )
-        conn.commit()
+        repo.commit()
 
         with pytest.raises(RuntimeError, match="expected 2"):
             bootstrap._validate_sqlite_integrity_only(repo)
@@ -76,13 +75,13 @@ def test_bootstrap_marks_existing_sqlite_as_verified_without_json_compare(
     storage = SQLiteStorage(str(sqlite_path))
     try:
         storage.initialize_schema(_schema_path())
-        storage._conn.execute(
+        storage.execute(
             """
             INSERT INTO wallets (name, currency, initial_balance, system, allow_negative, is_active)
             VALUES ('Main wallet', 'KZT', 0, 1, 0, 1)
             """
         )
-        storage._conn.commit()
+        storage.commit()
     finally:
         storage.close()
 
@@ -92,9 +91,9 @@ def test_bootstrap_marks_existing_sqlite_as_verified_without_json_compare(
 
     if isinstance(repository, SQLiteRecordRepository):
         try:
-            row = repository._conn.execute(
+            row = repository.query_one(
                 "SELECT value FROM schema_meta WHERE key='migration_verified'"
-            ).fetchone()
+            )
             assert row is not None
             assert str(row[0]).lower() == "true"
         finally:
@@ -122,20 +121,19 @@ def test_bootstrap_creates_sqlite_and_initializes_system_wallet(tmp_path, monkey
 def test_validate_sqlite_integrity_only_detects_wrong_transfer_types(tmp_path) -> None:
     repo = _make_repo(tmp_path / "finance.db")
     try:
-        conn = repo._conn
-        conn.execute(
+        repo.execute(
             """
             INSERT INTO wallets (name, currency, initial_balance, system, allow_negative, is_active)
             VALUES ('W1', 'KZT', 0, 1, 0, 1)
             """
         )
-        conn.execute(
+        repo.execute(
             """
             INSERT INTO wallets (name, currency, initial_balance, system, allow_negative, is_active)
             VALUES ('W2', 'KZT', 0, 0, 0, 1)
             """
         )
-        conn.execute(
+        repo.execute(
             """
             INSERT INTO transfers (
                 from_wallet_id, to_wallet_id, date, amount_original, currency,
@@ -144,7 +142,7 @@ def test_validate_sqlite_integrity_only_detects_wrong_transfer_types(tmp_path) -
             VALUES (1, 2, '2026-03-01', 100, 'KZT', 1, 100, '')
             """
         )
-        conn.execute(
+        repo.execute(
             """
             INSERT INTO records (
                 type, date, wallet_id, transfer_id, amount_original, currency,
@@ -153,7 +151,7 @@ def test_validate_sqlite_integrity_only_detects_wrong_transfer_types(tmp_path) -
             VALUES ('expense', '2026-03-01', 1, 1, 100, 'KZT', 1, 100, 'Transfer', '', NULL)
             """
         )
-        conn.execute(
+        repo.execute(
             """
             INSERT INTO records (
                 type, date, wallet_id, transfer_id, amount_original, currency,
@@ -162,7 +160,7 @@ def test_validate_sqlite_integrity_only_detects_wrong_transfer_types(tmp_path) -
             VALUES ('expense', '2026-03-01', 2, 1, 100, 'KZT', 1, 100, 'Transfer', '', NULL)
             """
         )
-        conn.commit()
+        repo.commit()
 
         with pytest.raises(RuntimeError, match="invalid linked types"):
             bootstrap._validate_sqlite_integrity_only(repo)

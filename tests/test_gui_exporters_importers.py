@@ -55,11 +55,12 @@ def test_export_report_csv_xlsx_pdf():
 def test_export_and_import_mandatory_expenses_csv_xlsx():
     expenses = [
         MandatoryExpenseRecord(
-            date="",
+            date="2026-03-15",
             _amount_init=50.0,
             category="Utilities",
             description="Water",
             period="monthly",
+            auto_pay=True,
         ),
         MandatoryExpenseRecord(
             date="",
@@ -80,11 +81,15 @@ def test_export_and_import_mandatory_expenses_csv_xlsx():
         assert csv_path.exists()
         data, _ = importers.import_mandatory_expenses_from_csv(str(csv_path))
         assert len(data) == len(expenses)
+        assert str(data[0].date) == "2026-03-15"
+        assert data[0].auto_pay is True
 
         exporters.export_mandatory_expenses(expenses, str(xlsx_path), "xlsx")
         assert xlsx_path.exists()
         data2, _ = importers.import_mandatory_expenses_from_xlsx(str(xlsx_path))
         assert len(data2) == len(expenses)
+        assert str(data2[0].date) == "2026-03-15"
+        assert data2[0].auto_pay is True
     finally:
         for p in (csv_path, xlsx_path):
             if p.exists():

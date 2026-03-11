@@ -249,6 +249,7 @@ def parse_import_row(
         MandatoryExpenseRecord(
             **common,
             period=period,  # type: ignore[arg-type]
+            auto_pay=bool(date_value),
         ),
         None,
         None,

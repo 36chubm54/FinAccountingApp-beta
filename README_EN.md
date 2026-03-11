@@ -25,7 +25,7 @@ Graphical application for personal financial accounting with multicurrency, cate
 
 ```bash
 # Go to the project directory
-cd "FU Project/project"
+cd "Проект ФУ/project"
 
 # Create a virtual environment
 python -m venv .venv
@@ -85,18 +85,21 @@ Income is displayed in green, expenses in red. For a pie chart, small categories
 4. Enter the amount.
 5. Specify the currency (default is `KZT`).
 6. Specify a category (default is `General`).
-7. Click `Save`.
+7. Optionally fill in `Description`.
+8. Click `Save`.
 
 The amount is converted into the base currency `KZT` at the current rates of the currency service. Once an entry is added, the list is automatically updated.
 
-### Adding a translation
+### Adding a transfer
 
 1. Open the `Operations` tab.
-2. In the `Add transfer` block, select the transfer type (`Transfer`).
+2. In the `Transfer` block, select `From wallet` and `To wallet`.
 3. Enter the date in the format `YYYY-MM-DD` (the date cannot be in the future).
 4. Enter the amount.
-5. Specify the source and recipient of the wallets.
-6. Click `Save`.
+5. Specify the currency (default is `KZT`).
+6. Optionally enter `Commission` and its currency.
+7. Optionally fill in `Description`.
+8. Click `Save`.
 
 ### Deleting an entry
 
@@ -114,10 +117,11 @@ The amount is converted into the base currency `KZT` at the current rates of the
 
 1. Open the `Operations` tab.
 2. Select a record in the list.
-3. Click `Edit Amount KZT`.
-4. Enter a new value and click `Save`.
+3. Click `Edit`.
+4. Change `Amount KZT`, `Category`, and optionally `Description`.
+5. Click `Save`.
 
-The update is applied through the immutable domain model: a new record instance is created and `rate_at_operation` is recalculated automatically. Transfer-linked records cannot be edited.
+The update is applied through the immutable domain model: a new record instance is created, `rate_at_operation` is recalculated automatically, and `description` remains optional. Transfer-linked records cannot be edited.
 
 ### Report generation
 
@@ -168,11 +172,34 @@ Mandatory expense fields:
 
 - `Amount`, `Currency`, `Category` (default `Mandatory`), `Description` (required), `Period` (`daily`, `weekly`, `monthly`, `yearly`).
 
+#### Mandatory expense template fields
+
+- `Date` (optional, `YYYY-MM-DD`) — if provided, the `auto_pay` flag is set automatically
+- `auto_pay` — derived from `date`: non-empty → `True`, empty → `False`
+
+`auto_pay` behavior:
+
+- Applies only to `monthly` templates with a non-empty `date`.
+- On startup, the app auto-creates the monthly record for the current month once the current date reaches that day.
+- If the configured day is beyond the last day of the month, the last day is used.
+- A record is created at most once per month per template.
+
+#### Inline template editing
+
+1. Select a template in the list.
+2. Click `Edit`.
+3. Change `Amount KZT` and/or `Date`.
+4. Click `Save`.
+
+`amount_kzt` is validated numerically; `date` is validated against the `YYYY-MM-DD` format.
+`auto_pay` is recalculated automatically when the date changes.
+
 Import/export of mandatory expenses:
 
 - Import: `CSV`, `XLSX`.
 - Export: `CSV`, `XLSX`.
-- `date` is no longer stored/exported for `mandatory_expenses` templates.
+- Runtime templates in SQLite can now store `date` and derived `auto_pay`.
+- The `date` field for `mandatory_expenses` is now preserved in `CSV`/`XLSX` import-export.
 
 ### Finance Audit
 
@@ -181,14 +208,16 @@ In the `Settings` tab, the `Finance Audit` block provides a `Run Audit` button.
 Clicking it runs a read-only diagnostic of the SQLite database.
 The audit checks:
 
+- System wallet sanity (`id=1` exists and has `system=1`)
 - Transfer pair integrity (exactly 2 linked records: income + expense per transfer)
 - Alignment of `transfers` aggregates with linked `expense`/`income` records
+- Transfer-linked record invariants (consistency of wallet IDs, amounts, currency, and categories)
 - Amount consistency (amount_kzt equals amount_original × rate_at_operation)
 - Positivity of amount_original and amount_kzt in records / transfers / mandatory_expenses
 - Rate positivity (rate_at_operation > 0 for all records)
 - Date validity (YYYY-MM-DD format, not in the future)
 - Currency code presence (currency not empty)
-- Absence of date field in mandatory expense templates
+- Mandatory template date/auto_pay consistency (`auto_pay` matches whether `date` is provided)
 
 Results are shown in a modal dialog grouped into three sections:
 `Errors`, `Warnings`, `Passed`. The database is never modified.
@@ -299,7 +328,7 @@ Backup restores:
 
 - wallets with fields `id/name/currency/balance`;
 - all records with fields `type/date/wallet_id/transfer_id/category/amount_original/currency/rate_at_operation/amount_kzt/category/description`;
-- all mandatory expenses with `description/period`;
+- all mandatory expenses with `date/description/period`;
 - all transfers between wallets.
 
 ### FX Revaluation
@@ -331,6 +360,9 @@ JSON (`data.json`) is no longer used as an application backend and remains only 
 - JSON import;
 - JSON export;
 - backups.
+
+During startup, after SQLite integrity validation, the current runtime state is exported to `data.json`.
+This export now preserves `mandatory_expenses.date`, so template dates survive the startup JSON snapshot.
 
 A dedicated `storage/` layer is used for data access:
 
@@ -369,6 +401,7 @@ What the script does:
 
 - `SQLITE_PATH = "finance.db"`
 - `JSON_PATH = "data.json"`
+- `JSON_BACKUP_KEEP_LAST = 30` — how many timestamped JSON backups to keep in `project/backups/` (older ones are pruned on startup after creating a new backup).
 
 Paths are resolved relative to the `project` directory, so `finance.db` and `data.json` are created inside `project` even when launched from another folder.
 
@@ -380,6 +413,7 @@ Initialization is handled by `bootstrap.py`:
 - SQLite internal integrity is validated on startup:
   `PRAGMA foreign_key_check`, transfer linkage (`exactly 2 linked records: income+expense`),
   no orphan records, and no CHECK-like violations;
+- after a successful integrity check, SQLite is exported to `data.json`;
 - JSON bootstrap and direct runtime work against `data.json` have been removed.
 
 SQLite behavior by identifiers:
@@ -454,7 +488,7 @@ Below are the key classes and functions synchronized with the actual code.
 
 `domain/import_result.py`
 
-- `ImportResult(imported, skipped, errors, dry_run=False)` — immutable result of a dry-run or real import.
+- `ImportResult(imported, skipped, errors, dry_run=False)` — immutable result of a dry-run or real import (`errors` is stored as a `tuple[str, ...]`).
 - `summary()` — compact result string; adds the `[DRY-RUN]` prefix for previews.
 
 `domain/records.py`
@@ -510,8 +544,8 @@ Below are the key classes and functions synchronized with the actual code.
 
 `app/use_cases.py`
 
-- `CreateIncome.execute(date, wallet_id, amount, currency, category)`.
-- `CreateExpense.execute(date, wallet_id, amount, currency, category)`.
+- `CreateIncome.execute(date, wallet_id, amount, currency, category="General", description="", amount_kzt=None, rate_at_operation=None)`.
+- `CreateExpense.execute(date, wallet_id, amount, currency, category="General", description="", amount_kzt=None, rate_at_operation=None)`.
 - `GenerateReport.execute(wallet_id=None)` → `Report` taking into account the initial balance.
 - `CreateWallet.execute(name, currency, initial_balance, allow_negative=False)` — creating a new wallet.
 - `GetWallets.execute()` — all wallets.
@@ -520,12 +554,13 @@ Below are the key classes and functions synchronized with the actual code.
 - `CalculateWalletBalance.execute(wallet_id)` — calculating wallet balance.
 - `CalculateNetWorth.execute_fixed()` — calculating net worth at fixed exchange rates.
 - `CalculateNetWorth.execute_current()` — calculating net worth at current exchange rates.
-- `CreateTransfer.execute(from_wallet_id, to_wallet_id, transfer_date, amount_original, currency, description, comission_amount, comission_currency)` — creating a transfer between wallets.
+- `CreateTransfer.execute(from_wallet_id, to_wallet_id, transfer_date, amount_original, currency, description="", commission_amount=0.0, commission_currency=None, amount_kzt=None, rate_at_operation=None)` — creating a transfer between wallets.
 - `DeleteTransfer.execute(transfer_id)` — atomic cascade deletion of a transfer aggregate.
 - `DeleteRecord.execute(index)`.
 - `DeleteAllRecords.execute()`.
 - `ImportFromCSV.execute(filepath)` — import and complete replacement of records (CSV, `ImportPolicy.FULL_BACKUP`).
-- `CreateMandatoryExpense.execute(amount, currency, category, description, period)`.
+- `CreateMandatoryExpense.execute(amount, currency, category, description, period, date="", amount_kzt=None, rate_at_operation=None)`.
+- `ApplyMandatoryAutoPayments.execute(today=None)` — creates due `monthly` mandatory records for templates with `auto_pay=True`.
 - `GetMandatoryExpenses.execute()`.
 - `DeleteMandatoryExpense.execute(index)`.
 - `DeleteAllMandatoryExpenses.execute()`.
@@ -535,6 +570,9 @@ Below are the key classes and functions synchronized with the actual code.
 `app/record_service.py`
 
 - `RecordService.update_amount_kzt(record_id, new_amount_kzt)` — safe amount update via immutable domain objects and repository replace.
+- `RecordService.update_record_inline(record_id, new_amount_kzt, new_category, new_description="")` — inline edit for `Amount KZT` + `Category` (+ `Description`).
+- `RecordService.update_mandatory_amount_kzt(expense_id, new_amount_kzt)` — updates `amount_kzt` and recalculates `rate_at_operation`.
+- `RecordService.update_mandatory_date(expense_id, new_date)` — updates `date` and derives `auto_pay`.
 
 ### Infrastructure
 
@@ -634,7 +672,7 @@ Below are the key classes and functions synchronized with the actual code.
 `services/audit_service.py`
 
 - `AuditService(repository)` — read-only diagnostic service for SQLite data.
-- `run()` — loads an in-memory snapshot and executes 8 integrity/consistency checks.
+- `run()` — scans SQLite data and executes 10 integrity/consistency checks.
 - Each check returns `AuditFinding` entries and emits one `OK` finding when no violations are found.
 
 `services/balance_service.py`
@@ -826,10 +864,12 @@ project/
     ├── test_import_policy_and_backup.py
     ├── test_import_security.py
     ├── test_import_service.py
+    ├── test_mandatory_ux.py
     ├── test_pdf.py
     ├── test_records.py
     ├── test_reports.py
     ├── test_repositories.py
+    ├── test_schema_contracts.py
     ├── test_services.py
     ├── test_sqlite_runtime_storage.py
     ├── test_use_cases.py

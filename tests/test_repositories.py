@@ -247,6 +247,27 @@ class TestJsonFileRecordRepository:
         expenses = self.repo.load_mandatory_expenses()
         assert [expense.id for expense in expenses] == [1, 2]
 
+    def test_save_and_load_mandatory_expense_preserves_date(self):
+        self.repo.save_mandatory_expense(
+            MandatoryExpenseRecord(
+                date="2026-03-10",
+                wallet_id=1,
+                amount_original=10.0,
+                currency="KZT",
+                rate_at_operation=1.0,
+                amount_kzt=10.0,
+                category="Mandatory",
+                description="A",
+                period="monthly",
+                auto_pay=True,
+            )
+        )
+
+        expenses = self.repo.load_mandatory_expenses()
+        assert len(expenses) == 1
+        assert str(expenses[0].date) == "2026-03-10"
+        assert expenses[0].auto_pay is True
+
     def test_delete_by_index_success(self):
         # Setup: add some records
         income1 = IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")

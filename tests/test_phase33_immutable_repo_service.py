@@ -20,7 +20,7 @@ def test_record_is_immutable():
         category="Salary",
     )
     with pytest.raises(FrozenInstanceError):
-        record.amount_kzt = 123.0 # type: ignore
+        record.amount_kzt = 123.0  # type: ignore
 
 
 def test_with_updated_amount_kzt_returns_new_object():
@@ -86,6 +86,27 @@ def test_service_blocks_transfer_edit():
         service.update_amount_kzt(transfer_record.id, 6000.0)
     repo.replace.assert_not_called()
 
+    # Protect user-created records labeled as Transfer even if transfer_id is missing.
+    manual_transfer = ExpenseRecord(
+        date="2026-01-02",
+        wallet_id=1,
+        transfer_id=None,
+        amount_original=10.0,
+        currency="USD",
+        rate_at_operation=500.0,
+        amount_kzt=5000.0,
+        category="Transfer",
+    )
+    repo.get_by_id.return_value = manual_transfer
+    with pytest.raises(ValueError, match="Transfer-linked"):
+        service.update_record_inline(
+            manual_transfer.id,
+            new_amount_kzt=6000.0,
+            new_category="X",
+            new_description="",
+        )
+    repo.replace.assert_not_called()
+
 
 def test_domain_invariant_preserved():
     record = IncomeRecord(
@@ -99,3 +120,32 @@ def test_domain_invariant_preserved():
 
     with pytest.raises(ValueError, match="amount_original"):
         record.with_updated_amount_kzt(100.0)
+
+
+def test_service_updates_amount_category_and_description():
+    repo = Mock(spec=RecordRepository)
+    record = IncomeRecord(
+        date="2026-01-01",
+        wallet_id=1,
+        amount_original=100.0,
+        currency="USD",
+        rate_at_operation=500.0,
+        amount_kzt=50000.0,
+        category="Salary",
+        description="Old",
+    )
+    repo.get_by_id.return_value = record
+
+    service = RecordService(repo)
+    service.update_record_inline(
+        record.id,
+        new_amount_kzt=52000.0,
+        new_category="Bonus",
+        new_description="Updated",
+    )
+
+    updated = repo.replace.call_args.args[0]
+    assert updated.amount_kzt == 52000.0
+    assert updated.rate_at_operation == 520.0
+    assert updated.category == "Bonus"
+    assert updated.description == "Updated"

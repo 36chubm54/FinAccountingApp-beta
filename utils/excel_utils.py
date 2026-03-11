@@ -9,9 +9,9 @@ from domain.import_policy import ImportPolicy
 from domain.records import MandatoryExpenseRecord, Record
 from domain.reports import Report
 from utils.csv_utils import (
-    _parse_transfer_row,
     _restore_missing_transfers,
     _validate_transfer_integrity,
+    parse_transfer_row,
 )
 from utils.import_core import (
     ImportSummary,
@@ -47,6 +47,7 @@ DATA_HEADERS = [
 ]
 MANDATORY_HEADERS = [
     "type",
+    "date",
     "category",
     "amount_original",
     "currency",
@@ -249,7 +250,7 @@ def import_records_from_xlsx(
             row_type = safe_type(_safe_str(raw.get("type", "")).lower())
             if row_type == "transfer":
                 row_lc = {norm_key(str(k)): str(v) if v is not None else "" for k, v in raw.items()}
-                parsed_records, transfer, next_transfer_id, error = _parse_transfer_row(
+                parsed_records, transfer, next_transfer_id, error = parse_transfer_row(
                     row_lc=row_lc,
                     row_label=f"row {idx}",
                     policy=policy,

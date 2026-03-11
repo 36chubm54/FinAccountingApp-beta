@@ -39,10 +39,19 @@ class FinancialApp(tk.Tk):
         self.title("Financial Accounting")
         self.geometry("1100x800")
         self.minsize(900, 600)
+        # Make shutdown explicit: ensures background executor and repository are closed
+        # when user closes the window via the window manager.
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
 
         self.repository = bootstrap_repository()
         self.currency = CurrencyService()
         self.controller = FinancialController(self.repository, self.currency)
+        try:
+            created_auto_payments = self.controller.apply_mandatory_auto_payments()
+            if created_auto_payments:
+                logger.info("Auto-applied mandatory payments on startup: %s", created_auto_payments)
+        except Exception:
+            logger.exception("Failed to apply mandatory auto payments on startup")
 
         self._executor = ThreadPoolExecutor(max_workers=2)
         self._busy = False
@@ -185,12 +194,24 @@ class FinancialApp(tk.Tk):
         self._list_index_to_record_id = {}
         self._record_id_to_repo_index = {}
         self._record_id_to_domain_id = {}
+        kind_to_color = {
+            "income": "#166534",
+            "expense": "#b91c1c",
+            "mandatory": "#b6ad13",
+            "transfer": "#1d4ed8",
+        }
         for list_index, item in enumerate(self.controller.build_record_list_items()):
             self._list_index_to_record_id[list_index] = item.record_id
             self._record_id_to_repo_index[item.record_id] = item.repository_index
             if item.domain_record_id is not None:
                 self._record_id_to_domain_id[item.record_id] = item.domain_record_id
             self.records_listbox.insert(tk.END, item.label)
+            color = kind_to_color.get(getattr(item, "kind", ""))
+            if color:
+                try:
+                    self.records_listbox.itemconfigure(list_index, foreground=color)
+                except Exception:
+                    pass
 
     def _refresh_charts(self) -> None:
         if (

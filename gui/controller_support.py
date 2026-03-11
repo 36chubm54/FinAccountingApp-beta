@@ -12,6 +12,7 @@ from domain.wallets import Wallet
 @dataclass(frozen=True)
 class RecordListItem:
     record_id: str
+    kind: str
     repository_index: int
     domain_record_id: int | None
     label: str
@@ -67,10 +68,13 @@ def build_list_items(records: Iterable[Record]) -> list[RecordListItem]:
         amount_kzt = float(record.amount_kzt or 0.0)
         if isinstance(record, IncomeRecord):
             record_type = "Income"
+            kind = "income"
         elif isinstance(record, MandatoryExpenseRecord):
             record_type = "Mandatory Expense"
+            kind = "mandatory"
         else:
             record_type = "Expense"
+            kind = "expense"
         signature = (
             f"{record.date}|{record_type}|{record.category}|"
             f"{amount_original}|{record.currency}|{amount_kzt}|{repository_index}"
@@ -84,6 +88,7 @@ def build_list_items(records: Iterable[Record]) -> list[RecordListItem]:
         items.append(
             RecordListItem(
                 record_id=record_id,
+                kind=kind,
                 repository_index=repository_index,
                 domain_record_id=int(getattr(record, "id", 0) or 0),
                 label=label,
@@ -114,6 +119,7 @@ def build_list_items(records: Iterable[Record]) -> list[RecordListItem]:
         items.append(
             RecordListItem(
                 record_id=record_id,
+                kind="transfer",
                 repository_index=repository_index,
                 domain_record_id=int(getattr(source, "id", 0) or 0),
                 label=label,

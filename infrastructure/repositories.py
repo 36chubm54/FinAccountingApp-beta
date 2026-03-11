@@ -141,6 +141,16 @@ class RecordRepository(ABC):
         pass
 
     @abstractmethod
+    def get_mandatory_expense_by_id(self, expense_id: int) -> MandatoryExpenseRecord:
+        """Return mandatory expense by id or raise ValueError."""
+        pass
+
+    @abstractmethod
+    def update_mandatory_expense(self, expense: MandatoryExpenseRecord) -> None:
+        """Update mandatory expense."""
+        pass
+
+    @abstractmethod
     def replace_records(self, records: list[Record], initial_balance: float) -> None:
         """Atomically replace all records and (legacy) system-wallet balance."""
         pass
@@ -400,9 +410,6 @@ class JsonFileRecordRepository(RecordRepository):
         for item in data["mandatory_expenses"]:
             if not isinstance(item, dict):
                 continue
-            if "date" in item:
-                item.pop("date", None)
-                migrated = True
             raw_id = self._as_int(item.get("id"), 0)
             if raw_id != normalized_mandatory_id or raw_id in seen_mandatory_ids:
                 item["id"] = normalized_mandatory_id
@@ -777,9 +784,11 @@ class JsonFileRecordRepository(RecordRepository):
                     record = ExpenseRecord(**common)
                 elif typ == "mandatory_expense":
                     period = str(item.get("period", "monthly") or "monthly")
+                    auto_pay = bool(str(common.get("date", "") or "").strip())
                     record = MandatoryExpenseRecord(
                         **common,
                         period=period,  # type: ignore[arg-type]
+                        auto_pay=auto_pay,
                     )
                 else:
                     logger.warning("Unknown record type '%s' at index %s, skipping", typ, index)
@@ -870,7 +879,6 @@ class JsonFileRecordRepository(RecordRepository):
                 data["mandatory_expenses"] = []
             expense_data = self._record_to_dict(expense, "mandatory_expense")
             expense_data.pop("type", None)
-            expense_data.pop("date", None)
             data["mandatory_expenses"].append(expense_data)
             self._save_data(data)
 
@@ -884,9 +892,11 @@ class JsonFileRecordRepository(RecordRepository):
                 continue
             try:
                 common = self._parse_record_common(item)
+                auto_pay = bool(str(common.get("date", "") or "").strip())
                 expense = MandatoryExpenseRecord(
                     **common,
                     period=str(item.get("period", "monthly") or "monthly"),  # type: ignore[arg-type]
+                    auto_pay=auto_pay,
                 )
                 expenses.append(expense)
             except Exception:
@@ -911,6 +921,38 @@ class JsonFileRecordRepository(RecordRepository):
         with self._lock:
             data = self._load_data()
             data["mandatory_expenses"] = []
+            self._save_data(data)
+
+    def get_mandatory_expense_by_id(self, expense_id: int) -> MandatoryExpenseRecord:
+        """Return mandatory expense by id or raise ValueError."""
+        expense = next(
+            (item for item in self.load_mandatory_expenses() if int(item.id) == int(expense_id)),
+            None,
+        )
+        if expense is None:
+            raise ValueError(f"Mandatory expense not found: {expense_id}")
+        return expense
+
+    def update_mandatory_expense(self, expense: MandatoryExpenseRecord) -> None:
+        """Update mandatory expense."""
+        expense_id = int(getattr(expense, "id", 0) or 0)
+        if expense_id <= 0:
+            raise ValueError("Mandatory expense id must be positive")
+        with self._lock:
+            data = self._load_data()
+            mandatory_expenses = data.get("mandatory_expenses", [])
+            updated = False
+            for index, item in enumerate(mandatory_expenses):
+                if isinstance(item, dict) and self._as_int(item.get("id"), 0) == expense_id:
+                    # Convert expense to dict representation (without type)
+                    expense_data = self._record_to_dict(expense, "mandatory_expense")
+                    expense_data.pop("type", None)
+                    mandatory_expenses[index] = expense_data
+                    updated = True
+                    break
+            if not updated:
+                raise ValueError(f"Mandatory expense not found: {expense_id}")
+            data["mandatory_expenses"] = mandatory_expenses
             self._save_data(data)
 
     def replace_records(self, records: list[Record], initial_balance: float) -> None:
@@ -944,7 +986,6 @@ class JsonFileRecordRepository(RecordRepository):
             for index, expense in enumerate(expenses, start=1):
                 payload = self._record_to_dict(dc_replace(expense, id=index), "mandatory_expense")
                 payload.pop("type", None)
-                payload.pop("date", None)
                 data["mandatory_expenses"].append(payload)
             self._save_data(data)
 
@@ -1008,7 +1049,6 @@ class JsonFileRecordRepository(RecordRepository):
             for expense in mandatory_expenses:
                 payload = self._record_to_dict(expense, "mandatory_expense")
                 payload.pop("type", None)
-                payload.pop("date", None)
                 data["mandatory_expenses"].append(payload)
             self._validate_transfer_integrity(data)
             self._save_data(data)

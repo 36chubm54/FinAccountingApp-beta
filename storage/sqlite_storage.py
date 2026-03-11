@@ -351,9 +351,13 @@ class SQLiteStorage(Storage):
         self._conn.commit()
 
     def get_mandatory_expenses(self) -> list[MandatoryExpenseRecord]:
-        rows = self._conn.execute(
-            """
-            SELECT
+        columns = {
+            str(row["name"])
+            for row in self._conn.execute("PRAGMA table_info(mandatory_expenses)").fetchall()
+        }
+        has_date = "date" in columns
+        has_auto_pay = "auto_pay" in columns
+        select_columns = """
                 id,
                 wallet_id,
                 amount_original,
@@ -363,6 +367,15 @@ class SQLiteStorage(Storage):
                 category,
                 description,
                 period
+        """
+        if has_date:
+            select_columns += ",\n                date"
+        if has_auto_pay:
+            select_columns += ",\n                auto_pay"
+        rows = self._conn.execute(
+            f"""
+            SELECT
+{select_columns}
             FROM mandatory_expenses
             ORDER BY id
             """
@@ -378,6 +391,8 @@ class SQLiteStorage(Storage):
                 category=str(row["category"]),
                 description=str(row["description"] or ""),
                 period=str(row["period"] or "monthly"),  # type: ignore[arg-type]
+                date=str(row["date"]) if has_date and row["date"] else "",
+                auto_pay=bool(row["auto_pay"]) if has_auto_pay else False,
             )
             for row in rows
         ]

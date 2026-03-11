@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from backup import create_backup, export_to_json
-from config import JSON_PATH, SQLITE_PATH
+from config import JSON_BACKUP_KEEP_LAST, JSON_PATH, SQLITE_PATH
 from infrastructure.repositories import RecordRepository
 from infrastructure.sqlite_repository import SQLiteRecordRepository
 
@@ -133,13 +134,13 @@ def _validate_sqlite_integrity_only(sqlite_repo: SQLiteRecordRepository) -> None
             f"Аварийный режим: SQLite CHECK-like violation detected: {negative_violation[0]}"
         )
 
-    print("[bootstrap] SQLite integrity check passed")
+    logging.info("[bootstrap] SQLite integrity check passed")
 
 
 def bootstrap_repository() -> RecordRepository:
     db_path = Path(SQLITE_PATH)
     db_existed = db_path.exists()
-    create_backup(JSON_PATH)
+    create_backup(JSON_PATH, keep_last=JSON_BACKUP_KEEP_LAST)
 
     repository = SQLiteRecordRepository(
         SQLITE_PATH,
@@ -147,11 +148,11 @@ def bootstrap_repository() -> RecordRepository:
     )
 
     if db_existed:
-        print("[bootstrap] Storage selected: SQLite")
-        print("[bootstrap] Existing SQLite database detected")
+        logging.info("[bootstrap] Storage selected: SQLite")
+        logging.info("[bootstrap] Existing SQLite database detected")
     else:
-        print("[bootstrap] Storage selected: SQLite")
-        print("[bootstrap] SQLite database created and schema initialized")
+        logging.info("[bootstrap] Storage selected: SQLite")
+        logging.info("[bootstrap] SQLite database created and schema initialized")
 
     _ensure_system_wallet(repository)
     if not _is_migration_verified(repository):

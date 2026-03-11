@@ -177,10 +177,16 @@ def build_operations_tab(
     category_entry.insert(0, "General")
     category_entry.grid(row=4, column=1, sticky="ew", padx=6, pady=4)
 
-    ttk.Label(form_frame, text="Wallet:").grid(row=5, column=0, sticky="w", padx=6, pady=4)
+    ttk.Label(form_frame, text="Description (optional):").grid(
+        row=5, column=0, sticky="w", padx=6, pady=4
+    )
+    description_entry = ttk.Entry(form_frame)
+    description_entry.grid(row=5, column=1, sticky="ew", padx=6, pady=4)
+
+    ttk.Label(form_frame, text="Wallet:").grid(row=6, column=0, sticky="w", padx=6, pady=4)
     operation_wallet_var = tk.StringVar(value="")
     operation_wallet_menu = ttk.OptionMenu(form_frame, operation_wallet_var, "")
-    operation_wallet_menu.grid(row=5, column=1, sticky="ew", padx=6, pady=4)
+    operation_wallet_menu.grid(row=6, column=1, sticky="ew", padx=6, pady=4)
     operation_wallet_map: dict[str, int] = {}
 
     def refresh_operation_wallet_menu() -> None:
@@ -239,6 +245,7 @@ def build_operations_tab(
 
         currency = (currency_entry.get() or "KZT").strip()
         category = (category_entry.get() or "General").strip()
+        description = description_entry.get().strip()
         wallet_id = operation_wallet_map.get(operation_wallet_var.get())
         if wallet_id is None:
             messagebox.showerror("Error", "Wallet is required.")
@@ -252,6 +259,7 @@ def build_operations_tab(
                     amount=amount,
                     currency=currency,
                     category=category,
+                    description=description,
                 )
                 messagebox.showinfo("Success", "Income record added.")
             else:
@@ -261,12 +269,14 @@ def build_operations_tab(
                     amount=amount,
                     currency=currency,
                     category=category,
+                    description=description,
                 )
                 messagebox.showinfo("Success", "Expense record added.")
 
             date_entry.delete(0, tk.END)
             amount_entry.delete(0, tk.END)
             category_entry.delete(0, tk.END)
+            description_entry.delete(0, tk.END)
             context._refresh_list()
             context._refresh_charts()
             refresh_operation_wallet_menu()
@@ -274,7 +284,7 @@ def build_operations_tab(
             messagebox.showerror("Error", f"Failed to add record: {str(error)}")
 
     ttk.Button(form_frame, text="Save", command=save_record).grid(
-        row=6, column=0, columnspan=2, pady=8
+        row=7, column=0, columnspan=2, pady=8
     )
 
     def delete_selected() -> None:
@@ -306,7 +316,7 @@ def build_operations_tab(
 
     edit_panel_state: dict[str, ttk.Frame | None] = {"panel": None}
 
-    def edit_selected_amount_kzt_inline() -> None:
+    def edit_selected_record_inline() -> None:
         selection = records_listbox.curselection()
         if not selection:
             messagebox.showerror("Error", "Please select a record to edit.")
@@ -322,6 +332,16 @@ def build_operations_tab(
             messagebox.showerror("Error", "Selected record cannot be edited.")
             return
 
+        try:
+            record = context.controller.get_record_for_edit(domain_record_id)
+        except Exception:
+            messagebox.showerror("Error", "Cannot load record for editing.")
+            return
+
+        if record.transfer_id is not None:
+            messagebox.showerror("Error", "Transfer-linked records cannot be edited.")
+            return
+
         if edit_panel_state["panel"] is not None:
             try:
                 edit_panel_state["panel"].destroy()
@@ -333,16 +353,23 @@ def build_operations_tab(
         edit_panel.grid(row=2, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 6))
         edit_panel_state["panel"] = edit_panel
 
-        ttk.Label(edit_panel, text="New amount (KZT):").grid(row=0, column=0, sticky="w", padx=4)
+        ttk.Label(edit_panel, text="Amount (KZT):").grid(row=0, column=0, sticky="w", padx=4)
         amount_entry = ttk.Entry(edit_panel)
         amount_entry.grid(row=0, column=1, sticky="ew", padx=4)
+        ttk.Label(edit_panel, text="Category:").grid(row=1, column=0, sticky="w", padx=4)
+        category_edit_entry = ttk.Entry(edit_panel)
+        category_edit_entry.grid(row=1, column=1, sticky="ew", padx=4)
+        ttk.Label(edit_panel, text="Description (optional):").grid(
+            row=2, column=0, sticky="w", padx=4
+        )
+        description_edit_entry = ttk.Entry(edit_panel)
+        description_edit_entry.grid(row=2, column=1, sticky="ew", padx=4)
         edit_panel.grid_columnconfigure(1, weight=1)
 
-        try:
-            current_amount = context.controller.get_record_amount_kzt(domain_record_id)
-            amount_entry.insert(0, f"{current_amount:.2f}")
-        except Exception:
-            amount_entry.insert(0, "")
+        # Заполнить поля данными записи
+        amount_entry.insert(0, f"{float(record.amount_kzt or 0.0):.2f}")
+        category_edit_entry.insert(0, str(record.category or ""))
+        description_edit_entry.insert(0, str(record.description or ""))
 
         def save_edit() -> None:
             try:
@@ -350,11 +377,20 @@ def build_operations_tab(
             except ValueError:
                 messagebox.showerror("Error", "Invalid amount.")
                 return
+            new_category = category_edit_entry.get().strip()
+            if not new_category:
+                messagebox.showerror("Error", "Category is required.")
+                return
             try:
-                context.controller.update_record_amount_kzt(domain_record_id, new_amount_kzt)
+                context.controller.update_record_inline(
+                    domain_record_id,
+                    new_amount_kzt=new_amount_kzt,
+                    new_category=new_category,
+                    new_description=description_edit_entry.get().strip(),
+                )
                 messagebox.showinfo(
                     "Success",
-                    "Record amount updated. rate_at_operation was recalculated.",
+                    "Record updated. amount_kzt, category, and description were saved.",
                 )
                 context._refresh_list()
                 context._refresh_charts()
@@ -370,8 +406,8 @@ def build_operations_tab(
                     pass
                 edit_panel_state["panel"] = None
 
-        ttk.Button(edit_panel, text="Save", command=save_edit).grid(row=0, column=2, padx=4)
-        ttk.Button(edit_panel, text="Cancel", command=cancel_edit).grid(row=0, column=3, padx=4)
+        ttk.Button(edit_panel, text="Save", command=save_edit).grid(row=3, column=2, padx=4)
+        ttk.Button(edit_panel, text="Cancel", command=cancel_edit).grid(row=3, column=3, padx=4)
 
     def delete_all() -> None:
         confirm = messagebox.askyesno(
@@ -623,7 +659,7 @@ def build_operations_tab(
     ttk.Button(btn_frame, text="Delete Selected", command=delete_selected).pack(
         side=tk.LEFT, padx=6
     )
-    ttk.Button(btn_frame, text="Edit Amount KZT", command=edit_selected_amount_kzt_inline).pack(
+    ttk.Button(btn_frame, text="Edit", command=edit_selected_record_inline).pack(
         side=tk.LEFT, padx=6
     )
     ttk.Button(btn_frame, text="Delete All", command=delete_all).pack(side=tk.LEFT, padx=6)

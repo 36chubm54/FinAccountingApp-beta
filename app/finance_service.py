@@ -58,6 +58,7 @@ class FinanceService(Protocol):
         category: str,
         description: str,
         period: str,
+        date: str = "",
         amount_kzt: float | None = None,
         rate_at_operation: float | None = None,
     ) -> None: ...

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import date as dt_date
 
 from domain.records import IncomeRecord, MandatoryExpenseRecord, Record
@@ -73,6 +74,27 @@ class SQLiteRecordRepository(RecordRepository):
 
     def query_one(self, sql: str, params: tuple = ()):
         return self._conn.execute(sql, params).fetchone()
+
+    def query_iter(self, sql: str, params: tuple = (), *, chunk_size: int = 1000):
+        cursor = self._conn.execute(sql, params)
+        while True:
+            rows = cursor.fetchmany(chunk_size)
+            if not rows:
+                break
+            yield from rows
+
+    def execute(self, sql: str, params: tuple = ()) -> None:
+        self._conn.execute(sql, params)
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+    @contextmanager
+    def transaction(self):
+        # Public transaction helper mainly for tests and one-off maintenance scripts.
+        # Prefer repository-level methods for production code.
+        with self._conn:
+            yield
 
     @staticmethod
     def _date_as_text(value: dt_date | str) -> str:
@@ -353,9 +375,11 @@ class SQLiteRecordRepository(RecordRepository):
                 amount_kzt,
                 category,
                 description,
-                period
+                period,
+                date,
+                auto_pay
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 int(wallet_id),
@@ -366,6 +390,8 @@ class SQLiteRecordRepository(RecordRepository):
                 str(expense.category),
                 str(expense.description or ""),
                 str(expense.period),
+                str(expense.date) if expense.date else None,
+                int(bool(expense.auto_pay)),
             ),
         )
         return self._require_lastrowid(cursor.lastrowid, "mandatory_expenses")
@@ -570,6 +596,8 @@ class SQLiteRecordRepository(RecordRepository):
 
     def save_mandatory_expense(self, expense: MandatoryExpenseRecord) -> None:
         with self._conn:
+            if not self.has_system_wallet_row():
+                self._upsert_system_wallet_balance(0.0)
             wallet_id = int(expense.wallet_id)
             wallet_exists = self._conn.execute(
                 "SELECT 1 FROM wallets WHERE id = ?",
@@ -581,6 +609,48 @@ class SQLiteRecordRepository(RecordRepository):
 
     def load_mandatory_expenses(self) -> list[MandatoryExpenseRecord]:
         return self._storage.get_mandatory_expenses()
+
+    def get_mandatory_expense_by_id(self, expense_id: int) -> MandatoryExpenseRecord:
+        expense = next(
+            (item for item in self.load_mandatory_expenses() if int(item.id) == int(expense_id)),
+            None,
+        )
+        if expense is None:
+            raise ValueError(f"Mandatory expense не найден: {expense_id}")
+        return expense
+
+    def update_mandatory_expense(self, expense: MandatoryExpenseRecord) -> None:
+        expense_id = int(getattr(expense, "id", 0) or 0)
+        if expense_id <= 0:
+            raise ValueError("id обязательного расхода должен быть положительным")
+        with self._conn:
+            self._conn.execute(
+                """
+                UPDATE mandatory_expenses
+                SET amount_original   = ?,
+                    currency          = ?,
+                    rate_at_operation = ?,
+                    amount_kzt        = ?,
+                    category          = ?,
+                    description       = ?,
+                    period            = ?,
+                    date              = ?,
+                    auto_pay          = ?
+                WHERE id = ?
+                """,
+                (
+                    float(expense.amount_original or 0.0),
+                    str(expense.currency).upper(),
+                    float(expense.rate_at_operation),
+                    float(expense.amount_kzt or 0.0),
+                    str(expense.category),
+                    str(expense.description or ""),
+                    str(expense.period),
+                    str(expense.date) if expense.date else None,
+                    int(bool(expense.auto_pay)),
+                    expense_id,
+                ),
+            )
 
     def delete_mandatory_expense_by_index(self, index: int) -> bool:
         expenses = self.load_mandatory_expenses()

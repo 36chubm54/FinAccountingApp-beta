@@ -308,17 +308,23 @@ def build_settings_tab(
         mand_listbox.delete(0, tk.END)
         expenses = context.controller.load_mandatory_expenses()
         for idx, expense in enumerate(expenses):
+            auto_pay_label = "✓ autopay" if expense.auto_pay else ""
+            date_label = f" | {expense.date}" if expense.date else ""
             mand_listbox.insert(
                 tk.END,
                 f"[{idx}] {expense.amount_original:.2f} {expense.currency} "
                 f"(={expense.amount_kzt:.2f} KZT) - {expense.category} - "
-                f"{expense.description} ({expense.period})",
+                f"{expense.description} ({expense.period}){date_label} {auto_pay_label}".strip(),
             )
 
-    current_panel: dict[str, tk.Frame | None] = {"add": None, "report": None}
+    current_panel: dict[str, tk.Frame | ttk.Frame | None] = {
+        "add": None,
+        "report": None,
+        "edit": None,
+    }
 
     def close_inline_panels() -> None:
-        for key in ("add", "report"):
+        for key in ("add", "report", "edit"):
             panel = current_panel[key]
             if panel is not None:
                 try:
@@ -359,6 +365,10 @@ def build_settings_tab(
             column=1,
         )
 
+        ttk.Label(add_panel, text="Date (YYYY-MM-DD, optional):").grid(row=5, column=0, sticky="w")
+        date_entry = ttk.Entry(add_panel)
+        date_entry.grid(row=5, column=1)
+
         def save() -> None:
             try:
                 amount = float(amount_entry.get())
@@ -366,12 +376,24 @@ def build_settings_tab(
                 if not description:
                     messagebox.showerror("Error", "Description is required.")
                     return
+                date_val = date_entry.get().strip()
+                if date_val:
+                    try:
+                        from domain.validation import parse_ymd
+
+                        parse_ymd(date_val)
+                    except ValueError:
+                        messagebox.showerror(
+                            "Ошибка", "Неверный формат даты. Используйте YYYY-MM-DD."
+                        )
+                        return
                 context.controller.create_mandatory_expense(
                     amount=amount,
                     currency=(currency_entry.get() or "KZT").strip(),
                     category=(category_entry.get() or "Mandatory").strip(),
                     description=description,
                     period=period_var.get(),
+                    date=date_val,
                 )
                 messagebox.showinfo("Success", "Mandatory expense added.")
                 add_panel.destroy()
@@ -387,8 +409,84 @@ def build_settings_tab(
             finally:
                 current_panel["add"] = None
 
-        ttk.Button(add_panel, text="Save", command=save).grid(row=5, column=0, padx=6)
-        ttk.Button(add_panel, text="Cancel", command=cancel).grid(row=5, column=1, padx=6)
+        ttk.Button(add_panel, text="Save", command=save).grid(row=6, column=0, padx=6)
+        ttk.Button(add_panel, text="Cancel", command=cancel).grid(row=6, column=1, padx=6)
+
+    def edit_mandatory_inline() -> None:
+        selection = mand_listbox.curselection()
+        if not selection:
+            messagebox.showerror("Error", "Select a required expense to edit.")
+            return
+        index = selection[0]
+        expenses = context.controller.load_mandatory_expenses()
+        if not (0 <= index < len(expenses)):
+            return
+        expense = expenses[index]
+
+        close_inline_panels()
+
+        edit_panel = ttk.Frame(mand_frame)
+        edit_panel.grid(row=2, column=0, columnspan=2, pady=6, sticky="ew")
+        current_panel["edit"] = edit_panel
+        edit_panel.grid_columnconfigure(1, weight=1)
+
+        ttk.Label(edit_panel, text="Amount KZT:").grid(row=0, column=0, sticky="w")
+        amount_kzt_entry = ttk.Entry(edit_panel)
+        amount_kzt_entry.insert(0, str(expense.amount_kzt))
+        amount_kzt_entry.grid(row=0, column=1)
+
+        ttk.Label(edit_panel, text="Date (YYYY-MM-DD, optional):").grid(row=1, column=0, sticky="w")
+        date_entry = ttk.Entry(edit_panel)
+        date_entry.insert(
+            0,
+            expense.date.isoformat()
+            if hasattr(expense.date, "isoformat")
+            else str(expense.date or ""),
+        )
+        date_entry.grid(row=1, column=1)
+
+        def save_edit() -> None:
+            expense_id = int(expense.id)
+            raw_amount = amount_kzt_entry.get().strip()
+            current_amount = str(expense.amount_kzt)
+            if raw_amount != current_amount:
+                try:
+                    context.controller.update_mandatory_expense_amount_kzt(
+                        expense_id, float(raw_amount)
+                    )
+                except ValueError as error:
+                    messagebox.showerror("Amount error", str(error))
+                    return
+
+            current_date = (
+                expense.date.isoformat()
+                if hasattr(expense.date, "isoformat")
+                else str(expense.date or "")
+            )
+            new_date = date_entry.get().strip()
+            if new_date != current_date:
+                try:
+                    context.controller.update_mandatory_expense_date(expense_id, new_date)
+                except ValueError as error:
+                    messagebox.showerror("Date error", str(error))
+                    return
+
+            edit_panel.destroy()
+            current_panel["edit"] = None
+            refresh_mandatory()
+            context._refresh_charts()
+            messagebox.showinfo("Success", "Mandatory expense updated.")
+
+        def cancel_edit() -> None:
+            try:
+                edit_panel.destroy()
+            finally:
+                current_panel["edit"] = None
+
+        ttk.Button(edit_panel, text="Save", command=lambda: save_edit()).grid(
+            row=2, column=0, padx=6
+        )
+        ttk.Button(edit_panel, text="Cancel", command=cancel_edit).grid(row=2, column=1, padx=6)
 
     def add_to_records_inline() -> None:
         close_inline_panels()
@@ -492,15 +590,16 @@ def build_settings_tab(
     format_var = tk.StringVar(value="CSV")
 
     ttk.Button(actions, text="Add", command=add_mandatory_inline).grid(row=0, column=0)
+    ttk.Button(actions, text="Edit", command=edit_mandatory_inline).grid(row=0, column=1, padx=6)
     ttk.Button(actions, text="Add to Records", command=add_to_records_inline).grid(
-        row=0, column=1, padx=6
+        row=0, column=2, padx=6
     )
-    ttk.Button(actions, text="Delete", command=delete_mandatory).grid(row=0, column=2)
+    ttk.Button(actions, text="Delete", command=delete_mandatory).grid(row=0, column=3)
     ttk.Button(actions, text="Delete All", command=delete_all_mandatory).grid(
-        row=0, column=3, padx=6
+        row=0, column=4, padx=6
     )
-    ttk.Button(actions, text="Refresh", command=refresh_mandatory).grid(row=0, column=4, padx=6)
-    ttk.OptionMenu(actions, format_var, "CSV", "CSV", "XLSX").grid(row=0, column=5, padx=6)
+    ttk.Button(actions, text="Refresh", command=refresh_mandatory).grid(row=0, column=5, padx=6)
+    ttk.OptionMenu(actions, format_var, "CSV", "CSV", "XLSX").grid(row=0, column=6, padx=6)
 
     def import_mand() -> None:
         fmt = format_var.get()
@@ -585,8 +684,8 @@ def build_settings_tab(
             busy_message=f"Exporting {fmt} mandatory expenses...",
         )
 
-    ttk.Button(actions, text="Import", command=import_mand).grid(row=0, column=6)
-    ttk.Button(actions, text="Export", command=export_mand).grid(row=0, column=7)
+    ttk.Button(actions, text="Import", command=import_mand).grid(row=0, column=7)
+    ttk.Button(actions, text="Export", command=export_mand).grid(row=0, column=8)
 
     backup_frame = ttk.LabelFrame(left_panel, text="Backup (JSON)")
     backup_frame.grid(row=2, column=0, sticky="ew")
@@ -624,6 +723,7 @@ def build_settings_tab(
                 "Success", f"Backup imported. Imported entities: {result.imported}.{details}"
             )
             refresh_mandatory()
+            refresh_wallets()
             context._refresh_list()
             context._refresh_charts()
 

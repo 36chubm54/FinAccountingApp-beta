@@ -255,7 +255,9 @@ def test_get_total_balance_is_unchanged_by_transfer_between_wallets(tmp_path: Pa
             _wallet(1, name="Cash", initial_balance=1000.0),
             _wallet(2, name="Card", initial_balance=500.0),
         ],
-        transfers=[_transfer(1, from_wallet_id=1, to_wallet_id=2, date="2026-01-05", amount_kzt=300.0)],
+        transfers=[
+            _transfer(1, from_wallet_id=1, to_wallet_id=2, date="2026-01-05", amount_kzt=300.0)
+        ],
         records=[
             _record(
                 1,
@@ -296,7 +298,9 @@ def test_get_wallet_balances_excludes_inactive_wallets(tmp_path: Path) -> None:
     try:
         svc = BalanceService(repo)
         balances = svc.get_wallet_balances()
-        assert balances == [WalletBalance(wallet_id=1, name="Active", currency="KZT", balance=100.0)]
+        assert balances == [
+            WalletBalance(wallet_id=1, name="Active", currency="KZT", balance=100.0)
+        ]
     finally:
         repo.close()
 
@@ -352,7 +356,9 @@ def test_get_cashflow_excludes_transfer_category_records(tmp_path: Path) -> None
     repo = _build_repo(
         tmp_path,
         wallets=[_wallet(1, initial_balance=0.0), _wallet(2, initial_balance=0.0)],
-        transfers=[_transfer(1, from_wallet_id=1, to_wallet_id=2, date="2026-03-10", amount_kzt=500.0)],
+        transfers=[
+            _transfer(1, from_wallet_id=1, to_wallet_id=2, date="2026-03-10", amount_kzt=500.0)
+        ],
         records=[
             _record(1, record_type="income", date="2026-03-01", wallet_id=1, amount_kzt=1000.0),
             _record(
@@ -450,7 +456,9 @@ def test_balance_service_does_not_write_to_db(tmp_path: Path) -> None:
             _wallet(1, name="Cash", initial_balance=100.0),
             _wallet(2, name="Card", initial_balance=200.0),
         ],
-        transfers=[_transfer(1, from_wallet_id=1, to_wallet_id=2, date="2026-05-03", amount_kzt=25.0)],
+        transfers=[
+            _transfer(1, from_wallet_id=1, to_wallet_id=2, date="2026-05-03", amount_kzt=25.0)
+        ],
         records=[
             _record(1, record_type="income", date="2026-05-01", wallet_id=1, amount_kzt=50.0),
             _record(2, record_type="expense", date="2026-05-02", wallet_id=1, amount_kzt=10.0),

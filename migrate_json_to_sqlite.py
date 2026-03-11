@@ -361,9 +361,9 @@ def _insert_mandatory_expenses(
                 """
                 INSERT INTO mandatory_expenses (
                     id, wallet_id, amount_original, currency, rate_at_operation,
-                    amount_kzt, category, description, period
+                    amount_kzt, category, description, period, date, auto_pay
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(expense.id),
@@ -375,6 +375,8 @@ def _insert_mandatory_expenses(
                     str(expense.category),
                     str(expense.description or ""),
                     str(expense.period),
+                    str(expense.date) if expense.date else None,
+                    int(bool(expense.auto_pay)),
                 ),
             )
             mapping[int(expense.id)] = int(expense.id)
@@ -383,9 +385,9 @@ def _insert_mandatory_expenses(
                 """
                 INSERT INTO mandatory_expenses (
                     wallet_id, amount_original, currency, rate_at_operation,
-                    amount_kzt, category, description, period
+                    amount_kzt, category, description, period, date, auto_pay
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     wallet_map[int(expense.wallet_id)],
@@ -396,6 +398,8 @@ def _insert_mandatory_expenses(
                     str(expense.category),
                     str(expense.description or ""),
                     str(expense.period),
+                    str(expense.date) if expense.date else None,
+                    int(bool(expense.auto_pay)),
                 ),
             )
             lastrowid = cursor.lastrowid

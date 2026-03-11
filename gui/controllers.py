@@ -7,6 +7,7 @@ from app.record_service import RecordService
 from app.services import CurrencyService
 from app.use_cases import (
     AddMandatoryExpenseToReport,
+    ApplyMandatoryAutoPayments,
     CalculateNetWorth,
     CalculateWalletBalance,
     CreateExpense,
@@ -78,9 +79,27 @@ class FinancialController:
     def update_record_amount_kzt(self, record_id: int, new_amount_kzt: float) -> None:
         self._record_service.update_amount_kzt(record_id, new_amount_kzt)
 
+    def update_record_inline(
+        self,
+        record_id: int,
+        *,
+        new_amount_kzt: float,
+        new_category: str,
+        new_description: str = "",
+    ) -> None:
+        self._record_service.update_record_inline(
+            record_id,
+            new_amount_kzt=new_amount_kzt,
+            new_category=new_category,
+            new_description=new_description,
+        )
+
     def get_record_amount_kzt(self, record_id: int) -> float:
         record = self._repository.get_by_id(int(record_id))
         return float(record.amount_kzt or 0.0)
+
+    def get_record_for_edit(self, record_id: int) -> Record:
+        return self._repository.get_by_id(int(record_id))
 
     def set_system_initial_balance(self, balance: float) -> None:
         self._repository.save_initial_balance(float(balance))
@@ -151,6 +170,7 @@ class FinancialController:
         category: str,
         description: str,
         period: str,
+        date: str = "",
         amount_kzt: float | None = None,
         rate_at_operation: float | None = None,
     ) -> None:
@@ -160,6 +180,7 @@ class FinancialController:
             category=category,
             description=description,
             period=period,
+            date=date,
             amount_kzt=amount_kzt,
             rate_at_operation=rate_at_operation,
         )
@@ -191,6 +212,12 @@ class FinancialController:
 
     def load_mandatory_expenses(self) -> list[MandatoryExpenseRecord]:
         return GetMandatoryExpenses(self._repository).execute()
+
+    def update_mandatory_expense_amount_kzt(self, expense_id: int, new_amount_kzt: float) -> None:
+        self._record_service.update_mandatory_amount_kzt(expense_id, new_amount_kzt)
+
+    def update_mandatory_expense_date(self, expense_id: int, new_date: str) -> None:
+        self._record_service.update_mandatory_date(expense_id, new_date)
 
     def create_wallet(
         self,
@@ -288,6 +315,9 @@ class FinancialController:
 
     def delete_all_mandatory_expenses(self) -> None:
         DeleteAllMandatoryExpenses(self._repository).execute()
+
+    def apply_mandatory_auto_payments(self) -> int:
+        return ApplyMandatoryAutoPayments(self._repository).execute()
 
     def reset_operations_for_import(self, *, initial_balance: float) -> None:
         self._repository.replace_records_and_transfers([], [])

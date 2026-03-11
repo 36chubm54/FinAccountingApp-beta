@@ -57,14 +57,19 @@ CREATE TABLE IF NOT EXISTS mandatory_expenses (
     category TEXT NOT NULL CHECK(length(trim(category)) > 0),
     description TEXT NOT NULL CHECK(length(trim(description)) > 0),
     period TEXT NOT NULL CHECK(period IN ('daily', 'weekly', 'monthly', 'yearly')),
+    date TEXT DEFAULT NULL,
+    auto_pay INTEGER NOT NULL DEFAULT 0 CHECK(auto_pay IN (0, 1)),
     FOREIGN KEY(wallet_id) REFERENCES wallets(id) ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
+-- Migration for existing databases:
+-- ALTER TABLE mandatory_expenses ADD COLUMN date TEXT DEFAULT NULL;
+-- ALTER TABLE mandatory_expenses ADD COLUMN auto_pay INTEGER NOT NULL DEFAULT 0;
+
 CREATE INDEX IF NOT EXISTS idx_records_date ON records(date);
 CREATE INDEX IF NOT EXISTS idx_records_wallet_id ON records(wallet_id);
+CREATE INDEX IF NOT EXISTS idx_records_wallet_date ON records(wallet_id, date);
 CREATE INDEX IF NOT EXISTS idx_transfers_date ON transfers(date);
 CREATE INDEX IF NOT EXISTS idx_transfers_wallet_from ON transfers(from_wallet_id);
 CREATE INDEX IF NOT EXISTS idx_transfers_wallet_to ON transfers(to_wallet_id);
 CREATE INDEX IF NOT EXISTS idx_mandatory_expenses_wallet_id ON mandatory_expenses(wallet_id);
-CREATE INDEX IF NOT EXISTS idx_records_wallet_date
-    ON records(wallet_id, date);
