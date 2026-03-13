@@ -7,6 +7,31 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.4.2] - 2026-03-14
+
+### Added
+
+- Mandatory auto-pay now supports all periods: `daily`, `weekly`, `monthly`, `yearly` (anchored by template `date`)
+- Mandatory templates: wallet dropdown on create, plus inline editing of `wallet` and `period` after creation
+- Operations tab inline edit: update `date` and `wallet` in addition to `amount_kzt`, `category`, and optional `description`
+
+### Changed
+
+- Transfers are protected from inline edits when the selected record has category `"Transfer"` (in addition to `transfer_id` linkage)
+
+### Tests
+
+- Extended `tests/test_mandatory_ux.py` with auto-pay scenarios for all periods
+- Added record inline edit coverage for wallet/date updates
+
+### Docs
+
+- Updated `README.md` and `README_EN.md`
+
+No breaking changes.
+
+---
+
 ## [1.4.1] - 2026-03-13
 
 ### Added
@@ -34,7 +59,7 @@ This project adheres to Semantic Versioning.
 - Added `tests/test_timeline_service.py` with 12 scenarios covering empty DB behavior,
   initial balance baseline, transfer neutrality for net worth, transfer exclusion in cashflow,
   date filters, and read-only guarantee
-- Added 4 scenarios to `tests/test_charting.py` to cover aggregated data with the excluded "Transfer" category
+- Extended `tests/test_charting.py` with scenarios for covering aggregated data with the excluded "Transfer" category
 
 ### Docs
 
@@ -172,7 +197,7 @@ No breaking changes.
 
 - Import Dry-run Mode: full parse and validation cycle without writing to SQLite
 - `ImportResult` dataclass (`domain/import_result.py`) with fields `imported`, `skipped`, `errors`, `dry_run`; replaces bare tuple returns from `ImportService`
-- Import preview dialog in `Operations` tab: displays record count, skipped rows
+- Import preview dialog in `Operations` tab: displays record count, skipped rows,
   and errors before the user confirms the operation
 - `dry_run: bool = False` parameter in `ImportService.import_file(...)` and `FinanceService` protocol
 

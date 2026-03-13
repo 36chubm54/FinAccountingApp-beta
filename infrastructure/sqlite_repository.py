@@ -627,7 +627,8 @@ class SQLiteRecordRepository(RecordRepository):
             self._conn.execute(
                 """
                 UPDATE mandatory_expenses
-                SET amount_original   = ?,
+                SET wallet_id         = ?,
+                    amount_original   = ?,
                     currency          = ?,
                     rate_at_operation = ?,
                     amount_kzt        = ?,
@@ -639,6 +640,7 @@ class SQLiteRecordRepository(RecordRepository):
                 WHERE id = ?
                 """,
                 (
+                    int(expense.wallet_id),
                     float(expense.amount_original or 0.0),
                     str(expense.currency).upper(),
                     float(expense.rate_at_operation),

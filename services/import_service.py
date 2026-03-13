@@ -441,7 +441,7 @@ class ImportService:
             normalized.append(
                 MandatoryExpenseRecord(
                     id=index,
-                    wallet_id=1,
+                    wallet_id=int(template.wallet_id),
                     date=str(template.date or ""),
                     amount_original=float(template.amount_original or 0.0),
                     currency=str(template.currency).upper(),
@@ -488,7 +488,12 @@ class ImportService:
                 self._finance_service.set_wallet_allow_negative_for_import(wallet_id, False)
 
     def _apply_mandatory_templates(self, templates: list[MandatoryExpenseRecord]) -> None:
+        wallet_ids = {int(wallet.id) for wallet in self._finance_service.load_wallets()}
         for template in templates:
+            if int(template.wallet_id) not in wallet_ids:
+                raise ValueError(
+                    f"Mandatory template references missing wallet: {template.wallet_id}"
+                )
             description = self._normalize_mandatory_description(
                 str(template.description or ""),
                 str(template.category),
@@ -496,6 +501,7 @@ class ImportService:
             self._finance_service.create_mandatory_expense(
                 amount=float(template.amount_original or 0.0),
                 currency=str(template.currency).upper(),
+                wallet_id=int(template.wallet_id),
                 category=str(template.category),
                 description=description,
                 period=str(template.period),
@@ -512,6 +518,7 @@ class ImportService:
             if self._policy == ImportPolicy.CURRENT_RATE
             else None
         )
+        wallet_ids = {int(wallet.id) for wallet in self._finance_service.load_wallets()}
 
         imported = 0
         skipped = 0
@@ -532,6 +539,10 @@ class ImportService:
                 skipped += 1
                 errors.append(f"row {index}: expected mandatory expense")
                 continue
+            if int(record.wallet_id) not in wallet_ids:
+                skipped += 1
+                errors.append(f"row {index}: wallet not found ({int(record.wallet_id)})")
+                continue
             description = self._normalize_mandatory_description(
                 str(record.description or ""),
                 str(record.category),
@@ -539,6 +550,7 @@ class ImportService:
             self._finance_service.create_mandatory_expense(
                 amount=float(record.amount_original or 0.0),
                 currency=str(record.currency).upper(),
+                wallet_id=int(record.wallet_id),
                 category=str(record.category),
                 description=description,
                 period=str(record.period),

@@ -55,6 +55,7 @@ class FinanceService(Protocol):
         *,
         amount: float,
         currency: str,
+        wallet_id: int,
         category: str,
         description: str,
         period: str,

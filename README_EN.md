@@ -113,15 +113,15 @@ The amount is converted into the base currency `KZT` at the current rates of the
 2. In the `List of operations` block, select an entry from the list.
 3. Click `Delete All Records` and confirm the deletion. The entries will be permanently deleted and the list of entries will be updated.
 
-### Inline amount_kzt edit
+### Inline record editing
 
 1. Open the `Operations` tab.
 2. Select a record in the list.
 3. Click `Edit`.
-4. Change `Amount KZT`, `Category`, and optionally `Description`.
+4. Change `Date`, `Wallet`, `Amount KZT`, `Category`, and optionally `Description`.
 5. Click `Save`.
 
-The update is applied through the immutable domain model: a new record instance is created, `rate_at_operation` is recalculated automatically, and `description` remains optional. Transfer-linked records cannot be edited.
+The update is applied through the immutable domain model: a new record instance is created, `rate_at_operation` is recalculated automatically, and `description` remains optional. The date is validated (`YYYY-MM-DD`, not in the future) and the wallet must be active. Transfer-linked records and records with category `"Transfer"` cannot be edited.
 
 ### Report generation
 
@@ -161,6 +161,7 @@ Export report:
 In the `Settings` tab, in the `Mandatory Expenses` block, the following operations are available:
 
 - `Add` — add a mandatory expense.
+- `Edit` — inline edit the selected template.
 - `Delete` — delete the selected one.
 - `Delete All` — delete everything.
 - `Add to Records` — add the selected expense to records with the specified date.
@@ -170,7 +171,7 @@ In the `Settings` tab, in the `Mandatory Expenses` block, the following operatio
 
 Mandatory expense fields:
 
-- `Amount`, `Currency`, `Category` (default `Mandatory`), `Description` (required), `Period` (`daily`, `weekly`, `monthly`, `yearly`).
+- `Wallet`, `Amount`, `Currency`, `Category` (default `Mandatory`), `Description` (required), `Period` (`daily`, `weekly`, `monthly`, `yearly`).
 
 #### Mandatory expense template fields
 
@@ -179,16 +180,19 @@ Mandatory expense fields:
 
 `auto_pay` behavior:
 
-- Applies only to `monthly` templates with a non-empty `date`.
-- On startup, the app auto-creates the monthly record for the current month once the current date reaches that day.
-- If the configured day is beyond the last day of the month, the last day is used.
-- A record is created at most once per month per template.
+- Applies to all templates with a non-empty `date` (i.e. `auto_pay=True`).
+- Auto-pay does not start before the template `date` (anchor date).
+- Frequency is defined by `period`:
+  `daily` — 1 record per day;
+  `weekly` — 1 record per week on the same weekday as `date`;
+  `monthly` — 1 record per month with the same `DD` (clamped to month end);
+  `yearly` — 1 record per year with the same `MM-DD` (clamped for missing days, e.g. Feb 29).
 
 #### Inline template editing
 
 1. Select a template in the list.
 2. Click `Edit`.
-3. Change `Amount KZT` and/or `Date`.
+3. Change `Amount KZT`, `Date`, `Period` and/or `Wallet`.
 4. Click `Save`.
 
 `amount_kzt` is validated numerically; `date` is validated against the `YYYY-MM-DD` format.
@@ -573,8 +577,8 @@ Below are the key classes and functions synchronized with the actual code.
 - `DeleteRecord.execute(index)`.
 - `DeleteAllRecords.execute()`.
 - `ImportFromCSV.execute(filepath)` — import and complete replacement of records (CSV, `ImportPolicy.FULL_BACKUP`).
-- `CreateMandatoryExpense.execute(amount, currency, category, description, period, date="", amount_kzt=None, rate_at_operation=None)`.
-- `ApplyMandatoryAutoPayments.execute(today=None)` — creates due `monthly` mandatory records for templates with `auto_pay=True`.
+- `CreateMandatoryExpense.execute(wallet_id=1, amount, currency, category, description, period, date="", amount_kzt=None, rate_at_operation=None)`.
+- `ApplyMandatoryAutoPayments.execute(today=None)` — creates due mandatory records for templates with `auto_pay=True` for all periods (`daily/weekly/monthly/yearly`).
 - `GetMandatoryExpenses.execute()`.
 - `DeleteMandatoryExpense.execute(index)`.
 - `DeleteAllMandatoryExpenses.execute()`.
@@ -584,9 +588,11 @@ Below are the key classes and functions synchronized with the actual code.
 `app/record_service.py`
 
 - `RecordService.update_amount_kzt(record_id, new_amount_kzt)` — safe amount update via immutable domain objects and repository replace.
-- `RecordService.update_record_inline(record_id, new_amount_kzt, new_category, new_description="")` — inline edit for `Amount KZT` + `Category` (+ `Description`).
+- `RecordService.update_record_inline(record_id, *, new_amount_kzt, new_category, new_description="", new_date=None, new_wallet_id=None)` — inline edit for `Amount KZT` + `Category` (+ `Description`) + (`Date`/`Wallet`).
 - `RecordService.update_mandatory_amount_kzt(expense_id, new_amount_kzt)` — updates `amount_kzt` and recalculates `rate_at_operation`.
 - `RecordService.update_mandatory_date(expense_id, new_date)` — updates `date` and derives `auto_pay`.
+- `RecordService.update_mandatory_wallet_id(expense_id, new_wallet_id)` — changes the template wallet.
+- `RecordService.update_mandatory_period(expense_id, new_period)` — changes the template period.
 
 ### Infrastructure
 

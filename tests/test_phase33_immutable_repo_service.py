@@ -7,6 +7,7 @@ import pytest
 
 from app.record_service import RecordService
 from domain.records import ExpenseRecord, IncomeRecord
+from domain.wallets import Wallet
 from infrastructure.repositories import JsonFileRecordRepository, RecordRepository
 
 
@@ -83,7 +84,12 @@ def test_service_blocks_transfer_edit():
 
     service = RecordService(repo)
     with pytest.raises(ValueError, match="Transfer-linked"):
-        service.update_amount_kzt(transfer_record.id, 6000.0)
+        service.update_record_inline(
+            transfer_record.id,
+            new_amount_kzt=6000.0,
+            new_category="X",
+            new_description="",
+        )
     repo.replace.assert_not_called()
 
     # Protect user-created records labeled as Transfer even if transfer_id is missing.
@@ -149,3 +155,36 @@ def test_service_updates_amount_category_and_description():
     assert updated.rate_at_operation == 520.0
     assert updated.category == "Bonus"
     assert updated.description == "Updated"
+
+
+def test_service_updates_date_and_wallet():
+    repo = Mock(spec=RecordRepository)
+    record = ExpenseRecord(
+        date="2026-01-01",
+        wallet_id=1,
+        amount_original=10.0,
+        currency="KZT",
+        rate_at_operation=1.0,
+        amount_kzt=10.0,
+        category="Food",
+        description="Old",
+    )
+    repo.get_by_id.return_value = record
+    repo.load_wallets.return_value = [
+        Wallet(id=1, name="Main", currency="KZT", initial_balance=0.0, system=True),
+        Wallet(id=2, name="Cash", currency="KZT", initial_balance=0.0),
+    ]
+
+    service = RecordService(repo)
+    service.update_record_inline(
+        record.id,
+        new_amount_kzt=12.0,
+        new_category="Food",
+        new_description="Old",
+        new_date="2026-01-02",
+        new_wallet_id=2,
+    )
+
+    updated = repo.replace.call_args.args[0]
+    assert str(updated.date) == "2026-01-02"
+    assert int(updated.wallet_id) == 2

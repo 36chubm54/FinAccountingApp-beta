@@ -77,9 +77,6 @@ class FinancialController:
     def delete_all_records(self) -> None:
         DeleteAllRecords(self._repository).execute()
 
-    def update_record_amount_kzt(self, record_id: int, new_amount_kzt: float) -> None:
-        self._record_service.update_amount_kzt(record_id, new_amount_kzt)
-
     def update_record_inline(
         self,
         record_id: int,
@@ -87,12 +84,16 @@ class FinancialController:
         new_amount_kzt: float,
         new_category: str,
         new_description: str = "",
+        new_date: str | None = None,
+        new_wallet_id: int | None = None,
     ) -> None:
         self._record_service.update_record_inline(
             record_id,
             new_amount_kzt=new_amount_kzt,
             new_category=new_category,
             new_description=new_description,
+            new_date=new_date,
+            new_wallet_id=new_wallet_id,
         )
 
     def get_record_amount_kzt(self, record_id: int) -> float:
@@ -168,6 +169,7 @@ class FinancialController:
         *,
         amount: float,
         currency: str,
+        wallet_id: int = 1,
         category: str,
         description: str,
         period: str,
@@ -178,6 +180,7 @@ class FinancialController:
         CreateMandatoryExpense(self._repository, self._currency).execute(
             amount=amount,
             currency=currency,
+            wallet_id=wallet_id,
             category=category,
             description=description,
             period=period,
@@ -219,6 +222,12 @@ class FinancialController:
 
     def update_mandatory_expense_date(self, expense_id: int, new_date: str) -> None:
         self._record_service.update_mandatory_date(expense_id, new_date)
+
+    def update_mandatory_expense_wallet_id(self, expense_id: int, new_wallet_id: int) -> None:
+        self._record_service.update_mandatory_wallet_id(expense_id, new_wallet_id)
+
+    def update_mandatory_expense_period(self, expense_id: int, new_period: str) -> None:
+        self._record_service.update_mandatory_period(expense_id, new_period)
 
     def create_wallet(
         self,

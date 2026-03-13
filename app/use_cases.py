@@ -2,6 +2,7 @@ import logging
 from calendar import monthrange
 from dataclasses import replace
 from datetime import date as dt_date
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from app.use_case_support import (
@@ -513,6 +514,7 @@ class CreateMandatoryExpense:
         *,
         amount: float,
         currency: str,
+        wallet_id: int = SYSTEM_WALLET_ID,
         category: str,
         description: str,
         period: str,
@@ -524,6 +526,12 @@ class CreateMandatoryExpense:
         from domain.validation import ensure_valid_period, parse_ymd
 
         ensure_valid_period(period)
+        # System wallet may not exist yet in a fresh DB; the repository will create it lazily.
+        if int(wallet_id) != SYSTEM_WALLET_ID:
+            wallet = wallet_by_id(self._repository, int(wallet_id))
+            if not wallet.is_active:
+                raise ValueError("Cannot create mandatory template for inactive wallet")
+
         normalized_date = date.strip()
         if normalized_date:
             parse_ymd(normalized_date)
@@ -534,7 +542,7 @@ class CreateMandatoryExpense:
         if rate_at_operation is None:
             rate_at_operation = build_rate(amount, amount_kzt, currency)
         expense = MandatoryExpenseRecord(
-            wallet_id=SYSTEM_WALLET_ID,
+            wallet_id=int(wallet_id),
             amount_original=amount,
             currency=currency.upper(),
             rate_at_operation=float(rate_at_operation),
@@ -678,24 +686,49 @@ class ApplyMandatoryAutoPayments:
         for template in templates:
             if not bool(getattr(template, "auto_pay", False)):
                 continue
-            if str(getattr(template, "period", "")) != "monthly":
+            period = str(getattr(template, "period", "") or "").strip().lower()
+            if period not in {"daily", "weekly", "monthly", "yearly"}:
                 continue
 
             template_date = getattr(template, "date", "")
             if isinstance(template_date, dt_date):
-                template_day = template_date.day
+                anchor_date = template_date
             else:
                 normalized_template_date = str(template_date or "").strip()
                 if not normalized_template_date:
                     continue
                 from domain.validation import parse_ymd
 
-                template_day = parse_ymd(normalized_template_date).day
+                anchor_date = parse_ymd(normalized_template_date)
 
-            last_day = monthrange(current_date.year, current_date.month)[1]
-            target_day = min(template_day, last_day)
-            target_date = dt_date(current_date.year, current_date.month, target_day)
-            if current_date < target_date:
+            # Autopay starts only after the anchor date becomes reachable.
+            if current_date < anchor_date:
+                continue
+
+            target_date: dt_date | None = None
+            if period == "daily":
+                target_date = current_date
+            elif period == "weekly":
+                anchor_weekday = int(anchor_date.weekday())
+                delta_days = (int(current_date.weekday()) - anchor_weekday) % 7
+                target_date = current_date - timedelta(days=delta_days)
+                if target_date < anchor_date:
+                    continue
+            elif period == "monthly":
+                last_day = monthrange(current_date.year, current_date.month)[1]
+                target_day = min(int(anchor_date.day), int(last_day))
+                target_date = dt_date(current_date.year, current_date.month, target_day)
+                if current_date < target_date:
+                    continue
+            elif period == "yearly":
+                last_day = monthrange(current_date.year, int(anchor_date.month))[1]
+                target_day = min(int(anchor_date.day), int(last_day))
+                target_date = dt_date(current_date.year, int(anchor_date.month), target_day)
+                if current_date < target_date:
+                    continue
+            else:
+                continue
+            if target_date is None:
                 continue
 
             exists = any(

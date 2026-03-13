@@ -341,6 +341,9 @@ def build_operations_tab(
         if record.transfer_id is not None:
             messagebox.showerror("Error", "Transfer-linked records cannot be edited.")
             return
+        if str(getattr(record, "category", "") or "").strip().lower() == "transfer":
+            messagebox.showerror("Error", "Transfer records cannot be edited.")
+            return
 
         if edit_panel_state["panel"] is not None:
             try:
@@ -356,20 +359,49 @@ def build_operations_tab(
         ttk.Label(edit_panel, text="Amount (KZT):").grid(row=0, column=0, sticky="w", padx=4)
         amount_entry = ttk.Entry(edit_panel)
         amount_entry.grid(row=0, column=1, sticky="ew", padx=4)
-        ttk.Label(edit_panel, text="Category:").grid(row=1, column=0, sticky="w", padx=4)
+        ttk.Label(edit_panel, text="Date (YYYY-MM-DD):").grid(row=1, column=0, sticky="w", padx=4)
+        date_edit_entry = ttk.Entry(edit_panel)
+        date_edit_entry.grid(row=1, column=1, sticky="ew", padx=4)
+        ttk.Label(edit_panel, text="Wallet:").grid(row=2, column=0, sticky="w", padx=4)
+        wallet_edit_var = tk.StringVar(value="")
+        wallet_edit_menu = ttk.OptionMenu(edit_panel, wallet_edit_var, "")
+        wallet_edit_menu.grid(row=2, column=1, sticky="ew", padx=4)
+        ttk.Label(edit_panel, text="Category:").grid(row=3, column=0, sticky="w", padx=4)
         category_edit_entry = ttk.Entry(edit_panel)
-        category_edit_entry.grid(row=1, column=1, sticky="ew", padx=4)
+        category_edit_entry.grid(row=3, column=1, sticky="ew", padx=4)
         ttk.Label(edit_panel, text="Description (optional):").grid(
-            row=2, column=0, sticky="w", padx=4
+            row=4, column=0, sticky="w", padx=4
         )
         description_edit_entry = ttk.Entry(edit_panel)
-        description_edit_entry.grid(row=2, column=1, sticky="ew", padx=4)
+        description_edit_entry.grid(row=4, column=1, sticky="ew", padx=4)
         edit_panel.grid_columnconfigure(1, weight=1)
 
         # Заполнить поля данными записи
         amount_entry.insert(0, f"{float(record.amount_kzt or 0.0):.2f}")
+        date_value = (
+            record.date.isoformat() if hasattr(record.date, "isoformat") else str(record.date)
+        )
+        date_edit_entry.insert(0, date_value)
         category_edit_entry.insert(0, str(record.category or ""))
         description_edit_entry.insert(0, str(record.description or ""))
+
+        wallet_edit_map: dict[str, int] = {
+            f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id
+            for wallet in context.controller.load_wallets()
+        }
+        wallet_labels = list(wallet_edit_map.keys()) or [""]
+        wallet_menu = wallet_edit_menu["menu"]
+        wallet_menu.delete(0, "end")
+        for label in wallet_labels:
+            wallet_menu.add_command(
+                label=label,
+                command=lambda value=label: wallet_edit_var.set(value),
+            )
+        current_wallet_label = next(
+            (label for label, wid in wallet_edit_map.items() if int(wid) == int(record.wallet_id)),
+            wallet_labels[0],
+        )
+        wallet_edit_var.set(current_wallet_label)
 
         def save_edit() -> None:
             try:
@@ -377,9 +409,17 @@ def build_operations_tab(
             except ValueError:
                 messagebox.showerror("Error", "Invalid amount.")
                 return
+            new_date = date_edit_entry.get().strip()
+            if not new_date:
+                messagebox.showerror("Error", "Date is required.")
+                return
             new_category = category_edit_entry.get().strip()
             if not new_category:
                 messagebox.showerror("Error", "Category is required.")
+                return
+            new_wallet_id = wallet_edit_map.get(wallet_edit_var.get())
+            if new_wallet_id is None:
+                messagebox.showerror("Error", "Wallet is required.")
                 return
             try:
                 context.controller.update_record_inline(
@@ -387,10 +427,12 @@ def build_operations_tab(
                     new_amount_kzt=new_amount_kzt,
                     new_category=new_category,
                     new_description=description_edit_entry.get().strip(),
+                    new_date=new_date,
+                    new_wallet_id=new_wallet_id,
                 )
                 messagebox.showinfo(
                     "Success",
-                    "Record updated. amount_kzt, category, and description were saved.",
+                    "Record updated. date, wallet, amount_kzt, category, and description were saved.",
                 )
                 context._refresh_list()
                 context._refresh_charts()
@@ -406,8 +448,8 @@ def build_operations_tab(
                     pass
                 edit_panel_state["panel"] = None
 
-        ttk.Button(edit_panel, text="Save", command=save_edit).grid(row=3, column=2, padx=4)
-        ttk.Button(edit_panel, text="Cancel", command=cancel_edit).grid(row=3, column=3, padx=4)
+        ttk.Button(edit_panel, text="Save", command=save_edit).grid(row=5, column=2, padx=4)
+        ttk.Button(edit_panel, text="Cancel", command=cancel_edit).grid(row=5, column=3, padx=4)
 
     def delete_all() -> None:
         confirm = messagebox.askyesno(

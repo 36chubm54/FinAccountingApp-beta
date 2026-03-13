@@ -137,6 +137,7 @@ def test_import_service_mandatory_import_uses_finance_service_only() -> None:
     finance_service.create_mandatory_expense.assert_called_once_with(
         amount=50.0,
         currency="KZT",
+        wallet_id=1,
         category="Rent",
         description="Monthly",
         period="monthly",
@@ -228,6 +229,7 @@ def test_import_service_json_backup_imports_mandatory_templates() -> None:
     finance_service.create_mandatory_expense.assert_called_once_with(
         amount=12.0,
         currency="USD",
+        wallet_id=1,
         category="Subscriptions",
         description="Music",
         period="monthly",

@@ -189,6 +189,34 @@ def test_update_mandatory_date_invalid_format_raises(tmp_path: Path) -> None:
         repo.close()
 
 
+def test_update_mandatory_wallet_and_period_persist(tmp_path: Path) -> None:
+    db_path = tmp_path / "mandatory_wallet_period_update.db"
+    repo = SQLiteRecordRepository(str(db_path), schema_path=_schema_path())
+    try:
+        repo.save_initial_balance(0.0)
+        repo.create_wallet(name="Cash", currency="KZT", initial_balance=0.0)
+        CreateMandatoryExpense(repo, CurrencyService(use_online=False)).execute(
+            amount=100.0,
+            currency="KZT",
+            wallet_id=1,
+            category="Mandatory",
+            description="Rent",
+            period="monthly",
+            date="2026-03-09",
+        )
+        expense = repo.load_mandatory_expenses()[0]
+
+        RecordService(repo).update_mandatory_wallet_id(expense.id, 2)
+        RecordService(repo).update_mandatory_period(expense.id, "weekly")
+
+        stored = repo.get_mandatory_expense_by_id(expense.id)
+        assert int(stored.wallet_id) == 2
+        assert str(stored.period) == "weekly"
+        assert stored.auto_pay is True
+    finally:
+        repo.close()
+
+
 def test_audit_reports_10_checks_on_clean_db(tmp_path: Path) -> None:
     db_path = tmp_path / "mandatory_audit.db"
     repo = SQLiteRecordRepository(str(db_path), schema_path=_schema_path())
@@ -270,5 +298,88 @@ def test_auto_pay_clamps_to_last_day_of_month(tmp_path: Path) -> None:
         ]
         assert created == 1
         assert str(mandatory_records[0].date) == "2026-02-28"
+    finally:
+        repo.close()
+
+
+def test_auto_pay_creates_daily_record_once(tmp_path: Path) -> None:
+    db_path = tmp_path / "mandatory_autopay_daily.db"
+    repo = SQLiteRecordRepository(str(db_path), schema_path=_schema_path())
+    try:
+        CreateMandatoryExpense(repo, CurrencyService(use_online=False)).execute(
+            amount=10.0,
+            currency="KZT",
+            category="Mandatory",
+            description="Daily",
+            period="daily",
+            date="2026-03-01",
+        )
+
+        created = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 3, 20))
+        created_again = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 3, 20))
+
+        mandatory_records = [
+            record for record in repo.load_all() if isinstance(record, MandatoryExpenseRecord)
+        ]
+        assert created == 1
+        assert created_again == 0
+        assert len(mandatory_records) == 1
+        assert str(mandatory_records[0].date) == "2026-03-20"
+    finally:
+        repo.close()
+
+
+def test_auto_pay_creates_weekly_record_on_anchor_weekday(tmp_path: Path) -> None:
+    db_path = tmp_path / "mandatory_autopay_weekly.db"
+    repo = SQLiteRecordRepository(str(db_path), schema_path=_schema_path())
+    try:
+        # Anchor date is Monday (2026-03-02). For 2026-03-14 (Saturday),
+        # the due date for that week is 2026-03-09 (Monday).
+        CreateMandatoryExpense(repo, CurrencyService(use_online=False)).execute(
+            amount=10.0,
+            currency="KZT",
+            category="Mandatory",
+            description="Weekly",
+            period="weekly",
+            date="2026-03-02",
+        )
+
+        created = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 3, 14))
+
+        mandatory_records = [
+            record for record in repo.load_all() if isinstance(record, MandatoryExpenseRecord)
+        ]
+        assert created == 1
+        assert len(mandatory_records) == 1
+        assert str(mandatory_records[0].date) == "2026-03-09"
+    finally:
+        repo.close()
+
+
+def test_auto_pay_creates_yearly_record_once(tmp_path: Path) -> None:
+    db_path = tmp_path / "mandatory_autopay_yearly.db"
+    repo = SQLiteRecordRepository(str(db_path), schema_path=_schema_path())
+    try:
+        CreateMandatoryExpense(repo, CurrencyService(use_online=False)).execute(
+            amount=10.0,
+            currency="KZT",
+            category="Mandatory",
+            description="Yearly",
+            period="yearly",
+            date="2024-06-15",
+        )
+
+        created_early = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 3, 20))
+        created = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 6, 20))
+        created_again = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 6, 20))
+
+        mandatory_records = [
+            record for record in repo.load_all() if isinstance(record, MandatoryExpenseRecord)
+        ]
+        assert created_early == 0
+        assert created == 1
+        assert created_again == 0
+        assert len(mandatory_records) == 1
+        assert str(mandatory_records[0].date) == "2026-06-15"
     finally:
         repo.close()

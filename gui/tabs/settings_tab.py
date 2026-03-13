@@ -349,25 +349,40 @@ def build_settings_tab(
         currency_entry.insert(0, "KZT")
         currency_entry.grid(row=1, column=1)
 
-        ttk.Label(add_panel, text="Category (default Mandatory):").grid(row=2, column=0, sticky="w")
+        ttk.Label(add_panel, text="Wallet:").grid(row=2, column=0, sticky="w")
+        mandatory_wallet_var = tk.StringVar(value="")
+        mandatory_wallet_menu = ttk.OptionMenu(add_panel, mandatory_wallet_var, "")
+        mandatory_wallet_menu.grid(row=2, column=1, sticky="ew")
+        mandatory_wallet_map: dict[str, int] = {
+            f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id
+            for wallet in context.controller.load_active_wallets()
+        }
+        wallet_labels = list(mandatory_wallet_map.keys()) or [""]
+        wallet_menu = mandatory_wallet_menu["menu"]
+        wallet_menu.delete(0, "end")
+        for label in wallet_labels:
+            wallet_menu.add_command(label=label, command=lambda value=label: mandatory_wallet_var.set(value))
+        mandatory_wallet_var.set(wallet_labels[0])
+
+        ttk.Label(add_panel, text="Category (default Mandatory):").grid(row=3, column=0, sticky="w")
         category_entry = ttk.Entry(add_panel)
         category_entry.insert(0, "Mandatory")
-        category_entry.grid(row=2, column=1)
+        category_entry.grid(row=3, column=1)
 
-        ttk.Label(add_panel, text="Description:").grid(row=3, column=0, sticky="w")
+        ttk.Label(add_panel, text="Description:").grid(row=4, column=0, sticky="w")
         description_entry = ttk.Entry(add_panel)
-        description_entry.grid(row=3, column=1)
+        description_entry.grid(row=4, column=1)
 
-        ttk.Label(add_panel, text="Period:").grid(row=4, column=0, sticky="w")
+        ttk.Label(add_panel, text="Period:").grid(row=5, column=0, sticky="w")
         period_var = tk.StringVar(value="monthly")
         ttk.OptionMenu(add_panel, period_var, "daily", "daily", "weekly", "monthly", "yearly").grid(
-            row=4,
+            row=5,
             column=1,
         )
 
-        ttk.Label(add_panel, text="Date (YYYY-MM-DD, optional):").grid(row=5, column=0, sticky="w")
+        ttk.Label(add_panel, text="Date (YYYY-MM-DD, optional):").grid(row=6, column=0, sticky="w")
         date_entry = ttk.Entry(add_panel)
-        date_entry.grid(row=5, column=1)
+        date_entry.grid(row=6, column=1)
 
         def save() -> None:
             try:
@@ -387,9 +402,14 @@ def build_settings_tab(
                             "Ошибка", "Неверный формат даты. Используйте YYYY-MM-DD."
                         )
                         return
+                wallet_id = mandatory_wallet_map.get(mandatory_wallet_var.get())
+                if wallet_id is None:
+                    messagebox.showerror("Error", "Wallet is required.")
+                    return
                 context.controller.create_mandatory_expense(
                     amount=amount,
                     currency=(currency_entry.get() or "KZT").strip(),
+                    wallet_id=wallet_id,
                     category=(category_entry.get() or "Mandatory").strip(),
                     description=description,
                     period=period_var.get(),
@@ -409,8 +429,8 @@ def build_settings_tab(
             finally:
                 current_panel["add"] = None
 
-        ttk.Button(add_panel, text="Save", command=save).grid(row=6, column=0, padx=6)
-        ttk.Button(add_panel, text="Cancel", command=cancel).grid(row=6, column=1, padx=6)
+        ttk.Button(add_panel, text="Save", command=save).grid(row=7, column=0, padx=6)
+        ttk.Button(add_panel, text="Cancel", command=cancel).grid(row=7, column=1, padx=6)
 
     def edit_mandatory_inline() -> None:
         selection = mand_listbox.curselection()
@@ -435,7 +455,38 @@ def build_settings_tab(
         amount_kzt_entry.insert(0, str(expense.amount_kzt))
         amount_kzt_entry.grid(row=0, column=1)
 
-        ttk.Label(edit_panel, text="Date (YYYY-MM-DD, optional):").grid(row=1, column=0, sticky="w")
+        ttk.Label(edit_panel, text="Wallet:").grid(row=1, column=0, sticky="w")
+        edit_wallet_var = tk.StringVar(value="")
+        edit_wallet_menu = ttk.OptionMenu(edit_panel, edit_wallet_var, "")
+        edit_wallet_menu.grid(row=1, column=1, sticky="ew")
+        edit_wallet_map: dict[str, int] = {
+            f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id
+            for wallet in context.controller.load_active_wallets()
+        }
+        edit_wallet_labels = list(edit_wallet_map.keys()) or [""]
+        wallet_menu = edit_wallet_menu["menu"]
+        wallet_menu.delete(0, "end")
+        for label in edit_wallet_labels:
+            wallet_menu.add_command(label=label, command=lambda value=label: edit_wallet_var.set(value))
+        current_wallet_label = next(
+            (label for label, wid in edit_wallet_map.items() if int(wid) == int(expense.wallet_id)),
+            edit_wallet_labels[0],
+        )
+        edit_wallet_var.set(current_wallet_label)
+
+        ttk.Label(edit_panel, text="Period:").grid(row=2, column=0, sticky="w")
+        edit_period_var = tk.StringVar(value=str(expense.period or "monthly"))
+        ttk.OptionMenu(
+            edit_panel,
+            edit_period_var,
+            str(expense.period or "monthly"),
+            "daily",
+            "weekly",
+            "monthly",
+            "yearly",
+        ).grid(row=2, column=1, sticky="ew")
+
+        ttk.Label(edit_panel, text="Date (YYYY-MM-DD, optional):").grid(row=3, column=0, sticky="w")
         date_entry = ttk.Entry(edit_panel)
         date_entry.insert(
             0,
@@ -443,7 +494,7 @@ def build_settings_tab(
             if hasattr(expense.date, "isoformat")
             else str(expense.date or ""),
         )
-        date_entry.grid(row=1, column=1)
+        date_entry.grid(row=3, column=1)
 
         def save_edit() -> None:
             expense_id = int(expense.id)
@@ -456,6 +507,25 @@ def build_settings_tab(
                     )
                 except ValueError as error:
                     messagebox.showerror("Amount error", str(error))
+                    return
+
+            new_wallet_id = edit_wallet_map.get(edit_wallet_var.get())
+            if new_wallet_id is None:
+                messagebox.showerror("Error", "Wallet is required.")
+                return
+            if int(new_wallet_id) != int(expense.wallet_id):
+                try:
+                    context.controller.update_mandatory_expense_wallet_id(expense_id, int(new_wallet_id))
+                except ValueError as error:
+                    messagebox.showerror("Wallet error", str(error))
+                    return
+
+            new_period = str(edit_period_var.get() or "").strip().lower()
+            if new_period and str(new_period) != str(expense.period):
+                try:
+                    context.controller.update_mandatory_expense_period(expense_id, new_period)
+                except ValueError as error:
+                    messagebox.showerror("Period error", str(error))
                     return
 
             current_date = (
@@ -484,9 +554,9 @@ def build_settings_tab(
                 current_panel["edit"] = None
 
         ttk.Button(edit_panel, text="Save", command=lambda: save_edit()).grid(
-            row=2, column=0, padx=6
+            row=4, column=0, padx=6
         )
-        ttk.Button(edit_panel, text="Cancel", command=cancel_edit).grid(row=2, column=1, padx=6)
+        ttk.Button(edit_panel, text="Cancel", command=cancel_edit).grid(row=4, column=1, padx=6)
 
     def add_to_records_inline() -> None:
         close_inline_panels()

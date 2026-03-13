@@ -143,7 +143,7 @@ class MandatoryExpenseRecord(Record):
 
     def with_updated_amount_kzt(self, new_amount_kzt: float) -> "MandatoryExpenseRecord":
         if new_amount_kzt <= 0:
-            raise ValueError("amount_kzt должен быть положительным")
+            raise ValueError("amount_kzt must be positive")
         if self.amount_original and self.amount_original > 0:
             new_rate = new_amount_kzt / self.amount_original
         else:
@@ -153,6 +153,22 @@ class MandatoryExpenseRecord(Record):
     def with_updated_date(self, new_date: str) -> "MandatoryExpenseRecord":
         normalized_date = (new_date or "").strip()
         return replace(self, date=normalized_date, auto_pay=bool(normalized_date))
+
+    def with_updated_period(self, new_period: str) -> "MandatoryExpenseRecord":
+        normalized_period = str(new_period or "").strip().lower()
+        from .validation import ensure_valid_period
+
+        ensure_valid_period(normalized_period)
+        return replace(self, period=normalized_period)  # type: ignore[arg-type]
+
+    def with_updated_wallet_id(self, new_wallet_id: int) -> "MandatoryExpenseRecord":
+        try:
+            wallet_id = int(new_wallet_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("wallet_id must be an integer") from exc
+        if wallet_id <= 0:
+            raise ValueError("wallet_id must be positive")
+        return replace(self, wallet_id=wallet_id)
 
     @property
     def type(self) -> str:

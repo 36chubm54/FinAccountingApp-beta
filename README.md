@@ -113,15 +113,15 @@ python main.py
 2. В блоке `List of operations` выберите запись из списка.
 3. Нажмите `Delete All Records` и подтвердите удаление. Записи будут удалены без возможности восстановления, а список записей обновится.
 
-### Inline-редактирование amount_kzt
+### Inline-редактирование записи
 
 1. Откройте вкладку `Operations`.
 2. Выберите запись в списке.
 3. Нажмите `Edit`.
-4. Измените `Amount KZT`, `Category` и при необходимости `Description`.
+4. Измените `Date`, `Wallet`, `Amount KZT`, `Category` и при необходимости `Description`.
 5. Нажмите `Save`.
 
-Изменение выполняется через immutable-модель: создаётся новая версия записи, `rate_at_operation` пересчитывается автоматически, а `description` остаётся необязательным. Для transfer-связанных записей редактирование запрещено.
+Изменение выполняется через immutable-модель: создаётся новая версия записи, `rate_at_operation` пересчитывается автоматически, а `description` остаётся необязательным. Дата валидируется (формат `YYYY-MM-DD`, не в будущем), кошелёк должен быть активным. Для transfer-связанных записей и записей с категорией `"Transfer"` редактирование запрещено.
 
 ### Генерация отчёта
 
@@ -161,6 +161,7 @@ python main.py
 Во вкладке `Settings`, в блоке `Mandatory Expenses` доступны операции:
 
 - `Add` — добавить обязательный расход.
+- `Edit` — отредактировать выбранный шаблон (inline).
 - `Delete` — удалить выбранный.
 - `Delete All` — удалить все.
 - `Add to Records` — добавить выбранный расход в записи с указанной датой.
@@ -170,7 +171,7 @@ python main.py
 
 Поля обязательного расхода:
 
-- `Amount`, `Currency`, `Category` (по умолчанию `Mandatory`), `Description` (обязательно), `Period` (`daily`, `weekly`, `monthly`, `yearly`).
+- `Wallet`, `Amount`, `Currency`, `Category` (по умолчанию `Mandatory`), `Description` (обязательно), `Period` (`daily`, `weekly`, `monthly`, `yearly`).
 
 #### Поля шаблона обязательного расхода
 
@@ -179,16 +180,19 @@ python main.py
 
 Поведение `auto_pay`:
 
-- Применяется только к `monthly`-шаблонам с непустым `date`.
-- При запуске приложения автоматически создаётся запись обязательного расхода на текущий месяц, когда текущая дата достигает указанного дня.
-- Если день больше последнего дня месяца, используется последний день месяца.
-- Для одного шаблона создаётся не более одной записи в месяц.
+- Применяется ко всем шаблонам с непустым `date` (т.е. `auto_pay=True`).
+- Автоплатёж запускается не раньше `date` шаблона (anchor date).
+- Частота определяется `period`:
+  `daily` — 1 запись в день;
+  `weekly` — 1 запись в неделю в день недели как в `date`;
+  `monthly` — 1 запись в месяц с тем же `DD` (если день больше последнего дня месяца, используется последний день месяца);
+  `yearly` — 1 запись в год с тем же `MM-DD` (дата корректируется для несуществующих дней, например 29 февраля).
 
 #### Inline-редактирование шаблона
 
 1. Выберите шаблон в списке.
 2. Нажмите `Edit`.
-3. Измените `Amount KZT` и/или `Date`.
+3. Измените `Amount KZT`, `Date`, `Period` и/или `Wallet`.
 4. Нажмите `Save`.
 
 `amount_kzt` валидируется как число, `date` — форматом `YYYY-MM-DD`.
@@ -573,8 +577,8 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `DeleteRecord.execute(index)`.
 - `DeleteAllRecords.execute()`.
 - `ImportFromCSV.execute(filepath)` — импорт и полная замена записей (CSV, `ImportPolicy.FULL_BACKUP`).
-- `CreateMandatoryExpense.execute(amount, currency, category, description, period, date="", amount_kzt=None, rate_at_operation=None)`.
-- `ApplyMandatoryAutoPayments.execute(today=None)` — создаёт due `monthly` записи для шаблонов с `auto_pay=True`.
+- `CreateMandatoryExpense.execute(wallet_id=1, amount, currency, category, description, period, date="", amount_kzt=None, rate_at_operation=None)`.
+- `ApplyMandatoryAutoPayments.execute(today=None)` — создаёт due-записи обязательных расходов для шаблонов с `auto_pay=True` по всем периодам (`daily/weekly/monthly/yearly`).
 - `GetMandatoryExpenses.execute()`.
 - `DeleteMandatoryExpense.execute(index)`.
 - `DeleteAllMandatoryExpenses.execute()`.
@@ -584,9 +588,11 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 `app/record_service.py`
 
 - `RecordService.update_amount_kzt(record_id, new_amount_kzt)` — безопасное обновление суммы через immutable-модель и repository replace.
-- `RecordService.update_record_inline(record_id, new_amount_kzt, new_category, new_description="")` — inline-редактирование `Amount KZT` + `Category` (+ `Description`).
+- `RecordService.update_record_inline(record_id, *, new_amount_kzt, new_category, new_description="", new_date=None, new_wallet_id=None)` — inline-редактирование `Amount KZT` + `Category` (+ `Description`) + (`Date`/`Wallet`).
 - `RecordService.update_mandatory_amount_kzt(expense_id, new_amount_kzt)` — обновляет `amount_kzt` и пересчитывает `rate_at_operation`.
 - `RecordService.update_mandatory_date(expense_id, new_date)` — обновляет `date` и вычисляет `auto_pay`.
+- `RecordService.update_mandatory_wallet_id(expense_id, new_wallet_id)` — меняет кошелёк шаблона.
+- `RecordService.update_mandatory_period(expense_id, new_period)` — меняет период шаблона.
 
 ### Infrastructure
 
