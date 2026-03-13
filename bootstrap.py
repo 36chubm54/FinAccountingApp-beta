@@ -148,10 +148,8 @@ def bootstrap_repository() -> RecordRepository:
     )
 
     if db_existed:
-        logging.info("[bootstrap] Storage selected: SQLite")
         logging.info("[bootstrap] Existing SQLite database detected")
     else:
-        logging.info("[bootstrap] Storage selected: SQLite")
         logging.info("[bootstrap] SQLite database created and schema initialized")
 
     _ensure_system_wallet(repository)

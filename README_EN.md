@@ -75,7 +75,7 @@ Infographics:
 - Histogram of income/expenses by day of the month.
 - Histogram of income/expenses by month of the year.
 
-Income is displayed in green, expenses in red. For a pie chart, small categories are aggregated into "Other". The list of categories in the legend scrolls.
+Income is displayed in green, expenses in red. For a pie chart, small categories are aggregated into "Other". The list of categories in the legend scrolls. Records with the "Transfer" category have been excluded to improve analysis accuracy and consistency.
 
 ### Adding income/expense
 
@@ -238,6 +238,20 @@ Available methods:
 
 The service is strictly read-only and never modifies the database.
 Transfer records (`category='Transfer'`) are excluded from cashflow calculations to prevent double-counting.
+
+### Timeline Engine
+
+Analytical service that builds historical financial dynamics.
+
+| Method | Description |
+| --- | --- |
+| `get_net_worth_timeline()` | Net worth (KZT) at the end of each month |
+| `get_monthly_cashflow(start_date, end_date)` | Monthly income, expenses, and cashflow |
+| `get_cumulative_income_expense()` | Running totals of income and expenses by month |
+
+All methods are read-only. Transfers (`transfer_id IS NOT NULL`) are excluded from cashflow calculations
+to prevent double-counting; they are included in net worth (expense + income = 0, neutral).
+Initial balances (`wallets.initial_balance`) are included in every timeline point.
 
 ### Importing financial records
 
@@ -645,6 +659,9 @@ Below are the key classes and functions synchronized with the actual code.
 - `import_records(fmt, filepath, policy, force=False, dry_run=False)` — single entry point for dry-run and real record imports.
 - `import_mandatory(fmt, filepath)` — imports mandatory templates and returns `ImportResult`.
 - `run_audit()` — runs the Data Audit Engine through a use case and returns `AuditReport`.
+- `get_net_worth_timeline()` — net worth (KZT) at the end of each month (Timeline Engine, SQLite-only).
+- `get_monthly_cashflow(start_date=None, end_date=None)` — monthly income/expense/cashflow (excluding transfers).
+- `get_cumulative_income_expense()` — cumulative income/expense by month (excluding transfers).
 
 `gui/exporters.py`
 
@@ -686,6 +703,16 @@ Below are the key classes and functions synchronized with the actual code.
 - `get_cashflow(start_date, end_date)` — income, expenses, and net cashflow without transfer double-counting.
 - `get_income(start_date, end_date)` — income for a period without transfers.
 - `get_expenses(start_date, end_date)` — expenses for a period, including `mandatory_expense`.
+
+`services/timeline_service.py`
+
+- `MonthlyNetWorth(month, balance)` — immutable net worth snapshot at month end.
+- `MonthlyCashflow(month, income, expenses, cashflow)` — immutable monthly cashflow aggregate.
+- `MonthlyCumulative(month, cumulative_income, cumulative_expenses)` — immutable running totals by month.
+- `TimelineService(repository)` — read-only timeline analytics from `wallets` + `records`.
+- `get_net_worth_timeline()` — net worth (KZT) at the end of each month (includes transfer pairs, they net to zero).
+- `get_monthly_cashflow(start_date=None, end_date=None)` — monthly income/expense/cashflow (excludes `transfer_id IS NOT NULL`).
+- `get_cumulative_income_expense()` — cumulative income and expenses by month (excludes `transfer_id IS NOT NULL`).
 
 `app/finance_service.py`
 
@@ -817,7 +844,8 @@ project/
 │   ├── audit_service.py        # Audit service
 │   ├── balance_service.py      # Read-only balance and cashflow service
 │   ├── import_parser.py        # CSV/XLSX/JSON parser -> DTO
-│   └── import_service.py       # Import orchestration via FinanceService
+│   ├── import_service.py       # Import orchestration via FinanceService
+│   └── timeline_service.py     # Read-only timeline service
 │
 ├── utils/                      # Import/export and graphs
 │   ├── __init__.py
@@ -872,6 +900,7 @@ project/
     ├── test_schema_contracts.py
     ├── test_services.py
     ├── test_sqlite_runtime_storage.py
+    ├── test_timeline_service.py
     ├── test_use_cases.py
     ├── test_validation.py
     ├── test_transfer_integrity.py

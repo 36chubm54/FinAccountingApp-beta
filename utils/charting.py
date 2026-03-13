@@ -23,6 +23,8 @@ def aggregate_expenses_by_category(records: Iterable[Record]) -> dict[str, float
         if isinstance(record, IncomeRecord):
             continue
         if isinstance(record, (ExpenseRecord, MandatoryExpenseRecord)):
+            if record.category == "Transfer":
+                continue
             amount = record.amount_kzt
             if amount is not None:
                 totals[record.category] = totals.get(record.category, 0.0) + abs(amount)
@@ -37,6 +39,8 @@ def aggregate_daily_cashflow(
     expense = [0.0 for _ in range(days_in_month)]
 
     for record in records:
+        if record.category == "Transfer":
+            continue
         dt = _parse_date(record.date)
         if not dt:
             continue
@@ -62,6 +66,8 @@ def aggregate_monthly_cashflow(
     expense = [0.0 for _ in range(12)]
 
     for record in records:
+        if record.category == "Transfer":
+            continue
         dt = _parse_date(record.date)
         if not dt:
             continue

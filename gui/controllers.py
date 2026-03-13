@@ -46,6 +46,7 @@ from infrastructure.sqlite_repository import SQLiteRecordRepository
 from services.audit_service import AuditService
 from services.balance_service import BalanceService, CashflowResult, WalletBalance
 from services.import_service import ImportService
+from services.timeline_service import TimelineService
 
 logger = logging.getLogger(__name__)
 
@@ -442,3 +443,27 @@ class FinancialController:
 
     def get_expenses(self, start_date: str, end_date: str) -> float:
         return self._balance_service().get_expenses(start_date, end_date)
+
+    def _timeline_service(self) -> TimelineService:
+        if not isinstance(self._repository, SQLiteRecordRepository):
+            raise TypeError("Timeline Engine is supported only for SQLite repository")
+        return TimelineService(self._repository)
+
+    def get_net_worth_timeline(self) -> list:
+        """Net worth (KZT) at end of each month. Returns list[MonthlyNetWorth]."""
+        return self._timeline_service().get_net_worth_timeline()
+
+    def get_monthly_cashflow(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> list:
+        """Monthly income/expense/cashflow. Returns list[MonthlyCashflow]."""
+        return self._timeline_service().get_monthly_cashflow(
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    def get_cumulative_income_expense(self) -> list:
+        """Cumulative income and expenses per month. Returns list[MonthlyCumulative]."""
+        return self._timeline_service().get_cumulative_income_expense()

@@ -7,6 +7,43 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.4.1] - 2026-03-13
+
+### Added
+
+- Timeline Engine: read-only analytical service for historical net worth and cashflow
+- `TimelineService` in `services/timeline_service.py` with 3 methods:
+  `get_net_worth_timeline` — net worth per month via SQL window function
+  `get_monthly_cashflow` — income/expenses/cashflow per month with optional date range
+  `get_cumulative_income_expense` — running totals for income and expenses
+- `MonthlyNetWorth`, `MonthlyCashflow`, `MonthlyCumulative` frozen dataclasses as result types
+- `RunTimeline` use case in `app/use_cases.py`
+- Timeline delegation methods in `FinancialController`:
+  `get_net_worth_timeline`, `get_monthly_cashflow`, `get_cumulative_income_expense`
+
+### Changed
+
+- "Transfer" category excluded from charts (expenses by category, daily/monthly cashflow)
+
+### Removed
+
+- Remove obsolete log messages about the selected repository
+
+### Tests
+
+- Added `tests/test_timeline_service.py` with 12 scenarios covering empty DB behavior,
+  initial balance baseline, transfer neutrality for net worth, transfer exclusion in cashflow,
+  date filters, and read-only guarantee
+- Added 4 scenarios to `tests/test_charting.py` to cover aggregated data with the excluded "Transfer" category
+
+### Docs
+
+- Updated `README.md` and `README_EN.md` with Timeline Engine description
+
+No breaking changes.
+
+---
+
 ## [1.4.0] - 2026-03-11
 
 ### Added
@@ -135,7 +172,8 @@ No breaking changes.
 
 - Import Dry-run Mode: full parse and validation cycle without writing to SQLite
 - `ImportResult` dataclass (`domain/import_result.py`) with fields `imported`, `skipped`, `errors`, `dry_run`; replaces bare tuple returns from `ImportService`
-- Import preview dialog in `Operations` tab: displays record count, skipped rows, and errors before the user confirms the operation
+- Import preview dialog in `Operations` tab: displays record count, skipped rows
+  and errors before the user confirms the operation
 - `dry_run: bool = False` parameter in `ImportService.import_file(...)` and `FinanceService` protocol
 
 ### Changed

@@ -2,6 +2,7 @@ import logging
 from calendar import monthrange
 from dataclasses import replace
 from datetime import date as dt_date
+from typing import TYPE_CHECKING
 
 from app.use_case_support import (
     build_rate,
@@ -21,6 +22,9 @@ from infrastructure.repositories import RecordRepository
 from services.audit_service import AuditService
 
 from .services import CurrencyService
+
+if TYPE_CHECKING:
+    from services.timeline_service import TimelineService
 
 logger = logging.getLogger(__name__)
 SYSTEM_WALLET_ID = 1
@@ -737,3 +741,23 @@ class RunAudit:
 
     def execute(self) -> AuditReport:
         return self._service.run()
+
+
+class RunTimeline:
+    """Use case: run timeline analytics via TimelineService."""
+
+    def __init__(self, timeline_service: "TimelineService") -> None:
+        self._service = timeline_service
+
+    def execute_net_worth(self) -> list:
+        return self._service.get_net_worth_timeline()
+
+    def execute_monthly_cashflow(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> list:
+        return self._service.get_monthly_cashflow(start_date=start_date, end_date=end_date)
+
+    def execute_cumulative(self) -> list:
+        return self._service.get_cumulative_income_expense()

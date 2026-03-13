@@ -101,7 +101,7 @@ def test_import_service_skips_missing_wallet_and_does_not_apply_changes() -> Non
     assert summary == ImportResult(
         imported=0,
         skipped=1,
-        errors=tuple(["row 2: wallet not found (999)"]),
+        errors=("row 2: wallet not found (999)",),
     )
     finance_service.reset_operations_for_import.assert_not_called()
     finance_service.create_income.assert_not_called()
@@ -371,7 +371,7 @@ def test_import_service_reports_duplicate_initial_balance_rows() -> None:
     assert summary == ImportResult(
         imported=0,
         skipped=1,
-        errors=tuple(["row 3: duplicate initial_balance row"]),
+        errors=("row 3: duplicate initial_balance row",),
     )
     finance_service.reset_operations_for_import.assert_not_called()
 

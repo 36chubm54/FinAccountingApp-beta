@@ -75,7 +75,7 @@ python main.py
 - Гистограмма доходов/расходов по дням месяца.
 - Гистограмма доходов/расходов по месяцам года.
 
-Доходы отображаются зелёным, расходы — красным. Для круговой диаграммы малые категории агрегируются в «Other». Список категорий в легенде прокручивается.
+Доходы отображаются зелёным, расходы — красным. Для круговой диаграммы малые категории агрегируются в «Other». Список категорий в легенде прокручивается. Исключены записи с категорией "Transfer" для повышения точности анализа и консистентности.
 
 ### Добавление дохода/расхода
 
@@ -238,6 +238,20 @@ python main.py
 
 Сервис строго только читает данные — база никогда не изменяется.
 Переводы (`category='Transfer'`) исключаются из cashflow-расчётов во избежание двойного счёта.
+
+### Timeline Engine
+
+Аналитический сервис для построения исторической динамики финансов.
+
+| Метод | Описание |
+| --- | --- |
+| `get_net_worth_timeline()` | Net worth (KZT) на конец каждого месяца |
+| `get_monthly_cashflow(start_date, end_date)` | Доходы, расходы, сальдо по месяцам |
+| `get_cumulative_income_expense()` | Накопительные суммы доходов и расходов |
+
+Все методы read-only. Переводы (`transfer_id IS NOT NULL`) исключаются из cashflow-расчётов,
+чтобы избежать двойного счёта; в net worth включаются (expense + income = 0, нейтральны).
+Стартовый баланс (`wallets.initial_balance`) учитывается в каждой точке timeline.
 
 ### Импорт финансовых записей
 
@@ -645,6 +659,9 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `import_records(fmt, filepath, policy, force=False, dry_run=False)` — единая точка входа для dry-run и реального импорта операций.
 - `import_mandatory(fmt, filepath)` — импорт шаблонов обязательных расходов с результатом `ImportResult`.
 - `run_audit()` — запуск Data Audit Engine через use case и возврат `AuditReport`.
+- `get_net_worth_timeline()` — net worth (KZT) на конец каждого месяца (Timeline Engine, только SQLite).
+- `get_monthly_cashflow(start_date=None, end_date=None)` — доходы/расходы/cashflow по месяцам (исключая переводы).
+- `get_cumulative_income_expense()` — накопительные суммы доходов и расходов по месяцам (исключая переводы).
 
 `gui/exporters.py`
 
@@ -686,6 +703,16 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `get_cashflow(start_date, end_date)` — доходы, расходы и net cashflow без double-counting transfer.
 - `get_income(start_date, end_date)` — доходы за период без transfer.
 - `get_expenses(start_date, end_date)` — расходы за период, включая `mandatory_expense`.
+
+`services/timeline_service.py`
+
+- `MonthlyNetWorth(month, balance)` — immutable snapshot net worth на конец месяца.
+- `MonthlyCashflow(month, income, expenses, cashflow)` — immutable агрегат cashflow по месяцу.
+- `MonthlyCumulative(month, cumulative_income, cumulative_expenses)` — immutable накопительные суммы по месяцам.
+- `TimelineService(repository)` — read-only аналитика по timeline из `wallets` + `records`.
+- `get_net_worth_timeline()` — net worth (KZT) на конец каждого месяца (включая transfer-пары, они нейтральны).
+- `get_monthly_cashflow(start_date=None, end_date=None)` — доходы/расходы/cashflow по месяцам (исключая `transfer_id IS NOT NULL`).
+- `get_cumulative_income_expense()` — накопительные доходы и расходы по месяцам (исключая `transfer_id IS NOT NULL`).
 
 `app/finance_service.py`
 
@@ -817,7 +844,8 @@ project/
 │   ├── audit_service.py        # Сервис аудита
 │   ├── balance_service.py      # Read-only сервис балансов и cashflow
 │   ├── import_parser.py        # Парсер CSV/XLSX/JSON -> DTO
-│   └── import_service.py       # Оркестрация импорта через FinanceService
+│   ├── import_service.py       # Оркестрация импорта через FinanceService
+│   └── timeline_service.py     # Read-only сервис временных рядов
 │
 ├── utils/                      # Импорт/экспорт и графики
 │   ├── __init__.py
@@ -872,6 +900,7 @@ project/
     ├── test_schema_contracts.py
     ├── test_services.py
     ├── test_sqlite_runtime_storage.py
+    ├── test_timeline_service.py
     ├── test_use_cases.py
     ├── test_validation.py
     ├── test_transfer_integrity.py
