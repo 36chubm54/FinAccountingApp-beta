@@ -677,9 +677,9 @@ class ApplyMandatoryAutoPayments:
     def __init__(self, repository: RecordRepository):
         self._repository = repository
 
-    def execute(self, *, today: dt_date | None = None) -> int:
+    def execute(self, *, today: dt_date | None = None) -> list[MandatoryExpenseRecord]:
         current_date = today or dt_date.today()
-        created = 0
+        created_records: list[MandatoryExpenseRecord] = []
         records = self._repository.load_all()
         templates = self._repository.load_mandatory_expenses()
 
@@ -763,9 +763,9 @@ class ApplyMandatoryAutoPayments:
             )
             self._repository.save(record)
             records.append(record)
-            created += 1
+            created_records.append(record)
 
-        return created
+        return created_records
 
 
 class RunAudit:

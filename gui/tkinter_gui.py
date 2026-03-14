@@ -49,7 +49,19 @@ class FinancialApp(tk.Tk):
         try:
             created_auto_payments = self.controller.apply_mandatory_auto_payments()
             if created_auto_payments:
-                logger.info("Auto-applied mandatory payments on startup: %s", created_auto_payments)
+                logger.info(
+                    "Auto-applied mandatory payments on startup: %s", len(created_auto_payments)
+                )
+                details = []
+                for record in created_auto_payments:
+                    details.append(
+                        f"- {record.category}: {record.amount_kzt:.2f} KZT ({record.date})"
+                    )
+                message_text = (
+                    f"Successfully created {len(created_auto_payments)} autopayments:\n"
+                    + "\n".join(details)
+                )
+                messagebox.showinfo("Auto-payments applied", message_text)
         except Exception:
             logger.exception("Failed to apply mandatory auto payments on startup")
 

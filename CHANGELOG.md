@@ -7,6 +7,33 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.4.3] - 2026-03-14
+
+### Added
+
+- Mandatory auto‑pay now displays a detailed informational GUI message on startup when payments are applied.
+- The message includes a list of created mandatory expenses with category, amount (KZT) and date for improved transparency.
+
+### Changed
+
+- `ApplyMandatoryAutoPayments` use case now returns a list of created `MandatoryExpenseRecord` objects instead of a simple count.
+- `FinancialController.apply_mandatory_auto_payments()` adapted to return the list.
+- GUI startup logic in `tkinter_gui.py` builds a user‑friendly summary from the returned records.
+
+### Tests
+
+- Existing auto‑pay scenarios in `tests/test_mandatory_ux.py` updated.
+- All modified modules (`use_cases.py`, `controllers.py`, `tkinter_gui.py`) compile without syntax errors.
+- No regression introduced; test suite passes.
+
+### Docs
+
+- Updated `README.md` and `README_EN.md` to mention the enhanced startup notification.
+
+No breaking changes.
+
+---
+
 ## [1.4.2] - 2026-03-14
 
 ### Added

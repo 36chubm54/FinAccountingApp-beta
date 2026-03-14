@@ -65,7 +65,7 @@ After running `python main.py` from the `project` directory, a window will open 
 Tabs and actions:
 
 - `Infographics` — displays infographics (pie charts, histograms) with the ability to filter by month/year.
-- `Operations` — management of records and transfers (adding, deleting, importing/exporting).
+- `Operations` — management of records and transfers (adding, editing, deleting, importing/exporting).
 - `Reports` — report generation, export.
 - `Settings` — management of mandatory expenses and wallets.
 
@@ -76,6 +76,8 @@ Infographics:
 - Histogram of income/expenses by month of the year.
 
 Income is displayed in green, expenses in red. For a pie chart, small categories are aggregated into "Other". The list of categories in the legend scrolls. Records with the "Transfer" category have been excluded to improve analysis accuracy and consistency.
+
+> **Note:** After launching the application, mandatory payments are automatically applied with a detailed GUI message displayed.
 
 ### Adding income/expense
 

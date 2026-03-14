@@ -242,15 +242,15 @@ def test_auto_pay_creates_monthly_record_once(tmp_path: Path) -> None:
             date="2026-01-15",
         )
 
-        created = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 3, 20))
+        created_records = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 3, 20))
         created_again = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 3, 20))
 
         records = repo.load_all()
         mandatory_records = [
             record for record in records if isinstance(record, MandatoryExpenseRecord)
         ]
-        assert created == 1
-        assert created_again == 0
+        assert len(created_records) == 1
+        assert len(created_again) == 0
         assert len(mandatory_records) == 1
         assert str(mandatory_records[0].date) == "2026-03-15"
     finally:
@@ -270,9 +270,9 @@ def test_auto_pay_skips_before_due_day(tmp_path: Path) -> None:
             date="2026-01-25",
         )
 
-        created = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 3, 20))
+        created_records = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 3, 20))
 
-        assert created == 0
+        assert len(created_records) == 0
         assert repo.load_all() == []
     finally:
         repo.close()
@@ -291,12 +291,12 @@ def test_auto_pay_clamps_to_last_day_of_month(tmp_path: Path) -> None:
             date="2026-01-31",
         )
 
-        created = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 2, 28))
+        created_records = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 2, 28))
 
         mandatory_records = [
             record for record in repo.load_all() if isinstance(record, MandatoryExpenseRecord)
         ]
-        assert created == 1
+        assert len(created_records) == 1
         assert str(mandatory_records[0].date) == "2026-02-28"
     finally:
         repo.close()
@@ -315,14 +315,14 @@ def test_auto_pay_creates_daily_record_once(tmp_path: Path) -> None:
             date="2026-03-01",
         )
 
-        created = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 3, 20))
+        created_records = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 3, 20))
         created_again = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 3, 20))
 
         mandatory_records = [
             record for record in repo.load_all() if isinstance(record, MandatoryExpenseRecord)
         ]
-        assert created == 1
-        assert created_again == 0
+        assert len(created_records) == 1
+        assert len(created_again) == 0
         assert len(mandatory_records) == 1
         assert str(mandatory_records[0].date) == "2026-03-20"
     finally:
@@ -344,12 +344,12 @@ def test_auto_pay_creates_weekly_record_on_anchor_weekday(tmp_path: Path) -> Non
             date="2026-03-02",
         )
 
-        created = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 3, 14))
+        created_records = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 3, 14))
 
         mandatory_records = [
             record for record in repo.load_all() if isinstance(record, MandatoryExpenseRecord)
         ]
-        assert created == 1
+        assert len(created_records) == 1
         assert len(mandatory_records) == 1
         assert str(mandatory_records[0].date) == "2026-03-09"
     finally:
@@ -370,15 +370,15 @@ def test_auto_pay_creates_yearly_record_once(tmp_path: Path) -> None:
         )
 
         created_early = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 3, 20))
-        created = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 6, 20))
+        created_records = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 6, 20))
         created_again = ApplyMandatoryAutoPayments(repo).execute(today=date(2026, 6, 20))
 
         mandatory_records = [
             record for record in repo.load_all() if isinstance(record, MandatoryExpenseRecord)
         ]
-        assert created_early == 0
-        assert created == 1
-        assert created_again == 0
+        assert len(created_early) == 0
+        assert len(created_records) == 1
+        assert len(created_again) == 0
         assert len(mandatory_records) == 1
         assert str(mandatory_records[0].date) == "2026-06-15"
     finally:

@@ -326,7 +326,7 @@ class FinancialController:
     def delete_all_mandatory_expenses(self) -> None:
         DeleteAllMandatoryExpenses(self._repository).execute()
 
-    def apply_mandatory_auto_payments(self) -> int:
+    def apply_mandatory_auto_payments(self) -> list[MandatoryExpenseRecord]:
         return ApplyMandatoryAutoPayments(self._repository).execute()
 
     def reset_operations_for_import(self, *, initial_balance: float) -> None:
