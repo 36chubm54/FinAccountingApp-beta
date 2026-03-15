@@ -7,7 +7,32 @@ This project adheres to Semantic Versioning.
 
 ---
 
-## [1.4.3] - 2026-03-14
+## [1.4.3] - 2026-03-15
+
+- `MetricsService` in `services/metrics_service.py` — read-only financial metrics service (live SQL aggregates; no intermediate storage)
+- `CategorySpend` and `MonthlySummary` frozen dataclasses as result types
+- Metrics methods:
+  `get_savings_rate`, `get_burn_rate`, `get_spending_by_category`, `get_income_by_category`,
+  `get_top_expense_categories`, `get_monthly_summary`
+- `RunMetrics` use case in `app/use_cases.py`
+- Metrics delegation methods in `FinancialController`:
+  `get_savings_rate`, `get_burn_rate`, `get_spending_by_category`, `get_income_by_category`,
+  `get_top_expense_categories`, `get_monthly_summary`
+
+### Tests
+
+- Added `tests/test_metrics_service.py` with scenarios covering empty DB, transfer exclusion,
+  limits, division-by-zero safety, and read-only guarantee.
+
+### Docs
+
+- Updated `README.md` and `README_EN.md` to mention Metrics Engine and the enhanced startup notification.
+
+No breaking changes.
+
+---
+
+## [1.4.2] - 2026-03-14
 
 ### Added
 
@@ -34,7 +59,7 @@ No breaking changes.
 
 ---
 
-## [1.4.2] - 2026-03-14
+## [1.4.1] - 2026-03-14
 
 ### Added
 
@@ -59,7 +84,7 @@ No breaking changes.
 
 ---
 
-## [1.4.1] - 2026-03-13
+## [1.4.0] - 2026-03-13
 
 ### Added
 
@@ -96,7 +121,7 @@ No breaking changes.
 
 ---
 
-## [1.4.0] - 2026-03-11
+## [1.3.3] - 2026-03-11
 
 ### Added
 

@@ -259,6 +259,22 @@ All methods are read-only. Transfers (`transfer_id IS NOT NULL`) are excluded fr
 to prevent double-counting; they are included in net worth (expense + income = 0, neutral).
 Initial balances (`wallets.initial_balance`) are included in every timeline point.
 
+### Metrics Engine
+
+Analytical service for calculating financial metrics on the fly.
+
+| Method | Description |
+| --- | --- |
+| `get_savings_rate(start, end)` | Savings rate (%) for a custom period |
+| `get_burn_rate(start, end)` | Average daily expense (KZT) |
+| `get_spending_by_category(start, end)` | Expenses by category, sorted descending |
+| `get_income_by_category(start, end)` | Income by category, sorted descending |
+| `get_top_expense_categories(start, end, top_n)` | Top N expense categories |
+| `get_monthly_summary(start, end)` | Monthly income/expenses/cashflow/savings rate |
+
+All methods are read-only. Transfers are excluded from all calculations (`transfer_id IS NULL`).
+Metrics are computed via SQL aggregates with no intermediate storage.
+
 ### Importing financial records
 
 Import is performed via `Import` in the `Operations` tab.
@@ -670,6 +686,12 @@ Below are the key classes and functions synchronized with the actual code.
 - `get_net_worth_timeline()` — net worth (KZT) at the end of each month (Timeline Engine, SQLite-only).
 - `get_monthly_cashflow(start_date=None, end_date=None)` — monthly income/expense/cashflow (excluding transfers).
 - `get_cumulative_income_expense()` — cumulative income/expense by month (excluding transfers).
+- `get_savings_rate(start_date, end_date)` — savings rate (%) for a period (Metrics Engine, SQLite-only).
+- `get_burn_rate(start_date, end_date)` — average daily expense (KZT) (Metrics Engine, SQLite-only).
+- `get_spending_by_category(start_date, end_date, limit=None)` — expenses by category (Metrics Engine, SQLite-only).
+- `get_income_by_category(start_date, end_date, limit=None)` — income by category (Metrics Engine, SQLite-only).
+- `get_top_expense_categories(start_date, end_date, top_n=5)` — top expense categories (Metrics Engine, SQLite-only).
+- `get_monthly_summary(start_date=None, end_date=None)` — monthly aggregates (Metrics Engine, SQLite-only).
 
 `gui/exporters.py`
 
@@ -721,6 +743,18 @@ Below are the key classes and functions synchronized with the actual code.
 - `get_net_worth_timeline()` — net worth (KZT) at the end of each month (includes transfer pairs, they net to zero).
 - `get_monthly_cashflow(start_date=None, end_date=None)` — monthly income/expense/cashflow (excludes `transfer_id IS NOT NULL`).
 - `get_cumulative_income_expense()` — cumulative income and expenses by month (excludes `transfer_id IS NOT NULL`).
+
+`services/metrics_service.py`
+
+- `CategorySpend(category, total_kzt, record_count)` — immutable per-category aggregate.
+- `MonthlySummary(month, income, expenses, cashflow, savings_rate)` — immutable monthly aggregate.
+- `MetricsService(repository)` — read-only metrics analytics over `records`.
+- `get_savings_rate(start_date, end_date)` — (income - expenses) / income * 100, safe division by zero.
+- `get_burn_rate(start_date, end_date)` — average daily expense (KZT) for date range.
+- `get_spending_by_category(start_date, end_date, limit=None)` — expenses by category, sorted descending.
+- `get_income_by_category(start_date, end_date, limit=None)` — income by category, sorted descending.
+- `get_top_expense_categories(start_date, end_date, top_n=5)` — wrapper over `get_spending_by_category`.
+- `get_monthly_summary(start_date=None, end_date=None)` — per-month aggregates (income/expenses/cashflow/savings_rate).
 
 `app/finance_service.py`
 
@@ -853,6 +887,7 @@ project/
 │   ├── balance_service.py      # Read-only balance and cashflow service
 │   ├── import_parser.py        # CSV/XLSX/JSON parser -> DTO
 │   ├── import_service.py       # Import orchestration via FinanceService
+│   ├── metrics_service.py      # Read-only financial metrics service
 │   └── timeline_service.py     # Read-only timeline service
 │
 ├── utils/                      # Import/export and graphs
@@ -901,6 +936,7 @@ project/
     ├── test_import_security.py
     ├── test_import_service.py
     ├── test_mandatory_ux.py
+    ├── test_metrics_service.py
     ├── test_pdf.py
     ├── test_records.py
     ├── test_reports.py

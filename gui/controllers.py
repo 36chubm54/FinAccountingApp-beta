@@ -46,6 +46,7 @@ from infrastructure.sqlite_repository import SQLiteRecordRepository
 from services.audit_service import AuditService
 from services.balance_service import BalanceService, CashflowResult, WalletBalance
 from services.import_service import ImportService
+from services.metrics_service import MetricsService
 from services.timeline_service import TimelineService
 
 logger = logging.getLogger(__name__)
@@ -476,3 +477,40 @@ class FinancialController:
     def get_cumulative_income_expense(self) -> list:
         """Cumulative income and expenses per month. Returns list[MonthlyCumulative]."""
         return self._timeline_service().get_cumulative_income_expense()
+
+    def _metrics_service(self) -> MetricsService:
+        if not isinstance(self._repository, SQLiteRecordRepository):
+            raise TypeError("Metrics Engine is supported only for SQLite repository")
+        return MetricsService(self._repository)
+
+    def get_savings_rate(self, start_date: str, end_date: str) -> float:
+        """Savings rate (%) for [start_date, end_date]."""
+        return self._metrics_service().get_savings_rate(start_date, end_date)
+
+    def get_burn_rate(self, start_date: str, end_date: str) -> float:
+        """Average daily expense (KZT) for [start_date, end_date]."""
+        return self._metrics_service().get_burn_rate(start_date, end_date)
+
+    def get_spending_by_category(
+        self, start_date: str, end_date: str, *, limit: int | None = None
+    ) -> list:
+        """Expenses per category, sorted descending. Returns list[CategorySpend]."""
+        return self._metrics_service().get_spending_by_category(start_date, end_date, limit=limit)
+
+    def get_income_by_category(
+        self, start_date: str, end_date: str, *, limit: int | None = None
+    ) -> list:
+        """Income per category, sorted descending. Returns list[CategorySpend]."""
+        return self._metrics_service().get_income_by_category(start_date, end_date, limit=limit)
+
+    def get_top_expense_categories(self, start_date: str, end_date: str, *, top_n: int = 5) -> list:
+        """Top N expense categories by total. Returns list[CategorySpend]."""
+        return self._metrics_service().get_top_expense_categories(start_date, end_date, top_n=top_n)
+
+    def get_monthly_summary(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> list:
+        """Per-month income/expenses/cashflow/savings_rate. Returns list[MonthlySummary]."""
+        return self._metrics_service().get_monthly_summary(start_date=start_date, end_date=end_date)

@@ -259,6 +259,22 @@ python main.py
 чтобы избежать двойного счёта; в net worth включаются (expense + income = 0, нейтральны).
 Стартовый баланс (`wallets.initial_balance`) учитывается в каждой точке timeline.
 
+### Metrics Engine
+
+Аналитический сервис для вычисления финансовых метрик на лету.
+
+| Метод | Описание |
+| --- | --- |
+| `get_savings_rate(start, end)` | Норма сбережений (%) за период |
+| `get_burn_rate(start, end)` | Средний дневной расход (KZT) |
+| `get_spending_by_category(start, end)` | Расходы по категориям, сортировка по убыванию |
+| `get_income_by_category(start, end)` | Доходы по категориям, сортировка по убыванию |
+| `get_top_expense_categories(start, end, top_n)` | Топ N категорий расходов |
+| `get_monthly_summary(start, end)` | Доходы, расходы, сальдо, норма сбережений по месяцам |
+
+Все методы read-only. Переводы (`transfer_id IS NULL`) исключаются из всех расчётов.
+Метрики вычисляются через SQL-агрегаты без промежуточного хранения.
+
 ### Импорт финансовых записей
 
 Импорт выполняется через `Import` во вкладке `Operations`.
@@ -670,6 +686,12 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `get_net_worth_timeline()` — net worth (KZT) на конец каждого месяца (Timeline Engine, только SQLite).
 - `get_monthly_cashflow(start_date=None, end_date=None)` — доходы/расходы/cashflow по месяцам (исключая переводы).
 - `get_cumulative_income_expense()` — накопительные суммы доходов и расходов по месяцам (исключая переводы).
+- `get_savings_rate(start_date, end_date)` — норма сбережений (%) за период (Metrics Engine, только SQLite).
+- `get_burn_rate(start_date, end_date)` — средний дневной расход (KZT) (Metrics Engine, только SQLite).
+- `get_spending_by_category(start_date, end_date, limit=None)` — расходы по категориям (Metrics Engine, только SQLite).
+- `get_income_by_category(start_date, end_date, limit=None)` — доходы по категориям (Metrics Engine, только SQLite).
+- `get_top_expense_categories(start_date, end_date, top_n=5)` — топ категорий расходов (Metrics Engine, только SQLite).
+- `get_monthly_summary(start_date=None, end_date=None)` — месячные агрегаты (Metrics Engine, только SQLite).
 
 `gui/exporters.py`
 
@@ -721,6 +743,18 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `get_net_worth_timeline()` — net worth (KZT) на конец каждого месяца (включая transfer-пары, они нейтральны).
 - `get_monthly_cashflow(start_date=None, end_date=None)` — доходы/расходы/cashflow по месяцам (исключая `transfer_id IS NOT NULL`).
 - `get_cumulative_income_expense()` — накопительные доходы и расходы по месяцам (исключая `transfer_id IS NOT NULL`).
+
+`services/metrics_service.py`
+
+- `CategorySpend(category, total_kzt, record_count)` — immutable агрегат по категории.
+- `MonthlySummary(month, income, expenses, cashflow, savings_rate)` — immutable агрегат по месяцу.
+- `MetricsService(repository)` — read-only аналитика финансовых метрик по `records`.
+- `get_savings_rate(start_date, end_date)` — (income - expenses) / income * 100, safe division by zero.
+- `get_burn_rate(start_date, end_date)` — average daily expenses (KZT) for date range.
+- `get_spending_by_category(start_date, end_date, limit=None)` — расходы по категориям, сортировка по убыванию.
+- `get_income_by_category(start_date, end_date, limit=None)` — доходы по категориям, сортировка по убыванию.
+- `get_top_expense_categories(start_date, end_date, top_n=5)` — wrapper над `get_spending_by_category`.
+- `get_monthly_summary(start_date=None, end_date=None)` — агрегаты по месяцам (income/expenses/cashflow/savings_rate).
 
 `app/finance_service.py`
 
@@ -853,6 +887,7 @@ project/
 │   ├── balance_service.py      # Read-only сервис балансов и cashflow
 │   ├── import_parser.py        # Парсер CSV/XLSX/JSON -> DTO
 │   ├── import_service.py       # Оркестрация импорта через FinanceService
+│   ├── metrics_service.py      # Read-only сервис финансовых метрик
 │   └── timeline_service.py     # Read-only сервис временных рядов
 │
 ├── utils/                      # Импорт/экспорт и графики
@@ -901,6 +936,7 @@ project/
     ├── test_import_security.py
     ├── test_import_service.py
     ├── test_mandatory_ux.py
+    ├── test_metrics_service.py
     ├── test_pdf.py
     ├── test_records.py
     ├── test_reports.py

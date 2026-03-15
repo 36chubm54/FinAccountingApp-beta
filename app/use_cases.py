@@ -25,6 +25,7 @@ from services.audit_service import AuditService
 from .services import CurrencyService
 
 if TYPE_CHECKING:
+    from services.metrics_service import MetricsService
     from services.timeline_service import TimelineService
 
 logger = logging.getLogger(__name__)
@@ -794,3 +795,38 @@ class RunTimeline:
 
     def execute_cumulative(self) -> list:
         return self._service.get_cumulative_income_expense()
+
+
+class RunMetrics:
+    """Use case: compute financial metrics via MetricsService."""
+
+    def __init__(self, metrics_service: "MetricsService") -> None:
+        self._service = metrics_service
+
+    def execute_savings_rate(self, start_date: str, end_date: str) -> float:
+        return self._service.get_savings_rate(start_date, end_date)
+
+    def execute_burn_rate(self, start_date: str, end_date: str) -> float:
+        return self._service.get_burn_rate(start_date, end_date)
+
+    def execute_spending_by_category(
+        self, start_date: str, end_date: str, *, limit: int | None = None
+    ) -> list:
+        return self._service.get_spending_by_category(start_date, end_date, limit=limit)
+
+    def execute_income_by_category(
+        self, start_date: str, end_date: str, *, limit: int | None = None
+    ) -> list:
+        return self._service.get_income_by_category(start_date, end_date, limit=limit)
+
+    def execute_top_expense_categories(
+        self, start_date: str, end_date: str, *, top_n: int = 5
+    ) -> list:
+        return self._service.get_top_expense_categories(start_date, end_date, top_n=top_n)
+
+    def execute_monthly_summary(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> list:
+        return self._service.get_monthly_summary(start_date=start_date, end_date=end_date)
