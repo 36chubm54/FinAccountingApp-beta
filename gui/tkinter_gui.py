@@ -75,6 +75,7 @@ class FinancialApp(tk.Tk):
         self.records_listbox: Listbox | None = None
         self.refresh_operation_wallet_menu: Callable[[], None] | None = None
         self.refresh_transfer_wallet_menus: Callable[[], None] | None = None
+        self.refresh_wallets: Callable[[], None] | None = None
 
         self.pie_month_var: tk.StringVar | None = None
         self.pie_month_menu: ttk.OptionMenu | None = None
@@ -247,6 +248,24 @@ class FinancialApp(tk.Tk):
         self._draw_expense_pie(records)
         self._draw_daily_bars(records)
         self._draw_monthly_bars(records)
+
+    def _refresh_wallets(self) -> None:
+        """Refresh wallet list in settings tab and wallet menus in operations tab."""
+        if self.refresh_wallets is not None:
+            try:
+                self.refresh_wallets()
+            except Exception:
+                pass
+        if self.refresh_operation_wallet_menu is not None:
+            try:
+                self.refresh_operation_wallet_menu()
+            except Exception:
+                pass
+        if self.refresh_transfer_wallet_menus is not None:
+            try:
+                self.refresh_transfer_wallet_menus()
+            except Exception:
+                pass
 
     def _on_chart_filter_change(self, *_args: Any) -> None:
         if self._chart_refresh_suspended:

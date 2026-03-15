@@ -25,6 +25,8 @@ class OperationsTabContext(Protocol):
 
     def _refresh_charts(self) -> None: ...
 
+    def _refresh_wallets(self) -> None: ...
+
     def _run_background(
         self,
         task: Callable[[], Any],
@@ -279,7 +281,7 @@ def build_operations_tab(
             description_entry.delete(0, tk.END)
             context._refresh_list()
             context._refresh_charts()
-            refresh_operation_wallet_menu()
+            context._refresh_wallets()
         except Exception as error:
             messagebox.showerror("Error", f"Failed to add record: {str(error)}")
 
@@ -580,6 +582,7 @@ def build_operations_tab(
             transfer_commission_entry.insert(0, "0")
             context._refresh_list()
             context._refresh_charts()
+            context._refresh_wallets()
         except Exception as error:
             messagebox.showerror("Error", f"Failed to create transfer: {str(error)}")
 
@@ -632,6 +635,7 @@ def build_operations_tab(
             )
             context._refresh_list()
             context._refresh_charts()
+            context._refresh_wallets()
 
         def on_error(exc: BaseException) -> None:
             if isinstance(exc, FileNotFoundError):

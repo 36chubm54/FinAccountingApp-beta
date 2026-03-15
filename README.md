@@ -603,6 +603,15 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `AddMandatoryExpenseToReport.execute(index, date)`.
 - `RunAudit.execute()` — запускает read-only аудит данных и возвращает `AuditReport`.
 
+`app/use_case_support.py`
+
+- Общие helper'ы для сценариев use case без собственной доменной логики.
+
+`app/finance_service.py`
+
+- Протокол `FinanceService` для import-оркестратора (`ImportService`).
+- Явно описывает методы импорта, rollback и нормализации идентификаторов.
+
 `app/record_service.py`
 
 - `RecordService.update_amount_kzt(record_id, new_amount_kzt)` — безопасное обновление суммы через immutable-модель и repository replace.
@@ -704,6 +713,16 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 
 - Legacy-обёртки над `utils/*` для обратной совместимости и unit-тестов.
 
+`gui/helpers.py`
+
+- `open_in_file_manager(path)`.
+
+`gui/controller_support.py`
+
+- Вспомогательные структуры и helper'ы для GUI-контроллера (`RecordListItem`, list-building, import normalization).
+
+### Services
+
 `services/import_parser.py`
 
 - `parse_import_file(path, force=False)` -> `ParsedImportData` (DTO/словарный слой, без записи в хранилище).
@@ -755,23 +774,6 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `get_income_by_category(start_date, end_date, limit=None)` — доходы по категориям, сортировка по убыванию.
 - `get_top_expense_categories(start_date, end_date, top_n=5)` — wrapper над `get_spending_by_category`.
 - `get_monthly_summary(start_date=None, end_date=None)` — агрегаты по месяцам (income/expenses/cashflow/savings_rate).
-
-`app/finance_service.py`
-
-- Протокол `FinanceService` для import-оркестратора (`ImportService`).
-- Явно описывает методы импорта, rollback и нормализации идентификаторов.
-
-`app/use_case_support.py`
-
-- Общие helper'ы для сценариев use case без собственной доменной логики.
-
-`gui/helpers.py`
-
-- `open_in_file_manager(path)`.
-
-`gui/controller_support.py`
-
-- Вспомогательные структуры и helper'ы для GUI-контроллера (`RecordListItem`, list-building, import normalization).
 
 ### Utils
 

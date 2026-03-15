@@ -17,6 +17,7 @@ class SettingsTabContext(Protocol):
     repository: Any
     refresh_operation_wallet_menu: Callable[[], None] | None
     refresh_transfer_wallet_menus: Callable[[], None] | None
+    refresh_wallets: Callable[[], None] | None
 
     def _refresh_list(self) -> None: ...
 
@@ -222,6 +223,8 @@ def build_settings_tab(
             except Exception:
                 pass
 
+    context.refresh_wallets = refresh_wallets
+
     def create_wallet() -> None:
         try:
             initial_balance = float(wallet_initial_entry.get().strip() or "0")
@@ -361,7 +364,9 @@ def build_settings_tab(
         wallet_menu = mandatory_wallet_menu["menu"]
         wallet_menu.delete(0, "end")
         for label in wallet_labels:
-            wallet_menu.add_command(label=label, command=lambda value=label: mandatory_wallet_var.set(value))
+            wallet_menu.add_command(
+                label=label, command=lambda value=label: mandatory_wallet_var.set(value)
+            )
         mandatory_wallet_var.set(wallet_labels[0])
 
         ttk.Label(add_panel, text="Category (default Mandatory):").grid(row=3, column=0, sticky="w")
@@ -467,7 +472,9 @@ def build_settings_tab(
         wallet_menu = edit_wallet_menu["menu"]
         wallet_menu.delete(0, "end")
         for label in edit_wallet_labels:
-            wallet_menu.add_command(label=label, command=lambda value=label: edit_wallet_var.set(value))
+            wallet_menu.add_command(
+                label=label, command=lambda value=label: edit_wallet_var.set(value)
+            )
         current_wallet_label = next(
             (label for label, wid in edit_wallet_map.items() if int(wid) == int(expense.wallet_id)),
             edit_wallet_labels[0],
@@ -515,7 +522,9 @@ def build_settings_tab(
                 return
             if int(new_wallet_id) != int(expense.wallet_id):
                 try:
-                    context.controller.update_mandatory_expense_wallet_id(expense_id, int(new_wallet_id))
+                    context.controller.update_mandatory_expense_wallet_id(
+                        expense_id, int(new_wallet_id)
+                    )
                 except ValueError as error:
                     messagebox.showerror("Wallet error", str(error))
                     return

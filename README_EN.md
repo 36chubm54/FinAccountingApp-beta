@@ -603,6 +603,15 @@ Below are the key classes and functions synchronized with the actual code.
 - `AddMandatoryExpenseToReport.execute(index, date)`.
 - `RunAudit.execute()` — runs the read-only data audit and returns an `AuditReport`.
 
+`app/use_case_support.py`
+
+- Shared helper functions for use cases without separate domain logic.
+
+`app/finance_service.py`
+
+- `FinanceService` protocol used by the import orchestrator (`ImportService`).
+- Defines import-facing methods, rollback wrapper, and ID normalization.
+
 `app/record_service.py`
 
 - `RecordService.update_amount_kzt(record_id, new_amount_kzt)` — safe amount update via immutable domain objects and repository replace.
@@ -704,6 +713,16 @@ Below are the key classes and functions synchronized with the actual code.
 
 - Legacy wrappers over `utils/*` kept for backward compatibility and tests.
 
+`gui/helpers.py`
+
+- `open_in_file_manager(path)`.
+
+`gui/controller_support.py`
+
+- Support structures and helpers for the GUI controller (`RecordListItem`, list building, import normalization).
+
+### Services
+
 `services/import_parser.py`
 
 - `parse_import_file(path, force=False)` -> `ParsedImportData` (DTO/dict parsing layer, no storage writes).
@@ -755,23 +774,6 @@ Below are the key classes and functions synchronized with the actual code.
 - `get_income_by_category(start_date, end_date, limit=None)` — income by category, sorted descending.
 - `get_top_expense_categories(start_date, end_date, top_n=5)` — wrapper over `get_spending_by_category`.
 - `get_monthly_summary(start_date=None, end_date=None)` — per-month aggregates (income/expenses/cashflow/savings_rate).
-
-`app/finance_service.py`
-
-- `FinanceService` protocol used by the import orchestrator (`ImportService`).
-- Defines import-facing methods, rollback wrapper, and ID normalization.
-
-`app/use_case_support.py`
-
-- Shared helper functions for use cases without separate domain logic.
-
-`gui/helpers.py`
-
-- `open_in_file_manager(path)`.
-
-`gui/controller_support.py`
-
-- Support structures and helpers for the GUI controller (`RecordListItem`, list building, import normalization).
 
 ### Utils
 
