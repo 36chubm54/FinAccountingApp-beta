@@ -11,6 +11,7 @@ from bootstrap import bootstrap_repository
 from domain.import_policy import ImportPolicy
 from gui.controllers import FinancialController
 from gui.tabs import (
+    build_analytics_tab,
     build_infographics_tab,
     build_operations_tab,
     build_reports_tab,
@@ -95,11 +96,13 @@ class FinancialApp(tk.Tk):
         self.tab_infographics = ttk.Frame(notebook)
         self.tab_operations = ttk.Frame(notebook)
         self.tab_reports = ttk.Frame(notebook)
+        self.tab_analytics = ttk.Frame(notebook)
         self.tab_settings = ttk.Frame(notebook)
 
         notebook.add(self.tab_infographics, text="Infographics")
         notebook.add(self.tab_operations, text="Operations")
         notebook.add(self.tab_reports, text="Reports")
+        notebook.add(self.tab_analytics, text="Analytics")
         notebook.add(self.tab_settings, text="Settings")
 
         infographics = build_infographics_tab(
@@ -129,6 +132,7 @@ class FinancialApp(tk.Tk):
         self.refresh_transfer_wallet_menus = operations.refresh_transfer_wallet_menus
 
         build_reports_tab(self.tab_reports, self)
+        self._analytics_bindings = build_analytics_tab(self.tab_analytics, context=self)
         build_settings_tab(self.tab_settings, self, IMPORT_FORMATS)
 
         self.progress = ttk.Progressbar(self, mode="indeterminate")

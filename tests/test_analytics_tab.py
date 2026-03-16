@@ -1,0 +1,265 @@
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+from app.services import CurrencyService
+from gui.controllers import FinancialController
+from infrastructure.sqlite_repository import SQLiteRecordRepository
+
+
+def _schema_path() -> str:
+    return str(Path(__file__).resolve().parents[1] / "db" / "schema.sql")
+
+
+def _init_db(path: Path) -> None:
+    conn = sqlite3.connect(path)
+    try:
+        conn.executescript(Path(_schema_path()).read_text(encoding="utf-8"))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _insert_wallet(
+    conn: sqlite3.Connection, wallet_id: int, *, initial_balance: float = 0.0
+) -> None:
+    conn.execute(
+        "INSERT INTO wallets (id, name, currency, initial_balance, is_active) "
+        "VALUES (?, 'Test', 'KZT', ?, 1)",
+        (int(wallet_id), float(initial_balance)),
+    )
+    conn.commit()
+
+
+def _insert_transfer(
+    conn: sqlite3.Connection,
+    *,
+    transfer_id: int,
+    from_wallet_id: int,
+    to_wallet_id: int,
+    date: str,
+    amount_kzt: float,
+) -> None:
+    conn.execute(
+        "INSERT INTO transfers "
+        "(id, from_wallet_id, to_wallet_id, date, amount_original, currency, "
+        "rate_at_operation, amount_kzt, description) "
+        "VALUES (?, ?, ?, ?, ?, 'KZT', 1.0, ?, 'Transfer')",
+        (
+            int(transfer_id),
+            int(from_wallet_id),
+            int(to_wallet_id),
+            str(date),
+            float(amount_kzt),
+            float(amount_kzt),
+        ),
+    )
+    conn.commit()
+
+
+def _insert_record(
+    conn: sqlite3.Connection,
+    *,
+    record_type: str,
+    date: str,
+    wallet_id: int,
+    amount_kzt: float,
+    transfer_id=None,
+    category: str = "General",
+) -> None:
+    conn.execute(
+        "INSERT INTO records "
+        "(type, date, wallet_id, transfer_id, amount_original, currency, "
+        "rate_at_operation, amount_kzt, category) "
+        "VALUES (?, ?, ?, ?, ?, 'KZT', 1.0, ?, ?)",
+        (
+            str(record_type),
+            str(date),
+            int(wallet_id),
+            transfer_id,
+            float(amount_kzt),
+            float(amount_kzt),
+            str(category),
+        ),
+    )
+    conn.commit()
+
+
+def _make_controller(db_path: Path) -> tuple[SQLiteRecordRepository, FinancialController]:
+    repo = SQLiteRecordRepository(str(db_path), schema_path=_schema_path())
+    controller = FinancialController(repo, CurrencyService())
+    return repo, controller
+
+
+def test_empty_db_get_savings_rate_returns_zero(tmp_path: Path) -> None:
+    repo, controller = _make_controller(tmp_path / "analytics.db")
+    try:
+        assert controller.get_savings_rate("2026-01-01", "2026-01-31") == 0.0
+    finally:
+        repo.close()
+
+
+def test_empty_db_get_monthly_summary_returns_empty_list(tmp_path: Path) -> None:
+    repo, controller = _make_controller(tmp_path / "analytics.db")
+    try:
+        assert controller.get_monthly_summary("2026-01-01", "2026-03-31") == []
+    finally:
+        repo.close()
+
+
+def test_empty_db_get_net_worth_timeline_returns_empty_list(tmp_path: Path) -> None:
+    repo, controller = _make_controller(tmp_path / "analytics.db")
+    try:
+        assert controller.get_net_worth_timeline() == []
+    finally:
+        repo.close()
+
+
+def test_monthly_summary_three_months_returns_three_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "analytics.db"
+    _init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        _insert_wallet(conn, 1)
+        _insert_record(conn, record_type="income", date="2026-01-05", wallet_id=1, amount_kzt=100.0)
+        _insert_record(conn, record_type="expense", date="2026-02-05", wallet_id=1, amount_kzt=20.0)
+        _insert_record(conn, record_type="income", date="2026-03-05", wallet_id=1, amount_kzt=10.0)
+    finally:
+        conn.close()
+
+    repo, controller = _make_controller(db_path)
+    try:
+        rows = controller.get_monthly_summary("2026-01-01", "2026-03-31")
+        assert len(rows) == 3
+    finally:
+        repo.close()
+
+
+def test_savings_rate_positive_when_income_exceeds_expenses(tmp_path: Path) -> None:
+    db_path = tmp_path / "analytics.db"
+    _init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        _insert_wallet(conn, 1)
+        _insert_record(
+            conn, record_type="income", date="2026-01-01", wallet_id=1, amount_kzt=1000.0
+        )
+        _insert_record(
+            conn, record_type="expense", date="2026-01-02", wallet_id=1, amount_kzt=200.0
+        )
+    finally:
+        conn.close()
+
+    repo, controller = _make_controller(db_path)
+    try:
+        assert controller.get_savings_rate("2026-01-01", "2026-01-31") > 0
+    finally:
+        repo.close()
+
+
+def test_savings_rate_negative_when_expenses_exceed_income(tmp_path: Path) -> None:
+    db_path = tmp_path / "analytics.db"
+    _init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        _insert_wallet(conn, 1)
+        _insert_record(
+            conn, record_type="income", date="2026-01-01", wallet_id=1, amount_kzt=1000.0
+        )
+        _insert_record(
+            conn, record_type="expense", date="2026-01-02", wallet_id=1, amount_kzt=2000.0
+        )
+    finally:
+        conn.close()
+
+    repo, controller = _make_controller(db_path)
+    try:
+        assert controller.get_savings_rate("2026-01-01", "2026-01-31") < 0
+    finally:
+        repo.close()
+
+
+def test_transfer_records_do_not_affect_savings_rate(tmp_path: Path) -> None:
+    db_path = tmp_path / "analytics.db"
+    _init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        _insert_wallet(conn, 1)
+        _insert_wallet(conn, 2)
+        _insert_record(
+            conn, record_type="income", date="2026-01-01", wallet_id=1, amount_kzt=1000.0
+        )
+        _insert_record(
+            conn, record_type="expense", date="2026-01-02", wallet_id=1, amount_kzt=200.0
+        )
+
+        _insert_transfer(
+            conn,
+            transfer_id=1,
+            from_wallet_id=1,
+            to_wallet_id=2,
+            date="2026-01-10",
+            amount_kzt=500.0,
+        )
+        _insert_record(
+            conn,
+            record_type="expense",
+            date="2026-01-10",
+            wallet_id=1,
+            amount_kzt=500.0,
+            transfer_id=1,
+            category="Transfer",
+        )
+        _insert_record(
+            conn,
+            record_type="income",
+            date="2026-01-10",
+            wallet_id=2,
+            amount_kzt=500.0,
+            transfer_id=1,
+            category="Transfer",
+        )
+    finally:
+        conn.close()
+
+    repo, controller = _make_controller(db_path)
+    try:
+        assert controller.get_savings_rate("2026-01-01", "2026-01-31") == 80.0
+    finally:
+        repo.close()
+
+
+def test_get_spending_by_category_with_limit_returns_at_most_limit(tmp_path: Path) -> None:
+    db_path = tmp_path / "analytics.db"
+    _init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        _insert_wallet(conn, 1)
+        for idx, (cat, amount) in enumerate(
+            [
+                ("A", 100.0),
+                ("B", 200.0),
+                ("C", 300.0),
+                ("D", 400.0),
+                ("E", 500.0),
+            ],
+            start=1,
+        ):
+            _insert_record(
+                conn,
+                record_type="expense",
+                date=f"2026-01-{idx:02d}",
+                wallet_id=1,
+                amount_kzt=amount,
+                category=cat,
+            )
+    finally:
+        conn.close()
+
+    repo, controller = _make_controller(db_path)
+    try:
+        rows = controller.get_spending_by_category("2026-01-01", "2026-01-31", limit=3)
+        assert len(rows) <= 3
+    finally:
+        repo.close()

@@ -7,6 +7,34 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.5.0] - 2026-03-15
+
+### Added
+
+- `Analytics` tab in the main Notebook (between Reports and Settings)
+- Dashboard section: net worth (KZT), savings rate (%), burn rate (KZT/day)
+- Net worth timeline chart (line chart on `tk.Canvas`, monthly granularity)
+- Category Breakdown: spending and income Treeviews + expenses pie chart on `tk.Canvas`
+- Monthly Report: Treeview with income, expenses, cashflow, savings rate per month
+- Period filter (`From` / `To`, `YYYY-MM-DD`) with `Refresh` button
+- Positive/negative cashflow rows colored green/red in Monthly Report
+
+### Fixed
+
+- Wallet lists/menus now refresh after operations that change wallets/data (GUI)
+
+### Tests
+
+- Added `tests/test_analytics_tab.py` with 8 headless scenarios (service-level)
+
+### Docs
+
+- Updated `README.md` and `README_EN.md` to document the Analytics tab
+
+No breaking changes.
+
+---
+
 ## [1.4.3] - 2026-03-15
 
 - `MetricsService` in `services/metrics_service.py` — read-only financial metrics service (live SQL aggregates; no intermediate storage)

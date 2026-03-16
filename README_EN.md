@@ -67,6 +67,7 @@ Tabs and actions:
 - `Infographics` — displays infographics (pie charts, histograms) with the ability to filter by month/year.
 - `Operations` — management of records and transfers (adding, editing, deleting, importing/exporting).
 - `Reports` — report generation, export.
+- `Analytics` — financial analytics for an arbitrary period (dashboard, categories, monthly report).
 - `Settings` — management of mandatory expenses and wallets.
 
 Infographics:
@@ -76,6 +77,17 @@ Infographics:
 - Histogram of income/expenses by month of the year.
 
 Income is displayed in green, expenses in red. For a pie chart, small categories are aggregated into "Other". The list of categories in the legend scrolls. Records with the "Transfer" category have been excluded to improve analysis accuracy and consistency.
+
+### Analytics tab
+
+Financial analytics for an arbitrary period.
+
+- **Dashboard** — key metrics: net worth, savings rate, burn rate.
+- **Net Worth Timeline** — line chart of net worth by month.
+- **Category Breakdown** — expenses and income by category (tables + expenses pie chart).
+- **Monthly Report** — table with income, expenses, cashflow and savings rate by month.
+
+The period filter uses `YYYY-MM-DD` in the `From` / `To` fields. Transfers are excluded from calculations.
 
 > **Note:** After launching the application, mandatory payments are automatically applied with a detailed GUI message displayed.
 
@@ -680,6 +692,11 @@ Below are the key classes and functions synchronized with the actual code.
 - The exchange rate difference is displayed as a separate line (`FX Difference`).
 - Monthly aggregates and charts are always calculated in fixed mode (`amount_kzt`).
 
+`gui/tabs/analytics_tab.py`
+
+- `AnalyticsTabBindings` — widget bindings for the `Analytics` tab.
+- `build_analytics_tab(parent, context)` — builds the `Analytics` tab (Dashboard, Category Breakdown, Monthly Report, Net Worth Timeline).
+
 `gui/tabs/settings_tab.py`
 
 - `SettingsTabContext` — context of the settings tab.
@@ -907,6 +924,7 @@ project/
 │   │   ├── infographics_tab.py # Tab with infographics
 │   │   ├── operations_tab.py   # Tab with operations and transfers
 │   │   ├── reports_tab.py      # Tab with reports
+│   │   ├── analytics_tab.py    # Analytics tab (dashboard, categories, report)
 │   │   └── settings_tab.py     # Tab with wallets and mandatory expenses
 │   │
 │   ├── __init__.py
@@ -920,6 +938,7 @@ project/
 └── tests/                      # Tests
     ├── __init__.py
     ├── conftest.py             # Local tmp fixture for stable test execution
+    ├── test_analytics_tab.py
     ├── test_audit_engine.py
     ├── test_balance_service.py
     ├── test_charting.py
