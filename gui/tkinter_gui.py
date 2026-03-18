@@ -3,13 +3,14 @@ import tkinter as tk
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, datetime
-from tkinter import Listbox, messagebox, ttk
+from tkinter import messagebox, ttk
 from typing import Any
 
 from app.services import CurrencyService
 from bootstrap import bootstrap_repository
 from domain.import_policy import ImportPolicy
 from gui.controllers import FinancialController
+from gui.record_colors import KIND_TO_FOREGROUND, foreground_for_kind
 from gui.tabs import (
     build_analytics_tab,
     build_infographics_tab,
@@ -58,9 +59,17 @@ class FinancialApp(tk.Tk):
                     details.append(
                         f"- {record.category}: {record.amount_kzt:.2f} KZT ({record.date})"
                     )
+                max_details = 5
+                if len(details) > max_details:
+                    displayed = details[:max_details]
+                    remaining = len(details) - max_details
+                    displayed.append(f"+ {remaining} more")
+                    details_text = "\n".join(displayed)
+                else:
+                    details_text = "\n".join(details)
                 message_text = (
                     f"Successfully created {len(created_auto_payments)} autopayments:\n"
-                    + "\n".join(details)
+                    + details_text
                 )
                 messagebox.showinfo("Auto-payments applied", message_text)
         except Exception:
@@ -68,12 +77,11 @@ class FinancialApp(tk.Tk):
 
         self._executor = ThreadPoolExecutor(max_workers=2)
         self._busy = False
-        self._list_index_to_record_id: dict[int, str] = {}
         self._record_id_to_repo_index: dict[str, int] = {}
         self._record_id_to_domain_id: dict[str, int] = {}
         self._chart_refresh_suspended = False
 
-        self.records_listbox: Listbox | None = None
+        self.records_tree: ttk.Treeview | None = None
         self.refresh_operation_wallet_menu: Callable[[], None] | None = None
         self.refresh_transfer_wallet_menus: Callable[[], None] | None = None
         self.refresh_wallets: Callable[[], None] | None = None
@@ -127,7 +135,7 @@ class FinancialApp(tk.Tk):
         self.monthly_bar_canvas = infographics.monthly_bar_canvas
 
         operations = build_operations_tab(self.tab_operations, self, IMPORT_FORMATS)
-        self.records_listbox = operations.records_listbox
+        self.records_tree = operations.records_tree
         self.refresh_operation_wallet_menu = operations.refresh_operation_wallet_menu
         self.refresh_transfer_wallet_menus = operations.refresh_transfer_wallet_menus
 
@@ -205,30 +213,39 @@ class FinancialApp(tk.Tk):
         return ImportPolicy.CURRENT_RATE
 
     def _refresh_list(self) -> None:
-        if self.records_listbox is None:
+        if self.records_tree is None:
             return
-        self.records_listbox.delete(0, tk.END)
-        self._list_index_to_record_id = {}
+        for iid in self.records_tree.get_children():
+            self.records_tree.delete(iid)
         self._record_id_to_repo_index = {}
         self._record_id_to_domain_id = {}
-        kind_to_color = {
-            "income": "#166534",
-            "expense": "#b91c1c",
-            "mandatory": "#b6ad13",
-            "transfer": "#1d4ed8",
-        }
-        for list_index, item in enumerate(self.controller.build_record_list_items()):
-            self._list_index_to_record_id[list_index] = item.record_id
+        for kind, color in KIND_TO_FOREGROUND.items():
+            try:
+                self.records_tree.tag_configure(kind, foreground=color)
+            except Exception:
+                pass
+
+        for item in self.controller.build_record_list_items():
             self._record_id_to_repo_index[item.record_id] = item.repository_index
             if item.domain_record_id is not None:
                 self._record_id_to_domain_id[item.record_id] = item.domain_record_id
-            self.records_listbox.insert(tk.END, item.label)
-            color = kind_to_color.get(getattr(item, "kind", ""))
-            if color:
-                try:
-                    self.records_listbox.itemconfigure(list_index, foreground=color)
-                except Exception:
-                    pass
+            kind = str(getattr(item, "kind", "") or "").strip().lower()
+            tags = (kind,) if foreground_for_kind(kind) else ()
+            values = (
+                str(item.repository_index),
+                str(item.date),
+                str(item.type_label),
+                str(item.category),
+                f"{float(item.amount_original):.2f}",
+                str(item.currency),
+                f"{float(item.amount_kzt):.2f}",
+                str(item.wallet_label),
+                str(item.extra),
+            )
+            try:
+                self.records_tree.insert("", "end", iid=item.record_id, values=values, tags=tags)
+            except Exception:
+                self.records_tree.insert("", "end", values=values, tags=tags)
 
     def _refresh_charts(self) -> None:
         if (

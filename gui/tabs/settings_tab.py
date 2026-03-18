@@ -283,14 +283,9 @@ def build_settings_tab(
     ttk.Button(wallet_actions, text="Delete wallet", command=delete_wallet).grid(
         row=0,
         column=0,
+        columnspan=2,
         sticky="ew",
-        padx=(0, 4),
-    )
-    ttk.Button(wallet_actions, text="Refresh", command=refresh_wallets).grid(
-        row=0,
-        column=1,
-        sticky="ew",
-        padx=(4, 0),
+        pady=(6, 0),
     )
 
     refresh_wallets()
@@ -300,25 +295,78 @@ def build_settings_tab(
     mand_frame.grid_rowconfigure(0, weight=1)
     mand_frame.grid_columnconfigure(0, weight=1)
 
-    mand_listbox = tk.Listbox(mand_frame)
-    mand_listbox.grid(row=0, column=0, sticky="nsew", padx=pad_x, pady=pad_y)
+    mand_list_frame = ttk.Frame(mand_frame)
+    mand_list_frame.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=pad_x, pady=pad_y)
+    mand_list_frame.grid_rowconfigure(0, weight=1)
+    mand_list_frame.grid_columnconfigure(0, weight=1)
 
-    mand_scroll = ttk.Scrollbar(mand_frame, orient="vertical", command=mand_listbox.yview)
-    mand_scroll.grid(row=0, column=1, sticky="ns", pady=pad_y)
-    mand_listbox.config(yscrollcommand=mand_scroll.set)
+    mand_tree = ttk.Treeview(
+        mand_list_frame,
+        show="headings",
+        selectmode="browse",
+        columns=(
+            "index",
+            "amount",
+            "currency",
+            "kzt",
+            "category",
+            "description",
+            "period",
+            "date",
+            "autopay",
+        ),
+        height=10,
+    )
+    mand_tree.heading("index", text="#")
+    mand_tree.heading("amount", text="Amount")
+    mand_tree.heading("currency", text="Cur")
+    mand_tree.heading("kzt", text="KZT")
+    mand_tree.heading("category", text="Category")
+    mand_tree.heading("description", text="Description")
+    mand_tree.heading("period", text="Period")
+    mand_tree.heading("date", text="Date")
+    mand_tree.heading("autopay", text="Autopay")
+    mand_tree.column("index", width=30, minwidth=40, stretch=False, anchor="e")
+    mand_tree.column("amount", width=70, minwidth=90, stretch=False, anchor="e")
+    mand_tree.column("currency", width=50, minwidth=50, stretch=False, anchor="center")
+    mand_tree.column("kzt", width=80, minwidth=90, stretch=False, anchor="e")
+    mand_tree.column("category", width=100, minwidth=120, stretch=False)
+    mand_tree.column("description", width=200, minwidth=160, stretch=True)
+    mand_tree.column("period", width=80, minwidth=70, stretch=False)
+    mand_tree.column("date", width=80, minwidth=90, stretch=False)
+    mand_tree.column("autopay", width=70, minwidth=60, stretch=False, anchor="center")
+    mand_tree.grid(row=0, column=0, sticky="nsew")
+
+    mand_scroll = ttk.Scrollbar(mand_list_frame, orient="vertical", command=mand_tree.yview)
+    mand_scroll.grid(row=0, column=1, sticky="ns")
+    mand_tree.config(yscrollcommand=mand_scroll.set)
+
+    mand_xscroll = ttk.Scrollbar(mand_list_frame, orient="horizontal", command=mand_tree.xview)
+    mand_xscroll.grid(row=1, column=0, sticky="ew")
+    mand_tree.config(xscrollcommand=mand_xscroll.set)
 
     def refresh_mandatory() -> None:
-        mand_listbox.delete(0, tk.END)
+        for iid in mand_tree.get_children():
+            mand_tree.delete(iid)
         expenses = context.controller.load_mandatory_expenses()
         for idx, expense in enumerate(expenses):
-            auto_pay_label = "✓ autopay" if expense.auto_pay else ""
-            date_label = f" | {expense.date}" if expense.date else ""
-            mand_listbox.insert(
-                tk.END,
-                f"[{idx}] {expense.amount_original:.2f} {expense.currency} "
-                f"(={expense.amount_kzt:.2f} KZT) - {expense.category} - "
-                f"{expense.description} ({expense.period}){date_label} {auto_pay_label}".strip(),
+            date_value = (
+                expense.date.isoformat()
+                if getattr(expense.date, "isoformat", None) is not None
+                else str(expense.date or "")
             )
+            values = (
+                str(idx),
+                f"{float(expense.amount_original or 0.0):.2f}",
+                str(expense.currency or "KZT").upper(),
+                f"{float(expense.amount_kzt or 0.0):.2f}",
+                str(expense.category or ""),
+                str(expense.description or ""),
+                str(expense.period or ""),
+                str(date_value),
+                "✓" if bool(expense.auto_pay) else "",
+            )
+            mand_tree.insert("", "end", iid=str(idx), values=values)
 
     current_panel: dict[str, tk.Frame | ttk.Frame | None] = {
         "add": None,
@@ -438,11 +486,15 @@ def build_settings_tab(
         ttk.Button(add_panel, text="Cancel", command=cancel).grid(row=7, column=1, padx=6)
 
     def edit_mandatory_inline() -> None:
-        selection = mand_listbox.curselection()
+        selection = mand_tree.selection()
         if not selection:
             messagebox.showerror("Error", "Select a required expense to edit.")
             return
-        index = selection[0]
+        try:
+            index = int(selection[0])
+        except Exception:
+            messagebox.showerror("Error", "Invalid selection.")
+            return
         expenses = context.controller.load_mandatory_expenses()
         if not (0 <= index < len(expenses)):
             return
@@ -596,8 +648,14 @@ def build_settings_tab(
             )
         mandatory_wallet_var.set(wallet_labels[0])
 
-        selection = mand_listbox.curselection()
-        index = selection[0] if selection else -1
+        selection = mand_tree.selection()
+        if selection:
+            try:
+                index = int(selection[0])
+            except Exception:
+                index = -1
+        else:
+            index = -1
 
         def save() -> None:
             try:
@@ -640,11 +698,15 @@ def build_settings_tab(
         ttk.Button(add_to_report_panel, text="Cancel", command=cancel).grid(row=2, column=1, padx=6)
 
     def delete_mandatory() -> None:
-        selection = mand_listbox.curselection()
+        selection = mand_tree.selection()
         if not selection:
             messagebox.showerror("Error", "Select mandatory expense to delete.")
             return
-        index = selection[0]
+        try:
+            index = int(selection[0])
+        except Exception:
+            messagebox.showerror("Error", "Invalid selection.")
+            return
         if context.controller.delete_mandatory_expense(index):
             messagebox.showinfo("Success", "Mandatory expense deleted.")
             refresh_mandatory()
@@ -677,8 +739,7 @@ def build_settings_tab(
     ttk.Button(actions, text="Delete All", command=delete_all_mandatory).grid(
         row=0, column=4, padx=6
     )
-    ttk.Button(actions, text="Refresh", command=refresh_mandatory).grid(row=0, column=5, padx=6)
-    ttk.OptionMenu(actions, format_var, "CSV", "CSV", "XLSX").grid(row=0, column=6, padx=6)
+    ttk.OptionMenu(actions, format_var, "CSV", "CSV", "XLSX").grid(row=0, column=5, padx=6)
 
     def import_mand() -> None:
         fmt = format_var.get()

@@ -392,8 +392,15 @@ class FinancialController:
             raise import_error
 
     def normalize_operation_ids_for_import(self) -> None:
-        records = sorted(self._repository.load_all(), key=lambda item: int(item.id))
-        transfers = sorted(self._repository.load_transfers(), key=lambda item: int(item.id))
+        def record_sort_key(record: Record) -> tuple[str, int]:
+            # Keep operations grouped by date while preserving stable intra-day order
+            # as they were written by the import pipeline / transfer creation.
+            return (str(record.date), int(record.id))
+
+        records = sorted(self._repository.load_all(), key=record_sort_key)
+        transfers = sorted(
+            self._repository.load_transfers(), key=lambda item: (str(item.date), int(item.id))
+        )
         transfer_id_map = {int(item.id): index for index, item in enumerate(transfers, start=1)}
         normalized_transfers = [
             replace(transfer, id=transfer_id_map[int(transfer.id)]) for transfer in transfers
@@ -402,7 +409,7 @@ class FinancialController:
         for index, record in enumerate(records, start=1):
             mapped_transfer_id = None
             if record.transfer_id is not None:
-                mapped_transfer_id = transfer_id_map[int(record.transfer_id)]
+                mapped_transfer_id = transfer_id_map.get(int(record.transfer_id))
             normalized_records.append(replace(record, id=index, transfer_id=mapped_transfer_id))
         self._repository.replace_records_and_transfers(normalized_records, normalized_transfers)
 
@@ -514,3 +521,71 @@ class FinancialController:
     ) -> list:
         """Per-month income/expenses/cashflow/savings_rate. Returns list[MonthlySummary]."""
         return self._metrics_service().get_monthly_summary(start_date=start_date, end_date=end_date)
+
+    def get_year_income(self, year: int, *, up_to_date: str | None = None) -> float:
+        """Total income (KZT) for the given calendar year, optionally up to a date."""
+        start = f"{int(year):04d}-01-01"
+        end = f"{int(year):04d}-12-31"
+        if up_to_date is not None:
+            end = self._min_date_iso(end, str(up_to_date))
+        if parse_ymd(end) < parse_ymd(start):
+            return 0.0
+        return self.get_income(start, end)
+
+    def get_average_monthly_income(self, year: int, *, up_to_date: str | None = None) -> float:
+        """
+        Average monthly income (KZT) for the given calendar year (year-to-date if up_to_date set).
+        """
+        start = f"{int(year):04d}-01-01"
+        end = f"{int(year):04d}-12-31"
+        if up_to_date is not None:
+            end = self._min_date_iso(end, str(up_to_date))
+        if parse_ymd(end) < parse_ymd(start):
+            return 0.0
+        months = self._month_count_in_range(start, end)
+        if months <= 0:
+            return 0.0
+        return round(self.get_income(start, end) / months, 2)
+
+    def get_average_monthly_expenses(self, start_date: str, end_date: str) -> float:
+        """Average monthly expenses (KZT) for [start_date, end_date], inclusive."""
+        months = self._month_count_in_range(start_date, end_date)
+        if months <= 0:
+            return 0.0
+        return round(self.get_expenses(start_date, end_date) / months, 2)
+
+    def get_average_annual_expenses(self, start_date: str, end_date: str) -> float:
+        """
+        Annualized expenses (KZT/year) based on average monthly expenses for [start_date, end_date].
+        """
+        return round(self.get_average_monthly_expenses(start_date, end_date) * 12, 2)
+
+    def convert_kzt_to_usd(self, amount_kzt: float) -> float:
+        """Convert a KZT amount to USD using the configured USD rate (KZT per 1 USD)."""
+        try:
+            rate = float(self._currency.get_rate("USD"))
+        except Exception:
+            return 0.0
+        if rate <= 0:
+            return 0.0
+        return round(float(amount_kzt) / rate, 2)
+
+    def get_time_costs(self, start_date: str, end_date: str) -> tuple[float, float, float]:
+        """
+        Cost of day/hour/minute (KZT) based on annualized expenses for [start_date, end_date].
+        """
+        annual = float(self.get_average_annual_expenses(start_date, end_date))
+        per_day = annual / 365 if annual > 0 else 0.0
+        per_hour = per_day / 24
+        per_minute = per_hour / 60
+        return (round(per_day, 2), round(per_hour, 2), round(per_minute, 2))
+
+    def _month_count_in_range(self, start_date: str, end_date: str) -> int:
+        d1 = parse_ymd(start_date)
+        d2 = parse_ymd(end_date)
+        if d2 < d1:
+            return 0
+        return (d2.year - d1.year) * 12 + (d2.month - d1.month) + 1
+
+    def _min_date_iso(self, a: str, b: str) -> str:
+        return a if parse_ymd(a) <= parse_ymd(b) else b

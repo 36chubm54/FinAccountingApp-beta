@@ -215,3 +215,49 @@ date,type,from_wallet_id,to_wallet_id,amount_original,currency,rate_at_operation
         assert "invalid transfer wallets" in summary[2][0]
     finally:
         os.unlink(tmp_path)
+
+
+def test_csv_export_grouped_drill_down():
+    """Export a report filtered by a single category (simulating grouped drill‑down)."""
+    import csv
+    import os
+    import tempfile
+
+    from domain.records import ExpenseRecord, IncomeRecord
+    from domain.reports import Report
+
+    records = [
+        IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+        ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food"),
+        IncomeRecord(date="2025-01-03", _amount_init=50.0, category="Salary"),
+        ExpenseRecord(date="2025-01-04", _amount_init=20.0, category="Food"),
+    ]
+    report = Report(records, initial_balance=200.0)
+    # Simulate drill‑down into "Salary" category
+    filtered = report.filter_by_category("Salary")
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv") as tmp:
+        tmp_path = tmp.name
+    try:
+        filtered.to_csv(tmp_path)
+        with open(tmp_path, encoding="utf-8") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+        # Header rows
+        assert rows[0][0] == "Transaction statement"
+        assert rows[1] == ["Date", "Type", "Category", "Amount (KZT)"]
+        assert rows[2][3] == "Fixed amounts by operation-time FX rates"
+        # No initial balance because filter_by_category resets it to zero
+        # Expect two Salary records
+        salary_rows = [r for r in rows if r[2] == "Salary"]
+        assert len(salary_rows) == 2
+        # Check amounts
+        amounts = [float(r[3]) for r in rows if r[0] and r[0].startswith("2025")]
+        assert amounts == [100.0, 50.0]
+        # SUBTOTAL should be sum of amounts (150.0)
+        subtotal_row = next(r for r in rows if r[0] == "SUBTOTAL")
+        assert subtotal_row[3] == "150.00"
+        # FINAL BALANCE should equal SUBTOTAL (since initial balance is zero)
+        final_row = next(r for r in rows if r[0] == "FINAL BALANCE")
+        assert final_row[3] == "150.00"
+    finally:
+        os.unlink(tmp_path)

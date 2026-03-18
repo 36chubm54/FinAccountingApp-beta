@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import os
 import tkinter as tk
-from datetime import date
 from tkinter import VERTICAL, filedialog, messagebox, ttk
 from typing import Any, Protocol
 
-from domain.reports import Report
 from gui.helpers import open_in_file_manager
+from gui.record_colors import KIND_TO_FOREGROUND, foreground_for_kind
+from gui.tabs.reports_controller import ReportsController
+from gui.tooltip import Tooltip
+from services.report_service import ReportFilters
+from utils.csv_utils import report_to_csv
 
 
 class ReportsTabContext(Protocol):
@@ -16,198 +19,443 @@ class ReportsTabContext(Protocol):
 
 
 def build_reports_tab(parent: tk.Frame | ttk.Frame, context: ReportsTabContext) -> None:
-    parent.grid_rowconfigure(1, weight=1)
+    ReportsFrame(parent, context).grid(row=0, column=0, sticky="nsew")
+    parent.grid_rowconfigure(0, weight=1)
     parent.grid_columnconfigure(0, weight=1)
 
-    controls = tk.Frame(parent)
-    controls.grid(row=0, column=0, sticky="nw", padx=10, pady=10)
 
-    ttk.Label(controls, text="Period (e.g., 2025-03):").grid(row=0, column=0, sticky="w")
-    period_start_entry = ttk.Entry(controls)
-    period_start_entry.grid(row=0, column=1, padx=6, pady=4)
+class ReportsFrame(ttk.Frame):
+    def __init__(self, parent: tk.Misc, context: ReportsTabContext) -> None:
+        super().__init__(parent, padding=10)
+        self._context = context
+        self._controller = ReportsController(context.controller, context.currency)
+        self._last_result = None
+        self._group_drill_category: str | None = None
+        self._group_iid_to_category: dict[str, str] = {}
 
-    ttk.Label(controls, text="Period end (e.g., 2025-03-31):").grid(row=1, column=0, sticky="w")
-    period_end_entry = ttk.Entry(controls)
-    period_end_entry.grid(row=1, column=1, padx=6, pady=4)
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=1)
 
-    ttk.Label(controls, text="Category:").grid(row=2, column=0, sticky="w")
-    category_entry = ttk.Entry(controls)
-    category_entry.grid(row=2, column=1, padx=6, pady=4)
+        self._build_controls()
+        self._build_body()
+        self.operations_tree.bind("<Double-1>", self._on_operations_double_click)
+        self._refresh_wallets()
+        self._apply_group_ui_state()
 
-    ttk.Label(controls, text="Wallet:").grid(row=3, column=0, sticky="w")
-    report_wallet_var = tk.StringVar(value="All wallets")
-    report_wallet_menu = ttk.OptionMenu(controls, report_wallet_var, "All wallets")
-    report_wallet_menu.grid(row=3, column=1, padx=6, pady=4, sticky="ew")
+    def _build_controls(self) -> None:
+        controls = ttk.Frame(self)
+        controls.grid(row=0, column=0, sticky="ew")
+        controls.grid_columnconfigure(1, weight=1)
+        controls.grid_columnconfigure(3, weight=1)
+        controls.grid_columnconfigure(6, weight=1)
 
-    wallet_label_to_id: dict[str, int | None] = {"All wallets": None}
+        self.period_start_var = tk.StringVar()
+        self.period_end_var = tk.StringVar()
+        self.category_var = tk.StringVar()
+        self.wallet_var = tk.StringVar(value="All wallets")
+        self.group_var = tk.BooleanVar(value=True)
+        self.totals_mode_var = tk.StringVar(value="fixed")
 
-    def refresh_report_wallet_menu() -> None:
-        nonlocal wallet_label_to_id
-        wallet_label_to_id = {"All wallets": None}
-        for wallet in context.controller.load_active_wallets():
-            wallet_label_to_id[f"[{wallet.id}] {wallet.name} ({wallet.currency})"] = wallet.id
-        labels = list(wallet_label_to_id.keys())
-        menu = report_wallet_menu["menu"]
-        menu.delete(0, "end")
-        for label in labels:
-            menu.add_command(label=label, command=lambda value=label: report_wallet_var.set(value))
-        if report_wallet_var.get() not in wallet_label_to_id:
-            report_wallet_var.set("All wallets")
+        ttk.Label(controls, text="Period:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(controls, textvariable=self.period_start_var, width=16).grid(
+            row=0, column=1, sticky="ew", padx=(6, 12)
+        )
 
-    refresh_report_wallet_menu()
+        ttk.Label(controls, text="Period end:").grid(row=0, column=2, sticky="w")
+        ttk.Entry(controls, textvariable=self.period_end_var, width=16).grid(
+            row=0, column=3, sticky="ew", padx=(6, 12)
+        )
 
-    group_var = tk.BooleanVar()
-    ttk.Checkbutton(controls, text="Group by category", variable=group_var).grid(
-        row=4, column=0, columnspan=2, sticky="w"
-    )
+        ttk.Label(controls, text="Category:").grid(row=0, column=4, sticky="w")
+        self.category_combo = ttk.Combobox(
+            controls, textvariable=self.category_var, values=[], width=18
+        )
+        self.category_combo.grid(row=0, column=5, sticky="ew", padx=(6, 12))
 
-    table_var = tk.BooleanVar()
-    ttk.Checkbutton(controls, text="Display as table", variable=table_var).grid(
-        row=5, column=0, columnspan=2, sticky="w"
-    )
+        ttk.Label(controls, text="Wallet:").grid(row=0, column=6, sticky="w")
+        self.wallet_combo = ttk.Combobox(controls, textvariable=self.wallet_var, values=[])
+        self.wallet_combo.grid(row=0, column=7, sticky="ew", padx=(6, 0))
 
-    result_frame = tk.Frame(parent)
-    result_frame.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=10, pady=6)
-    result_frame.grid_rowconfigure(0, weight=1)
-    result_frame.grid_columnconfigure(0, weight=1)
+        ttk.Checkbutton(
+            controls,
+            text="Group by category",
+            variable=self.group_var,
+            command=self._apply_group_ui_state,
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
-    result_text = tk.Text(result_frame, wrap="word")
-    result_text.grid(row=0, column=0, sticky="nsew")
-    scrollbar = ttk.Scrollbar(result_frame, orient=VERTICAL, command=result_text.yview)
-    scrollbar.grid(row=0, column=1, sticky="ns")
-    result_text.config(yscrollcommand=scrollbar.set)
+        self._group_status_var = tk.StringVar(value="")
+        self.group_status_label = ttk.Label(controls, textvariable=self._group_status_var)
+        self.group_status_label.grid(
+            row=1, column=2, columnspan=2, sticky="w", padx=(12, 0), pady=(8, 0)
+        )
 
-    current_report: dict[str, Report | None] = {"report": None}
-    report_mode_var = tk.StringVar(value="fixed")
+        # Hint for grouped view
+        self._group_status_tooltip = Tooltip(
+            self.group_status_label,
+            "Double clicking on a category opens its details. "
+            "The 'Back' button returns to the summary.",
+        )
 
-    ttk.Label(controls, text="Totals mode:").grid(row=0, column=2, sticky="w", padx=(12, 0))
-    ttk.Radiobutton(controls, text="On fixed rate", variable=report_mode_var, value="fixed").grid(
-        row=1, column=2, sticky="w", padx=(12, 0)
-    )
-    ttk.Radiobutton(
-        controls, text="On current rate", variable=report_mode_var, value="current"
-    ).grid(row=2, column=2, sticky="w", padx=(12, 0))
+        self.group_back_button = ttk.Button(controls, text="Back", command=self._on_group_back)
+        self.group_back_button.grid(row=1, column=4, sticky="w", padx=(12, 0), pady=(6, 0))
 
-    def generate() -> None:
-        refresh_report_wallet_menu()
-        selected_wallet = wallet_label_to_id.get(report_wallet_var.get(), None)
-        report = context.controller.generate_report_for_wallet(selected_wallet)
-        period_start = period_start_entry.get().strip()
-        period_end = period_end_entry.get().strip()
-        if period_start:
+        totals = ttk.Frame(controls)
+        totals.grid(row=1, column=4, columnspan=4, sticky="e", pady=(6, 0))
+        ttk.Label(totals, text="Totals mode:").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        ttk.Radiobutton(
+            totals,
+            text="On fixed rate",
+            variable=self.totals_mode_var,
+            value="fixed",
+            command=self._refresh_summary_only,
+        ).grid(row=0, column=1, sticky="w", padx=(0, 8))
+        ttk.Radiobutton(
+            totals,
+            text="On current rate",
+            variable=self.totals_mode_var,
+            value="current",
+            command=self._refresh_summary_only,
+        ).grid(row=0, column=2, sticky="w")
+
+        buttons = ttk.Frame(controls)
+        buttons.grid(row=2, column=0, columnspan=8, sticky="w", pady=(10, 0))
+        ttk.Button(buttons, text="Generate", command=self._on_generate).grid(
+            row=0, column=0, padx=(0, 8)
+        )
+
+        self.export_button = ttk.Menubutton(buttons, text="Export")
+        self.export_button.grid(row=0, column=1, padx=(0, 8))
+        export_menu = tk.Menu(self.export_button, tearoff=False)
+        export_menu.add_command(label="CSV", command=lambda: self._export("csv"))
+        export_menu.add_command(label="XLSX", command=lambda: self._export("xlsx"))
+        export_menu.add_command(label="PDF", command=lambda: self._export("pdf"))
+        self.export_button["menu"] = export_menu
+
+    def _build_body(self) -> None:
+        body = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
+        body.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+
+        left = ttk.Frame(body)
+        left.grid_rowconfigure(1, weight=1)
+        left.grid_columnconfigure(0, weight=1)
+        body.add(left, weight=3)
+
+        right = ttk.Frame(body)
+        right.grid_rowconfigure(0, weight=1)
+        right.grid_columnconfigure(0, weight=1)
+        body.add(right, weight=2)
+
+        # (B) Summary block
+        self.summary_frame = ttk.Labelframe(left, text="Summary", padding=10)
+        self.summary_frame.grid(row=0, column=0, sticky="ew")
+        self.summary_frame.grid_columnconfigure(1, weight=1)
+        self._summary_values: dict[str, ttk.Label] = {}
+        for row_index, (label_key, label_text) in enumerate(
+            [
+                ("net_worth_fixed", "Net Worth (fixed):"),
+                ("net_worth_current", "Net Worth (current):"),
+                ("initial_balance", "Initial balance:"),
+                ("records_total", "Records Total:"),
+                ("final_balance", "Final Balance:"),
+                ("fx_difference", "FX Difference:"),
+            ]
+        ):
+            ttk.Label(self.summary_frame, text=label_text).grid(row=row_index, column=0, sticky="w")
+            value_label = ttk.Label(self.summary_frame, text="—")
+            value_label.grid(row=row_index, column=1, sticky="e")
+            self._summary_values[label_key] = value_label
+
+        # (C) Operations table
+        self.operations_container = ttk.Labelframe(left, text="Operations", padding=6)
+        self.operations_container.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+        self.operations_container.grid_rowconfigure(0, weight=1)
+        self.operations_container.grid_columnconfigure(0, weight=1)
+
+        self.operations_tree = ttk.Treeview(
+            self.operations_container,
+            columns=("date", "type", "category", "amount"),
+            show="headings",
+            selectmode="browse",
+        )
+        self.operations_tree.heading("date", text="Date")
+        self.operations_tree.heading("type", text="Type")
+        self.operations_tree.heading("category", text="Category")
+        self.operations_tree.heading("amount", text="Amount (KZT)")
+        self.operations_tree.column("date", width=60, anchor="w")
+        self.operations_tree.column("type", width=100, anchor="w")
+        self.operations_tree.column("category", width=120, anchor="w")
+        self.operations_tree.column("amount", width=70, anchor="e")
+        self.operations_tree.grid(row=0, column=0, sticky="nsew")
+        op_scroll = ttk.Scrollbar(
+            self.operations_container, orient=VERTICAL, command=self.operations_tree.yview
+        )
+        op_scroll.grid(row=0, column=1, sticky="ns")
+        self.operations_tree.config(yscrollcommand=op_scroll.set)
+        for kind, color in KIND_TO_FOREGROUND.items():
             try:
-                report = report.filter_by_period_range(
-                    period_start, period_end or date.today().isoformat()
-                )
-            except ValueError as error:
-                messagebox.showerror("Error", str(error))
-                return
-        elif period_end:
-            messagebox.showerror("Error", "Period start is required when period end is provided.")
+                self.operations_tree.tag_configure(kind, foreground=color)
+            except Exception:
+                pass
+
+        # (D) Monthly summary
+        monthly_frame = ttk.Labelframe(right, text="Monthly summary", padding=6)
+        monthly_frame.grid(row=0, column=0, sticky="nsew")
+        monthly_frame.grid_rowconfigure(0, weight=1)
+        monthly_frame.grid_columnconfigure(0, weight=1)
+
+        self.monthly_tree = ttk.Treeview(
+            monthly_frame,
+            columns=("month", "income", "expense"),
+            show="headings",
+            selectmode="none",
+        )
+        self.monthly_tree.heading("month", text="Month")
+        self.monthly_tree.heading("income", text="Income")
+        self.monthly_tree.heading("expense", text="Expense")
+        self.monthly_tree.column("month", width=90, anchor="w")
+        self.monthly_tree.column("income", width=90, anchor="e")
+        self.monthly_tree.column("expense", width=90, anchor="e")
+        self.monthly_tree.grid(row=0, column=0, sticky="nsew")
+        monthly_scroll = ttk.Scrollbar(
+            monthly_frame, orient=VERTICAL, command=self.monthly_tree.yview
+        )
+        monthly_scroll.grid(row=0, column=1, sticky="ns")
+        self.monthly_tree.config(yscrollcommand=monthly_scroll.set)
+
+    def _refresh_wallets(self) -> None:
+        selected = self.wallet_var.get()
+        self._wallet_label_to_id: dict[str, int | None] = {"All wallets": None}
+        for wallet in self._controller.load_active_wallets():
+            self._wallet_label_to_id[f"[{wallet.id}] {wallet.name} ({wallet.currency})"] = wallet.id
+        labels = list(self._wallet_label_to_id.keys())
+        self.wallet_combo["values"] = labels
+        if selected in self._wallet_label_to_id:
+            self.wallet_var.set(selected)
+        else:
+            self.wallet_var.set("All wallets")
+
+    def _current_filters(self) -> ReportFilters:
+        wallet_id = self._wallet_label_to_id.get(self.wallet_var.get(), None)
+        return ReportFilters(
+            wallet_id=wallet_id,
+            period_start=self.period_start_var.get().strip(),
+            period_end=self.period_end_var.get().strip(),
+            category=self.category_var.get().strip(),
+            totals_mode=self.totals_mode_var.get().strip() or "fixed",
+        )
+
+    def _on_generate(self) -> None:
+        self._refresh_wallets()
+        try:
+            result = self._controller.generate(self._current_filters())
+        except ValueError as error:
+            messagebox.showerror("Error", str(error))
+            return
+        except Exception as error:
+            messagebox.showerror("Error", f"Failed to generate report: {error}")
             return
 
-        category_value = category_entry.get().strip()
-        if category_value:
-            report = report.filter_by_category(category_value)
+        self._last_result = result
+        self._group_drill_category = None
+        self._refresh_summary_only()
+        self._refresh_operations_table()
+        self._refresh_monthly_table()
+        self._refresh_category_sources()
 
-        current_report["report"] = report
-
-        result_text.delete(1.0, tk.END)
-        summary_year: int | None = None
-        summary_up_to_month: int | None = None
-        if period_start:
-            try:
-                parts = period_start.split("-")
-                if parts and parts[0].isdigit():
-                    summary_year = int(parts[0])
-                if len(parts) > 1 and parts[1].isdigit():
-                    summary_up_to_month = int(parts[1])
-            except Exception:
-                summary_year = None
-                summary_up_to_month = None
-
-        result_text.insert(tk.END, report.statement_title + "\n\n")
-        result_text.insert(
-            tk.END,
-            f"Net Worth (fixed): {context.controller.net_worth_fixed():.2f} KZT\n"
-            f"Net Worth (current): {context.controller.net_worth_current():.2f} KZT\n\n",
+    def _refresh_summary_only(self) -> None:
+        result = self._last_result
+        if result is None:
+            return
+        summary = result.summary
+        self._summary_values["net_worth_fixed"].config(
+            text=f"{_fmt_kzt(summary.net_worth_fixed)} KZT"
         )
-
-        if group_var.get():
-            groups = report.grouped_by_category()
-            if table_var.get():
-                for cat, cat_report in groups.items():
-                    result_text.insert(tk.END, f"\nCategory: {cat}\n")
-                    result_text.insert(
-                        tk.END, cat_report.as_table(summary_mode="total_only") + "\n"
-                    )
-            else:
-                for cat, cat_report in groups.items():
-                    if report_mode_var.get() == "current":
-                        total = cat_report.total_current(context.currency)
-                    else:
-                        total = cat_report.total_fixed()
-                    result_text.insert(tk.END, f"{cat}: {total:.2f} KZT\n")
-        elif table_var.get():
-            result_text.insert(tk.END, report.as_table())
+        self._summary_values["net_worth_current"].config(
+            text=f"{_fmt_kzt(summary.net_worth_current)} KZT"
+        )
+        self._summary_values["initial_balance"].config(
+            text=f"{_fmt_kzt(summary.initial_balance)} KZT"
+        )
+        self._summary_values["records_total"].config(
+            text=f"{_fmt_kzt(summary.records_total_fixed)} KZT"
+        )
+        if self.totals_mode_var.get() == "current":
+            final_value = summary.final_balance_current
         else:
-            balance_value = report.initial_balance
-            balance_label = "Opening balance" if report.is_opening_balance else "Initial balance"
-            records_total_fixed = report.net_profit_fixed()
-            final_balance_fixed = report.total_fixed()
-            final_balance_current = report.total_current(context.currency)
-            fx_diff = report.fx_difference(context.currency)
-            result_text.insert(tk.END, f"{balance_label}: {balance_value:.2f} KZT\n")
-            if report_mode_var.get() == "current":
-                result_text.insert(
-                    tk.END, f"Records Total (fixed): {records_total_fixed:.2f} KZT\n"
-                )
-                result_text.insert(
-                    tk.END,
-                    f"Final Balance (current rate): {final_balance_current:.2f} KZT\n",
-                )
-            else:
-                result_text.insert(
-                    tk.END, f"Records Total (fixed): {records_total_fixed:.2f} KZT\n"
-                )
-                result_text.insert(
-                    tk.END,
-                    f"Final Balance (operation rate): {final_balance_fixed:.2f} KZT\n",
-                )
-            result_text.insert(tk.END, f"FX Difference: {fx_diff:.2f} KZT\n")
+            final_value = summary.final_balance_fixed
+        self._summary_values["final_balance"].config(text=f"{_fmt_kzt(final_value)} KZT")
+        self._summary_values["fx_difference"].config(text=f"{_fmt_kzt(summary.fx_difference)} KZT")
 
-        summary_table = report.monthly_income_expense_table(
-            year=summary_year,
-            up_to_month=summary_up_to_month,
-        )
-        result_text.insert(tk.END, "\n\nMonthly Income/Expense Summary (Past & Current Months)\n")
-        result_text.insert(tk.END, summary_table + "\n")
+    def _refresh_operations_table(self) -> None:
+        for iid in self.operations_tree.get_children():
+            self.operations_tree.delete(iid)
+        result = self._last_result
+        if result is None:
+            return
 
-    ttk.Button(controls, text="Generate", command=generate).grid(row=6, column=0, pady=8)
+        if not self.group_var.get():
+            for row in result.operations:
+                tags = (row.kind,) if foreground_for_kind(row.kind) else ()
+                self.operations_tree.insert(
+                    "",
+                    "end",
+                    values=(row.date, row.type_label, row.category, f"{row.amount_kzt:.2f}"),
+                    tags=tags,
+                )
+            return
 
-    export_format_var = tk.StringVar(value="CSV")
-    ttk.OptionMenu(controls, export_format_var, "CSV", "CSV", "XLSX", "PDF").grid(
-        row=6, column=1, padx=6
-    )
+        self._group_iid_to_category = {}
+        drill_category = (self._group_drill_category or "").strip()
+        if drill_category:
+            for row in result.operations:
+                if row.category != drill_category:
+                    continue
+                tags = (row.kind,) if foreground_for_kind(row.kind) else ()
+                self.operations_tree.insert(
+                    "",
+                    "end",
+                    values=(row.date, row.type_label, row.category, f"{row.amount_kzt:.2f}"),
+                    tags=tags,
+                )
+            return
 
-    def export_any() -> None:
-        report = current_report.get("report")
-        if report is None:
+        totals_by_category: dict[str, float] = {}
+        counts_by_category: dict[str, int] = {}
+        for row in result.operations:
+            key = str(row.category or "").strip() or "<Empty>"
+            totals_by_category[key] = float(totals_by_category.get(key, 0.0)) + float(
+                row.amount_kzt
+            )
+            counts_by_category[key] = int(counts_by_category.get(key, 0)) + 1
+
+        for index, category in enumerate(
+            sorted(totals_by_category, key=lambda s: s.casefold()), start=1
+        ):
+            total = float(totals_by_category[category])
+            count = int(counts_by_category.get(category, 0))
+            iid = f"cat_{index}"
+            self._group_iid_to_category[iid] = category if category != "<Empty>" else ""
+            self.operations_tree.insert(
+                "",
+                "end",
+                iid=iid,
+                values=("", f"Ops: {count}", category, f"{total:.2f}"),
+            )
+
+    def _refresh_monthly_table(self) -> None:
+        for iid in self.monthly_tree.get_children():
+            self.monthly_tree.delete(iid)
+        result = self._last_result
+        if result is None:
+            return
+        for row in result.monthly:
+            self.monthly_tree.insert(
+                "", "end", values=(row.month, f"{row.income:.2f}", f"{row.expense:.2f}")
+            )
+
+    def _refresh_category_sources(self) -> None:
+        result = self._last_result
+        if result is None:
+            return
+        values = [""] + result.categories
+        self.category_combo["values"] = values
+
+    def _apply_group_ui_state(self) -> None:
+        enabled = bool(self.group_var.get())
+        try:
+            self.group_back_button.configure(state=("normal" if enabled else "disabled"))
+        except Exception:
+            pass
+        if not enabled:
+            self._group_drill_category = None
+            self._group_status_var.set("")
+        else:
+            self._group_status_var.set(
+                f"Category: {self._group_drill_category}"
+                if self._group_drill_category
+                else "Grouped view (double-click a category) ⓘ"
+            )
+        self._refresh_operations_table()
+
+    def _on_group_back(self) -> None:
+        if not self._group_drill_category:
+            return
+        self._group_drill_category = None
+        self._apply_group_ui_state()
+
+    def _on_operations_double_click(self, _event: tk.Event) -> None:
+        if not self.group_var.get():
+            return
+        if self._group_drill_category:
+            return
+        selected = self.operations_tree.focus()
+        if not selected:
+            return
+        category = self._group_iid_to_category.get(selected)
+        if category is None:
+            return
+        self._group_drill_category = category
+        self._apply_group_ui_state()
+
+    def _apply_table_ui_state(self) -> None:
+        self.operations_container.grid()
+
+    def _export(self, fmt: str) -> None:
+        result = self._last_result
+        if result is None:
             messagebox.showerror("Error", "Please generate a report first.")
             return
-        fmt = export_format_var.get()
-        filepath = filedialog.asksaveasfilename(
-            defaultextension=f".{fmt.lower()}", title="Save Report"
-        )
+
+        fmt = (fmt or "csv").strip().lower()
+        if fmt not in ("csv", "xlsx", "pdf"):
+            messagebox.showerror("Error", f"Unsupported export format: {fmt}")
+            return
+
+        drill_category = (self._group_drill_category or "").strip()
+        export_category_only = bool(self.group_var.get()) and bool(drill_category)
+
+        if fmt == "csv":
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=".csv",
+                filetypes=[("CSV", "*.csv")],
+                title="Save CSV",
+            )
+        elif fmt == "xlsx":
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel", "*.xlsx")],
+                title="Save XLSX",
+            )
+        else:
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=".pdf",
+                filetypes=[("PDF", "*.pdf")],
+                title="Save PDF",
+            )
         if not filepath:
             return
         try:
-            from gui.exporters import export_report
+            report_to_export = (
+                result.report.filter_by_category(drill_category)
+                if export_category_only
+                else result.report
+            )
+            if fmt == "csv":
+                # Export report view (includes Opening/Initial balance and Total/Final balance rows)
+                report_to_csv(report_to_export, filepath)
+            else:
+                from gui.exporters import export_report
 
-            export_report(report, filepath, fmt.lower())
-            messagebox.showinfo("Success", f"Report exported to {filepath}")
+                export_report(report_to_export, filepath, fmt)
+            messagebox.showinfo("Success", f"Exported to {filepath}")
             open_in_file_manager(os.path.dirname(filepath))
         except Exception as error:
-            messagebox.showerror("Error", f"Failed to export: {str(error)}")
+            messagebox.showerror("Error", f"Failed to export: {error}")
 
-    ttk.Button(controls, text="Export", command=export_any).grid(row=6, column=2, padx=6)
+
+def _fmt_kzt(value: float) -> str:
+    # 1 000 000.00 style (space-grouped).
+    try:
+        return f"{float(value):,.2f}".replace(",", " ")
+    except Exception:
+        return "0.00"

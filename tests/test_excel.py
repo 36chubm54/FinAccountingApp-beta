@@ -136,3 +136,70 @@ def test_mandatory_csv_roundtrip():
         assert imported[0].period == "daily"
     finally:
         os.unlink(tmp_path)
+
+
+def test_xlsx_export_grouped_drill_down():
+    """Export a category‑filtered report to XLSX (simulating grouped drill‑down)."""
+    import os
+    import tempfile
+
+    from openpyxl import load_workbook
+
+    from domain.records import ExpenseRecord, IncomeRecord
+    from domain.reports import Report
+    from utils.excel_utils import report_to_xlsx
+
+    records = [
+        IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+        ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food"),
+        IncomeRecord(date="2025-01-03", _amount_init=50.0, category="Salary"),
+        ExpenseRecord(date="2025-01-04", _amount_init=20.0, category="Food"),
+    ]
+    report = Report(records, initial_balance=200.0)
+    filtered = report.filter_by_category("Salary")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        tmp_path = tmp.name
+    try:
+        report_to_xlsx(filtered, tmp_path)
+        wb = load_workbook(tmp_path, data_only=True)
+        try:
+            ws = wb["Report"]
+            # Check title
+            assert ws.cell(1, 1).value == "Transaction statement"
+            # Check that there is no initial balance row (because filter_by_category resets it)
+            # The first data row should be the first Salary record
+            data_rows = []
+            for row in ws.iter_rows(min_row=4, max_col=4, values_only=True):
+                if row[0] and isinstance(row[0], str) and row[0].startswith("2025"):
+                    data_rows.append(row)
+            assert len(data_rows) == 2
+            assert data_rows[0][2] == "Salary"
+            assert data_rows[0][3] == "100.00"
+            assert data_rows[1][2] == "Salary"
+            assert data_rows[1][3] == "50.00"
+            # Find SUBTOTAL row
+            subtotal_found = False
+            for row in ws.iter_rows(min_row=1, max_col=4, values_only=True):
+                if row[0] == "SUBTOTAL":
+                    assert row[3] == "150.00"
+                    subtotal_found = True
+                    break
+            assert subtotal_found
+            # Find FINAL BALANCE row
+            final_found = False
+            for row in ws.iter_rows(min_row=1, max_col=4, values_only=True):
+                if row[0] == "FINAL BALANCE":
+                    assert row[3] == "150.00"
+                    final_found = True
+                    break
+            assert final_found
+        finally:
+            wb.close()
+    finally:
+        for _ in range(5):
+            try:
+                os.unlink(tmp_path)
+                break
+            except PermissionError:
+                time.sleep(0.1)

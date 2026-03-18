@@ -145,12 +145,13 @@ python main.py
     - `Period end` — конец периода (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`).
     - `Category` — фильтр по категории.
 3. Выберите один кошелёк для генерации отчёта по нему или все кошельки.
-4. Включите опции:
-    - `Group by category` — группировка по категориям.
-    - `Display as table` — табличный формат.
-5. Нажмите `Generate`.
+4. При необходимости включите `Group by category` — группировка по категориям (double-click по категории открывает её детализацию, кнопка `Back` возвращает к сводке).
+5. Выберите `Totals mode`:
+    - `On fixed rate` — итоги по фиксированным `amount_kzt` (курс операции).
+    - `On current rate` — итоги по текущим курсам (`CurrencyService`).
+6. Нажмите `Generate`.
 
-Внизу отображается дополнительная таблица «Monthly Income/Expense Summary» для выбранного года и месяцев.
+Справа отображается блок «Monthly summary» (агрегаты доходов/расходов по месяцам).
 
 Экспорт отчёта:
 
@@ -450,6 +451,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `SQLITE_PATH = "finance.db"`
 - `JSON_PATH = "data.json"`
 - `JSON_BACKUP_KEEP_LAST = 30` — сколько timestamped JSON-бэкапов хранить в `project/backups/` (старые удаляются при старте после создания нового).
+- `LAZY_EXPORT_SIZE_THRESHOLD = 50 * 1024 * 1024` — порог размера SQLite (в байтах), после которого экспорт SQLite → JSON может выполняться в фоне.
 
 Пути резолвятся относительно каталога `project`, поэтому `finance.db` и `data.json` создаются внутри `project` даже при запуске из другой папки.
 
@@ -461,7 +463,9 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - выполняется проверка внутренней целостности SQLite:
   `PRAGMA foreign_key_check`, корректность связок transfer (`ровно 2 записи: income+expense`),
   отсутствие orphan records и CHECK-like нарушений;
-- после успешной проверки SQLite автоматически экспортируется в `data.json`;
+- после успешной проверки выполняется lazy export SQLite → `data.json`:
+  экспорт запускается только если `data.json` отсутствует или устарел относительно `finance.db`;
+  при большом размере БД экспорт может выполняться в background thread (не блокируя UI);
 - JSON bootstrap и работа приложения напрямую с `data.json` удалены.
 
 Поведение SQLite по идентификаторам:
@@ -560,11 +564,10 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `filter_by_period_range(start_prefix, end_prefix)` — фильтрация по диапазону дат.
 - `filter_by_category(category)` — фильтрация по категории.
 - `grouped_by_category()` — группировка по категориям с сохранением контекста отчёта (`balance_label`, диапазон периода).
+- `display_records()` / `sorted_display_records()` — записи для отображения (transfer-ноги исключаются из отчётного UI).
 - `sorted_by_date()` — сортировка по дате.
 - `net_profit_fixed()` — чистая прибыль по фиксированным курсам.
 - `monthly_income_expense_rows(year=None, up_to_month=None)` — агрегаты по месяцам.
-- `monthly_income_expense_table(year=None, up_to_month=None)` — таблица по месяцам.
-- `as_table(summary_mode="full"|"total_only")` — табличный вывод.
 - `to_csv(filepath)` и `from_csv(filepath)` — экспорт отчёта и backward-compatible импорт.
 
 `domain/wallets.py`
@@ -685,12 +688,24 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 
 `gui/tabs/reports_tab.py`
 
-- `ReportTabContext` — контекст вкладки отчетов.
-- `build_reports_tab(parent, context)` — метод для построения интерфейса вкладки `Reports`. Эта вкладка поддерживает 2 режима итогов:
-  - `По курсу операции`
-  - `По текущему курсу`
-- Курсовая разница выводится отдельной строкой (`FX Difference`).
-- Месячные агрегаты и графики всегда считаются в фиксированном режиме (`amount_kzt`).
+- `ReportsTabContext` — контекст вкладки отчетов.
+- `build_reports_tab(parent, context)` — построение вкладки `Reports`:
+  - фильтры `Period` / `Period end` / `Category` / `Wallet`;
+  - `Group by category` с drill‑down (double-click) и кнопкой `Back`;
+  - `Totals mode`: `On fixed rate` / `On current rate` (обновляет блок `Summary`);
+  - экспорт через меню `Export` (`CSV`/`XLSX`/`PDF`).
+
+`gui/tabs/reports_controller.py`
+
+- `ReportsController` — адаптер между `FinancialController` и UI отчётов (валидация фильтров, сбор summary/операций/месячных строк).
+
+`gui/record_colors.py`
+
+- `KIND_TO_FOREGROUND` / `foreground_for_kind(kind)` — палитра и выбор цвета для типов записей (`income`/`expense`/`mandatory`/`transfer`).
+
+`gui/tooltip.py`
+
+- `Tooltip(widget, text)` — простой tooltip для `tkinter`/`ttk` виджетов.
 
 `gui/tabs/analytics_tab.py`
 
@@ -759,6 +774,11 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - Все проверки возвращают `AuditFinding`, а при отсутствии нарушений формируют один `OK` finding на check.
 
 `services/balance_service.py`
+
+`services/report_service.py`
+
+- DTO-модели и helper'ы для UI отчётов: `ReportFilters`, `ReportSummary`, `ReportsResult`,
+  `build_operations_rows(report)`, `build_monthly_rows(report)`, `extract_categories(rows)`.
 
 - `WalletBalance(wallet_id, name, currency, balance)` — immutable snapshot баланса кошелька.
 - `CashflowResult(income, expenses, cashflow)` — immutable агрегат по периоду.
@@ -907,6 +927,7 @@ project/
 │   ├── import_parser.py        # Парсер CSV/XLSX/JSON -> DTO
 │   ├── import_service.py       # Оркестрация импорта через FinanceService
 │   ├── metrics_service.py      # Read-only сервис финансовых метрик
+│   ├── report_service.py       # DTO и helper'ы для UI отчётов
 │   └── timeline_service.py     # Read-only сервис временных рядов
 │
 ├── utils/                      # Импорт/экспорт и графики
@@ -924,11 +945,14 @@ project/
 │   │   ├── infographics_tab.py # Вкладка с информационными графиками
 │   │   ├── operations_tab.py   # Вкладка с операциями и переводами
 │   │   ├── reports_tab.py      # Вкладка с отчётами
+│   │   ├── reports_controller.py # Контроллер вкладки отчётов (UI adapter)
 │   │   ├── analytics_tab.py    # Вкладка аналитики (dashboard, категории, отчёт)
 │   │   └── settings_tab.py     # Вкладка с кошельками и обязательными расходами
 │   │
 │   ├── __init__.py
 │   ├── tkinter_gui.py          # Основное GUI-приложение
+│   ├── record_colors.py        # Цвета строк по типу записи
+│   ├── tooltip.py              # Tooltip для tkinter/ttk
 │   ├── controller_support.py   # Вспомогательные GUI helper'ы
 │   ├── helpers.py              # Помощники для GUI
 │   ├── controllers.py          # Контроллеры GUI

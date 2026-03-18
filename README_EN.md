@@ -145,12 +145,13 @@ The update is applied through the immutable domain model: a new record instance 
     - `Period end` — period end (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`).
     - `Category` — filter by category.
 3. Choose one wallet for generating the report on it or all wallets.
-4. Enable options:
-    - `Group by category` — grouping by category.
-    - `Display as table` — table format.
-5. Click `Generate`.
+4. Optionally enable `Group by category` — grouped view (double-click a category to open its details; use `Back` to return to the summary).
+5. Choose `Totals mode`:
+    - `On fixed rate` — totals based on fixed `amount_kzt` (operation-time rate).
+    - `On current rate` — totals on current FX rates (`CurrencyService`).
+6. Click `Generate`.
 
-At the bottom, an additional table “Monthly Income/Expense Summary” is displayed for the selected year and months.
+On the right, the “Monthly summary” block shows month-level income/expense aggregates.
 
 Export report:
 
@@ -450,6 +451,7 @@ What the script does:
 - `SQLITE_PATH = "finance.db"`
 - `JSON_PATH = "data.json"`
 - `JSON_BACKUP_KEEP_LAST = 30` — how many timestamped JSON backups to keep in `project/backups/` (older ones are pruned on startup after creating a new backup).
+- `LAZY_EXPORT_SIZE_THRESHOLD = 50 * 1024 * 1024` — SQLite size threshold (in bytes) above which SQLite → JSON export may run in the background.
 
 Paths are resolved relative to the `project` directory, so `finance.db` and `data.json` are created inside `project` even when launched from another folder.
 
@@ -461,7 +463,9 @@ Initialization is handled by `bootstrap.py`:
 - SQLite internal integrity is validated on startup:
   `PRAGMA foreign_key_check`, transfer linkage (`exactly 2 linked records: income+expense`),
   no orphan records, and no CHECK-like violations;
-- after a successful integrity check, SQLite is exported to `data.json`;
+- after a successful integrity check, a lazy SQLite → `data.json` export is performed:
+  export runs only if `data.json` is missing or older than `finance.db`;
+  for large databases, export may run in a background thread (non-blocking UI);
 - JSON bootstrap and direct runtime work against `data.json` have been removed.
 
 SQLite behavior by identifiers:
@@ -560,11 +564,10 @@ Below are the key classes and functions synchronized with the actual code.
 - `filter_by_period_range(start_prefix, end_prefix)` — filtering by date range.
 - `filter_by_category(category)` — filtering by category.
 - `grouped_by_category()` — grouping by categories while preserving report context (`balance_label`, period range).
+- `display_records()` / `sorted_display_records()` — records intended for UI display (transfer legs excluded from the report view).
 - `sorted_by_date()` — sorting by date.
 - `net_profit_fixed()` — net profit at fixed exchange rates.
 - `monthly_income_expense_rows(year=None, up_to_month=None)` — monthly aggregates.
-- `monthly_income_expense_table(year=None, up_to_month=None)` — table by month.
-- `as_table(summary_mode="full"|"total_only")` — tabular output.
 - `to_csv(filepath)` and `from_csv(filepath)` — report export and backward-compatible import.
 
 `domain/wallets.py`
@@ -685,12 +688,24 @@ Below are the key classes and functions synchronized with the actual code.
 
 `gui/tabs/reports_tab.py`
 
-- `ReportTabContext` — report tab context.
-- `build_reports_tab(parent, context)` — method for building the interface of the `Reports` tab. This tab supports 2 summary modes:
-  - `According to the course of the operation`
-  - `At the current rate`
-- The exchange rate difference is displayed as a separate line (`FX Difference`).
-- Monthly aggregates and charts are always calculated in fixed mode (`amount_kzt`).
+- `ReportsTabContext` — report tab context.
+- `build_reports_tab(parent, context)` — builds the `Reports` tab:
+  - filters `Period` / `Period end` / `Category` / `Wallet`;
+  - `Group by category` with drill-down (double-click) and `Back`;
+  - `Totals mode`: `On fixed rate` / `On current rate` (refreshes `Summary`);
+  - export via `Export` menu (`CSV`/`XLSX`/`PDF`).
+
+`gui/tabs/reports_controller.py`
+
+- `ReportsController` — adapter between `FinancialController` and the reports UI (filter validation and result assembly).
+
+`gui/record_colors.py`
+
+- `KIND_TO_FOREGROUND` / `foreground_for_kind(kind)` — colors for record kinds (`income`/`expense`/`mandatory`/`transfer`).
+
+`gui/tooltip.py`
+
+- `Tooltip(widget, text)` — simple tooltip for `tkinter`/`ttk` widgets.
 
 `gui/tabs/analytics_tab.py`
 
@@ -759,6 +774,11 @@ Below are the key classes and functions synchronized with the actual code.
 - Each check returns `AuditFinding` entries and emits one `OK` finding when no violations are found.
 
 `services/balance_service.py`
+
+`services/report_service.py`
+
+- DTOs and helpers for the reports UI: `ReportFilters`, `ReportSummary`, `ReportsResult`,
+  `build_operations_rows(report)`, `build_monthly_rows(report)`, `extract_categories(rows)`.
 
 - `WalletBalance(wallet_id, name, currency, balance)` — immutable wallet balance snapshot.
 - `CashflowResult(income, expenses, cashflow)` — immutable period aggregate.
@@ -907,6 +927,7 @@ project/
 │   ├── import_parser.py        # CSV/XLSX/JSON parser -> DTO
 │   ├── import_service.py       # Import orchestration via FinanceService
 │   ├── metrics_service.py      # Read-only financial metrics service
+│   ├── report_service.py       # DTOs and helpers for reports UI
 │   └── timeline_service.py     # Read-only timeline service
 │
 ├── utils/                      # Import/export and graphs
@@ -924,11 +945,14 @@ project/
 │   │   ├── infographics_tab.py # Tab with infographics
 │   │   ├── operations_tab.py   # Tab with operations and transfers
 │   │   ├── reports_tab.py      # Tab with reports
+│   │   ├── reports_controller.py # Reports tab controller (UI adapter)
 │   │   ├── analytics_tab.py    # Analytics tab (dashboard, categories, report)
 │   │   └── settings_tab.py     # Tab with wallets and mandatory expenses
 │   │
 │   ├── __init__.py
 │   ├── tkinter_gui.py          # Main GUI application
+│   ├── record_colors.py        # Row colors by record kind
+│   ├── tooltip.py              # Tooltip for tkinter/ttk
 │   ├── controller_support.py   # GUI support helpers
 │   ├── helpers.py              # Helpers for GUI
 │   ├── controllers.py          # GUI controllers

@@ -15,6 +15,14 @@ class RecordListItem:
     kind: str
     repository_index: int
     domain_record_id: int | None
+    date: str
+    type_label: str
+    category: str
+    amount_original: float
+    currency: str
+    amount_kzt: float
+    wallet_label: str
+    extra: str
     label: str
 
 
@@ -75,6 +83,10 @@ def build_list_items(records: Iterable[Record]) -> list[RecordListItem]:
         else:
             record_type = "Expense"
             kind = "expense"
+        date_value = record.date if isinstance(record.date, str) else record.date.isoformat()
+        currency = str(record.currency or "KZT").upper()
+        category = str(getattr(record, "category", "") or "")
+        wallet_label = f"W{int(getattr(record, 'wallet_id', 0) or 0)}"
         signature = (
             f"{record.date}|{record_type}|{record.category}|"
             f"{amount_original}|{record.currency}|{amount_kzt}|{repository_index}"
@@ -82,7 +94,7 @@ def build_list_items(records: Iterable[Record]) -> list[RecordListItem]:
         record_id = sha1(signature.encode("utf-8")).hexdigest()[:12]
         label = (
             f"[{repository_index}] {record.date} - {record_type} - {record.category} - "
-            f"{amount_original:.2f} {record.currency} "
+            f"{amount_original:.2f} {currency} "
             f"(={amount_kzt:.2f} KZT)"
         )
         items.append(
@@ -91,6 +103,14 @@ def build_list_items(records: Iterable[Record]) -> list[RecordListItem]:
                 kind=kind,
                 repository_index=repository_index,
                 domain_record_id=int(getattr(record, "id", 0) or 0),
+                date=str(date_value),
+                type_label=record_type,
+                category=category,
+                amount_original=amount_original,
+                currency=currency,
+                amount_kzt=amount_kzt,
+                wallet_label=wallet_label,
+                extra="",
                 label=label,
             )
         )
@@ -109,9 +129,12 @@ def build_list_items(records: Iterable[Record]) -> list[RecordListItem]:
         amount_original = float(source.amount_original or 0.0)
         amount_kzt = float(source.amount_kzt or 0.0)
         date_value = source.date if isinstance(source.date, str) else source.date.isoformat()
+        currency = str(source.currency or "KZT").upper()
+        wallet_label = f"W{int(source.wallet_id)} -> W{int(target.wallet_id)}"
+        extra = f"Commission: {commission:.2f} KZT" if commission > 0 else ""
         label = (
             f"[{repository_index}] {date_value} - Transfer #{transfer_id} - "
-            f"{amount_original:.2f} {source.currency} (={amount_kzt:.2f} KZT) "
+            f"{amount_original:.2f} {currency} (={amount_kzt:.2f} KZT) "
             f"W{source.wallet_id} -> W{target.wallet_id}"
         )
         if commission > 0:
@@ -122,6 +145,14 @@ def build_list_items(records: Iterable[Record]) -> list[RecordListItem]:
                 kind="transfer",
                 repository_index=repository_index,
                 domain_record_id=int(getattr(source, "id", 0) or 0),
+                date=str(date_value),
+                type_label="Transfer",
+                category=f"Transfer #{transfer_id}",
+                amount_original=amount_original,
+                currency=currency,
+                amount_kzt=amount_kzt,
+                wallet_label=wallet_label,
+                extra=extra,
                 label=label,
             )
         )

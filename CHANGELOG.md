@@ -7,6 +7,34 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.5.1] - 2026-03-18
+
+### Added
+
+- Reports UI refactor: a dedicated `ReportsController` + `services/report_service.py` DTO helpers
+- Tooltips and shared record kind colors for Treeviews (`gui/tooltip.py`, `gui/record_colors.py`)
+- Lazy SQLite → JSON export on startup (skips when `data.json` is up-to-date; may run in background for large DB)
+
+### Changed
+
+- Reports tab now supports grouped drill-down via double-click and a `Back` button
+- Summary totals can be switched between fixed-rate and current-rate mode (`Totals mode`)
+- Operations list migrated from Listbox to Treeview with sortable columns and kind-based coloring
+- Remove `prettytable` dependency and deprecated Report table helpers (`as_table`, `monthly_income_expense_table`)
+
+### Tests
+
+- Add/extend export contract coverage for CSV/XLSX reports and mandatory templates (`tests/test_csv.py`, `tests/test_excel.py`)
+- Add bootstrap/backup coverage for SQLite → JSON export and backup pruning (`tests/test_bootstrap_backup.py`)
+
+### Docs
+
+- Update `README.md` and `README_EN.md` to match the new Reports/Operations UI and lazy export behavior
+
+No breaking changes.
+
+---
+
 ## [1.5.0] - 2026-03-15
 
 ### Added

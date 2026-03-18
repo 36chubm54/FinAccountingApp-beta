@@ -250,6 +250,7 @@ class ImportService:
                 mandatory_templates=mandatory_templates,
                 preserve_existing_mandatory=not bool(target_wallets),
             )
+            self._finance_service.normalize_operation_ids_for_import()
             logger.info(
                 "Import completed (bulk) file=%s wallets=%s records=%s transfers=%s",
                 parsed.path,

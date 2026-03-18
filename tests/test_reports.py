@@ -107,36 +107,6 @@ class TestReport:
         )
         assert len(report.records()) == 1  # Original unchanged
 
-    def test_as_table(self):
-        records = [
-            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
-            ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food"),
-        ]
-        report = Report(records)
-        table_str = report.as_table()
-        assert "Date" in table_str
-        assert "Type" in table_str
-        assert "Category" in table_str
-        assert "Amount" in table_str
-        assert "Salary" in table_str
-        assert "Food" in table_str
-        assert "SUBTOTAL" in table_str
-        assert "FINAL BALANCE" in table_str
-
-    def test_as_table_with_initial_balance(self):
-        records = [
-            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
-            ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food"),
-        ]
-        report = Report(records, initial_balance=50.0)
-        table_str = report.as_table()
-        assert "Initial balance" in table_str
-        assert "50.00" in table_str
-        assert "SUBTOTAL" in table_str
-        assert "70.00" in table_str  # 100 - 30
-        assert "FINAL BALANCE" in table_str
-        assert "120.00" in table_str  # 50 + 70
-
     def test_monthly_income_expense_rows_defaults_to_latest_year(self):
         records = [
             IncomeRecord(date="2024-12-31", _amount_init=40.0, category="Old"),

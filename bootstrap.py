@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 
 from backup import create_backup, export_to_json
-from config import JSON_BACKUP_KEEP_LAST, JSON_PATH, SQLITE_PATH
+from config import JSON_BACKUP_KEEP_LAST, JSON_PATH, LAZY_EXPORT_SIZE_THRESHOLD, SQLITE_PATH
 from infrastructure.repositories import RecordRepository
 from infrastructure.sqlite_repository import SQLiteRecordRepository
 
@@ -137,6 +138,49 @@ def _validate_sqlite_integrity_only(sqlite_repo: SQLiteRecordRepository) -> None
     logging.info("[bootstrap] SQLite integrity check passed")
 
 
+def _should_export_json() -> bool:
+    """Return True if JSON export is needed (data.json missing or outdated)."""
+    json_path = Path(JSON_PATH)
+    sqlite_path = Path(SQLITE_PATH)
+
+    if not json_path.exists():
+        logging.info("[bootstrap] JSON file missing, export required")
+        return True
+
+    if not sqlite_path.exists():
+        # Should not happen because bootstrap creates SQLite if missing
+        return False
+
+    json_mtime = json_path.stat().st_mtime
+    sqlite_mtime = sqlite_path.stat().st_mtime
+
+    if sqlite_mtime > json_mtime:
+        logging.info("[bootstrap] SQLite database newer than JSON, export required")
+        return True
+
+    logging.info("[bootstrap] JSON file is up‑to‑date, skipping export")
+    return False
+
+
+def _export_in_background() -> None:
+    """Perform JSON export in a background thread (non‑blocking)."""
+
+    def _export():
+        try:
+            export_to_json(
+                SQLITE_PATH,
+                JSON_PATH,
+                schema_path=_resolve_schema_path("db/schema.sql"),
+            )
+            logging.info("[bootstrap] Background JSON export completed")
+        except Exception as e:
+            logging.error("[bootstrap] Background JSON export failed: %s", e)
+
+    thread = threading.Thread(target=_export, daemon=True)
+    thread.start()
+    logging.info("[bootstrap] Started background JSON export thread")
+
+
 def bootstrap_repository() -> RecordRepository:
     db_path = Path(SQLITE_PATH)
     db_existed = db_path.exists()
@@ -156,5 +200,25 @@ def bootstrap_repository() -> RecordRepository:
     if not _is_migration_verified(repository):
         _mark_migration_verified(repository)
     _validate_sqlite_integrity_only(repository)
-    export_to_json(SQLITE_PATH, JSON_PATH, schema_path=_resolve_schema_path("db/schema.sql"))
+
+    # Lazy export: only if needed, and possibly in background for large DB
+    if _should_export_json():
+        sqlite_size = db_path.stat().st_size if db_path.exists() else 0
+        if sqlite_size > LAZY_EXPORT_SIZE_THRESHOLD:
+            logging.info(
+                "[bootstrap] SQLite database is large (%d bytes), "
+                "scheduling JSON export in background",
+                sqlite_size,
+            )
+            _export_in_background()
+        else:
+            export_to_json(
+                SQLITE_PATH,
+                JSON_PATH,
+                schema_path=_resolve_schema_path("db/schema.sql"),
+            )
+            logging.info("[bootstrap] JSON export completed synchronously")
+    else:
+        logging.info("[bootstrap] Skipping JSON export (already up‑to‑date)")
+
     return repository

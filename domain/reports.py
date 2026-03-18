@@ -1,13 +1,39 @@
 from collections.abc import Iterable
 from datetime import date as dt_date
 
-from prettytable import PrettyTable
-
-from .records import IncomeRecord, MandatoryExpenseRecord, Record
+from .records import IncomeRecord, Record
 from .validation import parse_report_period_end, parse_report_period_start, parse_ymd
 
 
 class Report:
+    """
+    Immutable view over a set of financial records, with filtering and aggregation.
+
+    The class distinguishes between two kinds of consumers:
+
+    1. **Export/summary** – CSV/XLSX export, total calculations, monthly summaries.
+        These rely on:
+            - `initial_balance`, `balance_label`, `is_opening_balance`
+            - `statement_title`, `period_start_date`, `period_end_date`
+            - `records()` – raw records (including transfer legs)
+            - `total_fixed()`, `net_profit_fixed()`
+            - `monthly_income_expense_rows()`
+            - `grouped_by_category()` (for XLSX category sheets)
+
+    2. **Display (GUI)** – treeview rendering, interactive filtering, currency‑aware totals.
+        These rely on:
+            - `display_records()` / `sorted_display_records()` – transfer legs excluded
+            - `total_current()`, `fx_difference()` (require currency service)
+            - `filter_by_period()`, `filter_by_category()`, `filter_by_period_range()`
+            - `grouped_by_category()` (for grouped UI)
+
+    Key invariants:
+        - `filter_by_category()` resets `initial_balance` to zero (pure category slice).
+        - `filter_by_period()` computes an opening balance from preceding records.
+        - `display_records()` may omit transfer legs; `records()` includes them.
+        - Export formats (CSV/XLSX) use `records()` and `total_fixed()` (fixed rates).
+    """
+
     def __init__(
         self,
         records: Iterable[Record],
@@ -94,13 +120,16 @@ class Report:
         )
 
     def filter_by_category(self, category: str) -> "Report":
+        """Slice records by category without opening balance."""
         filtered = [r for r in self._records if r.category == category]
         return Report(
             filtered,
             0.0,
             wallet_id=self._wallet_id,
             balance_label=self._balance_label,
-            opening_start_date=self._opening_start_date,
+            # Category slice is a "pure records" view: it intentionally drops opening balance.
+            # Keeping `opening_start_date` would make exports render an "Opening balance 0.00" row.
+            opening_start_date=None,
             period_start_date=self._period_start_date,
             period_end_date=self._period_end_date,
         )
@@ -123,6 +152,13 @@ class Report:
             )
             for cat, recs in groups.items()
         }
+
+    def display_records(self) -> list[Record]:
+        """Records intended for display in reports (excludes transfer legs in some modes)."""
+        return list(self._display_records())
+
+    def sorted_display_records(self) -> list[Record]:
+        return sorted(self._display_records(), key=self._sort_key)
 
     def sorted_by_date(self) -> "Report":
         return Report(
@@ -248,70 +284,6 @@ class Report:
             rows.append((f"{year}-{month:02d}", income_total, expense_total))
 
         return year, rows
-
-    def monthly_income_expense_table(
-        self, year: int | None = None, up_to_month: int | None = None
-    ) -> str:
-        year, rows = self.monthly_income_expense_rows(year, up_to_month)
-        table = PrettyTable()
-        table.field_names = ["Month", "Income (KZT)", "Expense (KZT)"]
-
-        total_income = 0.0
-        total_expense = 0.0
-        for month_label, income, expense in rows:
-            total_income += income
-            total_expense += expense
-            table.add_row([month_label, f"{income:.2f}", f"{expense:.2f}"])
-
-        table.add_row(["TOTAL", f"{total_income:.2f}", f"{total_expense:.2f}"], divider=True)
-        return str(table)
-
-    def as_table(self, summary_mode: str = "full") -> str:
-        table = PrettyTable()
-        table.field_names = ["Date", "Type", "Category", "Amount (KZT)"]
-
-        if self._initial_balance != 0:
-            balance_str = (
-                f"{self._initial_balance:.2f}"
-                if self._initial_balance >= 0
-                else f"({abs(self._initial_balance):.2f})"
-            )
-            table.add_row(["", self._balance_label, "", balance_str], divider=True)
-
-        sorted_records = sorted(self._display_records(), key=self._sort_key)
-
-        for record in sorted_records:
-            if isinstance(record, IncomeRecord):
-                record_type = "Income"
-            elif isinstance(record, MandatoryExpenseRecord):
-                record_type = "Mandatory Expense"
-            else:
-                record_type = "Expense"
-            amount_value = record.amount
-            amount_str = (
-                f"{amount_value:.2f}" if amount_value >= 0 else f"({abs(amount_value):.2f})"
-            )
-            display_date = (
-                record.date.isoformat() if isinstance(record.date, dt_date) else record.date
-            )
-            table.add_row([display_date, record_type, record.category, amount_str])
-
-        records_total = self.net_profit_fixed()
-        records_total_str = (
-            f"{records_total:.2f}" if records_total >= 0 else f"({abs(records_total):.2f})"
-        )
-        final_balance = self.total_fixed()
-        final_balance_str = (
-            f"{final_balance:.2f}" if final_balance >= 0 else f"({abs(final_balance):.2f})"
-        )
-
-        if summary_mode == "total_only":
-            table.add_row(["SUBTOTAL", "", "", final_balance_str], divider=True)
-        else:
-            table.add_row(["SUBTOTAL", "", "", records_total_str], divider=True)
-            table.add_row(["FINAL BALANCE", "", "", final_balance_str], divider=True)
-
-        return str(table)
 
     def to_csv(self, filepath: str) -> None:
         from utils.csv_utils import report_to_csv

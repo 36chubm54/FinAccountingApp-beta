@@ -7,7 +7,7 @@ import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
@@ -205,16 +205,61 @@ def build_analytics_tab(
     dashboard_row.grid_columnconfigure(1, weight=1)
     dashboard_row.grid_columnconfigure(2, weight=1)
 
-    net_worth_label = ttk.Label(dashboard_row, text="Net worth: —", font=("Segoe UI", 14, "bold"))
+    dashboard_left = ttk.Frame(dashboard_row)
+    dashboard_left.grid(row=0, column=0, sticky="nw")
+    dashboard_right = ttk.Frame(dashboard_row)
+    dashboard_right.grid(row=0, column=1, sticky="nw", padx=(24, 0))
+
+    net_worth_label = ttk.Label(dashboard_left, text="Net worth: —", font=("Segoe UI", 12, "bold"))
     net_worth_label.grid(row=0, column=0, sticky="w")
 
     savings_rate_label = ttk.Label(
-        dashboard_row, text="Savings rate: —", font=("Segoe UI", 14, "bold")
+        dashboard_left, text="Savings rate: —", font=("Segoe UI", 12, "bold")
     )
     savings_rate_label.grid(row=1, column=0, sticky="w")
 
-    burn_rate_label = ttk.Label(dashboard_row, text="Burn rate: —", font=("Segoe UI", 14, "bold"))
+    burn_rate_label = ttk.Label(dashboard_left, text="Burn rate: —", font=("Segoe UI", 12, "bold"))
     burn_rate_label.grid(row=2, column=0, sticky="w")
+
+    avg_monthly_income_label = ttk.Label(
+        dashboard_right, text="Avg monthly income: —", font=("Segoe UI", 12, "bold")
+    )
+    avg_monthly_income_label.grid(row=0, column=0, sticky="w")
+
+    year_income_label = ttk.Label(
+        dashboard_right, text="Year income: —", font=("Segoe UI", 12, "bold")
+    )
+    year_income_label.grid(row=1, column=0, sticky="w")
+
+    year_income_usd_label = ttk.Label(
+        dashboard_right, text="Year income (USD): —", font=("Segoe UI", 12, "bold")
+    )
+    year_income_usd_label.grid(row=2, column=0, sticky="w")
+
+    avg_monthly_expenses_label = ttk.Label(
+        dashboard_right, text="Avg monthly expenses: —", font=("Segoe UI", 12, "bold")
+    )
+    avg_monthly_expenses_label.grid(row=3, column=0, sticky="w", pady=(10, 0))
+
+    avg_annual_expenses_label = ttk.Label(
+        dashboard_right, text="Avg annual expenses: —", font=("Segoe UI", 12, "bold")
+    )
+    avg_annual_expenses_label.grid(row=4, column=0, sticky="w")
+
+    day_cost_label = ttk.Label(
+        dashboard_right, text="Cost per day: —", font=("Segoe UI", 12, "bold")
+    )
+    day_cost_label.grid(row=5, column=0, sticky="w", pady=(10, 0))
+
+    hour_cost_label = ttk.Label(
+        dashboard_right, text="Cost per hour: —", font=("Segoe UI", 12, "bold")
+    )
+    hour_cost_label.grid(row=6, column=0, sticky="w")
+
+    minute_cost_label = ttk.Label(
+        dashboard_right, text="Cost per minute: —", font=("Segoe UI", 12, "bold")
+    )
+    minute_cost_label.grid(row=7, column=0, sticky="w")
 
     timeline_frame = ttk.LabelFrame(parent, text="Net Worth Timeline")
     timeline_frame.grid(row=1, column=1, sticky="nsew", padx=(6, 10), pady=(6, 10))
@@ -338,9 +383,32 @@ def build_analytics_tab(
         end = period_to_entry.get().strip() or default_end
 
         try:
+            from domain.validation import ensure_not_future, parse_ymd
+
+            parsed_start = parse_ymd(start)
+            parsed_end = parse_ymd(end)
+            ensure_not_future(parsed_start)
+            ensure_not_future(parsed_end)
+            if parsed_start > parsed_end:
+                raise ValueError("Start date must be <= end date")
+
+            start = parsed_start.isoformat()
+            end = parsed_end.isoformat()
+
             net_worth = float(context.controller.get_total_balance())
             savings_rate = float(context.controller.get_savings_rate(start, end))
             burn_rate = float(context.controller.get_burn_rate(start, end))
+            year = int(parsed_end.year)
+            avg_monthly_income = float(
+                context.controller.get_average_monthly_income(year, up_to_date=end)
+            )
+            year_income = float(context.controller.get_year_income(year, up_to_date=end))
+            year_income_usd = float(context.controller.convert_kzt_to_usd(year_income))
+            avg_monthly_expenses = float(
+                context.controller.get_average_monthly_expenses(start, end)
+            )
+            avg_annual_expenses = float(context.controller.get_average_annual_expenses(start, end))
+            day_cost, hour_cost, minute_cost = context.controller.get_time_costs(start, end)
 
             net_worth_label.config(text=f"Net worth:  {net_worth:,.0f} KZT")
             savings_rate_label.config(
@@ -348,6 +416,20 @@ def build_analytics_tab(
                 foreground="#10b981" if savings_rate >= 0 else "#ef4444",
             )
             burn_rate_label.config(text=f"Burn rate:  {burn_rate:,.0f} KZT/day")
+            avg_monthly_income_label.config(
+                text=f"Avg monthly income ({year}):  {avg_monthly_income:,.0f} KZT"
+            )
+            year_income_label.config(text=f"Year income ({year}):  {year_income:,.0f} KZT")
+            year_income_usd_label.config(text=f"Year income ({year}) USD:  {year_income_usd:,.2f}")
+            avg_monthly_expenses_label.config(
+                text=f"Avg monthly expenses:  {avg_monthly_expenses:,.0f} KZT"
+            )
+            avg_annual_expenses_label.config(
+                text=f"Avg annual expenses:  {avg_annual_expenses:,.0f} KZT"
+            )
+            day_cost_label.config(text=f"Cost per day:  {float(day_cost):,.0f} KZT")
+            hour_cost_label.config(text=f"Cost per hour:  {float(hour_cost):,.2f} KZT")
+            minute_cost_label.config(text=f"Cost per minute:  {float(minute_cost):,.2f} KZT")
 
             timeline_data = context.controller.get_net_worth_timeline()
             last_timeline_data = list(timeline_data) if timeline_data else []
@@ -405,6 +487,11 @@ def build_analytics_tab(
                 )
         except Exception as error:
             logger.warning("Analytics refresh error: %s", error)
+            if isinstance(error, ValueError):
+                messagebox.showerror(
+                    "Invalid period",
+                    f"{error}\n\nUse YYYY-MM-DD and ensure dates are not in the future.",
+                )
 
     refresh_button.configure(command=_refresh_analytics)
 

@@ -44,10 +44,6 @@ class MetricsService:
     def __init__(self, repository: SQLiteRecordRepository) -> None:
         self._repo = repository
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def get_savings_rate(self, start_date: str, end_date: str) -> float:
         """
         Savings rate (%) for the date range [start_date, end_date].
@@ -226,10 +222,6 @@ class MetricsService:
                 )
             )
         return result
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
 
     def _sum_income(self, start_date: str, end_date: str) -> float:
         """Total income (KZT) in [start_date, end_date], transfers excluded."""

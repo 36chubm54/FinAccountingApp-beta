@@ -263,3 +263,83 @@ def test_get_spending_by_category_with_limit_returns_at_most_limit(tmp_path: Pat
         assert len(rows) <= 3
     finally:
         repo.close()
+
+
+def test_get_year_income_and_avg_monthly_income_year_to_date(tmp_path: Path) -> None:
+    db_path = tmp_path / "analytics.db"
+    _init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        _insert_wallet(conn, 1)
+        _insert_record(conn, record_type="income", date="2026-01-05", wallet_id=1, amount_kzt=100.0)
+        _insert_record(conn, record_type="income", date="2026-02-05", wallet_id=1, amount_kzt=200.0)
+        _insert_record(conn, record_type="income", date="2026-03-05", wallet_id=1, amount_kzt=999.0)
+    finally:
+        conn.close()
+
+    repo, controller = _make_controller(db_path)
+    try:
+        # Up to Feb inclusive -> two months (Jan, Feb)
+        assert controller.get_year_income(2026, up_to_date="2026-02-28") == 300.0
+        assert controller.get_average_monthly_income(2026, up_to_date="2026-02-28") == 150.0
+    finally:
+        repo.close()
+
+
+def test_average_monthly_expenses_and_financial_freedom_ratio(tmp_path: Path) -> None:
+    db_path = tmp_path / "analytics.db"
+    _init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        _insert_wallet(conn, 1, initial_balance=1200.0)
+        _insert_record(
+            conn, record_type="expense", date="2026-01-10", wallet_id=1, amount_kzt=200.0
+        )
+        _insert_record(
+            conn, record_type="expense", date="2026-02-10", wallet_id=1, amount_kzt=200.0
+        )
+    finally:
+        conn.close()
+
+    repo, controller = _make_controller(db_path)
+    try:
+        avg_monthly = controller.get_average_monthly_expenses("2026-01-01", "2026-02-28")
+        assert avg_monthly == 200.0
+    finally:
+        repo.close()
+
+
+def test_convert_kzt_to_usd_uses_configured_rate(tmp_path: Path) -> None:
+    repo, controller = _make_controller(tmp_path / "analytics.db")
+    try:
+        # Default CurrencyService rate in tests: 500 KZT per USD
+        assert controller.convert_kzt_to_usd(1000.0) == 2.0
+    finally:
+        repo.close()
+
+
+def test_time_costs_are_annualized_not_burn_rate(tmp_path: Path) -> None:
+    db_path = tmp_path / "analytics.db"
+    _init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        _insert_wallet(conn, 1, initial_balance=0.0)
+        _insert_record(
+            conn, record_type="expense", date="2026-01-10", wallet_id=1, amount_kzt=3100.0
+        )
+        _insert_record(
+            conn, record_type="expense", date="2026-02-10", wallet_id=1, amount_kzt=3100.0
+        )
+    finally:
+        conn.close()
+
+    repo, controller = _make_controller(db_path)
+    try:
+        burn = controller.get_burn_rate("2026-01-01", "2026-02-28")
+        per_day, per_hour, per_minute = controller.get_time_costs("2026-01-01", "2026-02-28")
+        assert burn == 105.08  # 6200 / 59 days
+        assert per_day == 101.92  # (6200/2 months * 12) / 365
+        assert per_hour == 4.25
+        assert per_minute == 0.07
+    finally:
+        repo.close()

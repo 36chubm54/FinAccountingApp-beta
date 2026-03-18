@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from tkinter import VERTICAL, Listbox, filedialog, messagebox, ttk
+from tkinter import VERTICAL, filedialog, messagebox, ttk
 from typing import Any, Protocol
 
 from domain.import_policy import ImportPolicy
@@ -17,7 +17,6 @@ from gui.helpers import open_in_file_manager
 class OperationsTabContext(Protocol):
     controller: Any
     repository: Any
-    _list_index_to_record_id: dict[int, str]
     _record_id_to_repo_index: dict[str, int]
     _record_id_to_domain_id: dict[str, int]
 
@@ -41,7 +40,7 @@ class OperationsTabContext(Protocol):
 
 @dataclass(slots=True)
 class OperationsTabBindings:
-    records_listbox: Listbox
+    records_tree: ttk.Treeview
     refresh_operation_wallet_menu: Callable[[], None]
     refresh_transfer_wallet_menus: Callable[[], None]
 
@@ -96,13 +95,18 @@ def show_import_preview_dialog(
     errors_frame = ttk.Frame(content)
     errors_frame.grid(row=stats_row + 2, column=0, sticky="ew")
     errors_frame.grid_columnconfigure(0, weight=1)
-    errors_list = Listbox(errors_frame, height=min(max(len(preview.errors), 1), 5), width=72)
-    errors_list.grid(row=0, column=0, sticky="nsew")
-    errors_scroll = ttk.Scrollbar(errors_frame, orient=VERTICAL, command=errors_list.yview)
+    errors_tree = ttk.Treeview(
+        errors_frame,
+        show="tree",
+        selectmode="none",
+        height=min(max(len(preview.errors), 1), 5),
+    )
+    errors_tree.grid(row=0, column=0, sticky="nsew")
+    errors_scroll = ttk.Scrollbar(errors_frame, orient=VERTICAL, command=errors_tree.yview)
     errors_scroll.grid(row=0, column=1, sticky="ns")
-    errors_list.config(yscrollcommand=errors_scroll.set)
+    errors_tree.config(yscrollcommand=errors_scroll.set)
     for error in preview.errors or ["No validation errors."]:
-        errors_list.insert(tk.END, error)
+        errors_tree.insert("", "end", text=error)
 
     buttons = ttk.Frame(content)
     buttons.grid(row=stats_row + 3, column=0, sticky="e", pady=(12, 0))
@@ -214,12 +218,42 @@ def build_operations_tab(
     list_frame.grid_rowconfigure(0, weight=1)
     list_frame.grid_columnconfigure(0, weight=1)
 
-    records_listbox = Listbox(list_frame)
-    records_listbox.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
+    records_tree = ttk.Treeview(
+        list_frame,
+        show="headings",
+        selectmode="browse",
+        columns=(
+            "index",
+            "date",
+            "type",
+            "category",
+            "amount",
+            "currency",
+            "kzt",
+            "wallets",
+        ),
+    )
+    records_tree.heading("index", text="#")
+    records_tree.heading("date", text="Date")
+    records_tree.heading("type", text="Type")
+    records_tree.heading("category", text="Category")
+    records_tree.heading("amount", text="Amount")
+    records_tree.heading("currency", text="Cur")
+    records_tree.heading("kzt", text="KZT")
+    records_tree.heading("wallets", text="Wallets")
+    records_tree.column("index", width=40, minwidth=50, stretch=False, anchor="e")
+    records_tree.column("date", width=80, minwidth=90, stretch=False)
+    records_tree.column("type", width=120, minwidth=110, stretch=False)
+    records_tree.column("category", width=160, minwidth=140, stretch=True)
+    records_tree.column("amount", width=70, minwidth=90, stretch=False, anchor="e")
+    records_tree.column("currency", width=60, minwidth=50, stretch=False, anchor="center")
+    records_tree.column("kzt", width=100, minwidth=90, stretch=False, anchor="e")
+    records_tree.column("wallets", width=80, minwidth=110, stretch=False, anchor="center")
+    records_tree.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
 
-    scrollbar = ttk.Scrollbar(list_frame, orient=VERTICAL, command=records_listbox.yview)
+    scrollbar = ttk.Scrollbar(list_frame, orient=VERTICAL, command=records_tree.yview)
     scrollbar.grid(row=0, column=1, sticky="ns", pady=6)
-    records_listbox.config(yscrollcommand=scrollbar.set)
+    records_tree.config(yscrollcommand=scrollbar.set)
 
     def save_record() -> None:
         date_str = date_entry.get().strip()
@@ -290,13 +324,12 @@ def build_operations_tab(
     )
 
     def delete_selected() -> None:
-        selection = records_listbox.curselection()
+        selection = records_tree.selection()
         if not selection:
             messagebox.showerror("Error", "Please select a record to delete.")
             return
-        list_index = selection[0]
-        record_id = context._list_index_to_record_id.get(list_index)
-        repository_index = context._record_id_to_repo_index.get(record_id) if record_id else None
+        record_id = selection[0]
+        repository_index = context._record_id_to_repo_index.get(record_id)
         if repository_index is None:
             messagebox.showerror("Error", "Selected record is no longer available.")
             context._refresh_list()
@@ -319,16 +352,12 @@ def build_operations_tab(
     edit_panel_state: dict[str, ttk.Frame | None] = {"panel": None}
 
     def edit_selected_record_inline() -> None:
-        selection = records_listbox.curselection()
+        selection = records_tree.selection()
         if not selection:
             messagebox.showerror("Error", "Please select a record to edit.")
             return
 
-        list_index = selection[0]
-        ui_record_id = context._list_index_to_record_id.get(list_index)
-        if not ui_record_id:
-            messagebox.showerror("Error", "Selected record is no longer available.")
-            return
+        ui_record_id = selection[0]
         domain_record_id = context._record_id_to_domain_id.get(ui_record_id)
         if domain_record_id is None:
             messagebox.showerror("Error", "Selected record cannot be edited.")
@@ -378,7 +407,7 @@ def build_operations_tab(
         description_edit_entry.grid(row=4, column=1, sticky="ew", padx=4)
         edit_panel.grid_columnconfigure(1, weight=1)
 
-        # Заполнить поля данными записи
+        # Fill the fields with post data
         amount_entry.insert(0, f"{float(record.amount_kzt or 0.0):.2f}")
         date_value = (
             record.date.isoformat() if hasattr(record.date, "isoformat") else str(record.date)
@@ -434,7 +463,8 @@ def build_operations_tab(
                 )
                 messagebox.showinfo(
                     "Success",
-                    "Record updated. date, wallet, amount_kzt, category, and description were saved.",
+                    "Record updated. date, wallet, amount_kzt, category, "
+                    "and description were saved.",
                 )
                 context._refresh_list()
                 context._refresh_charts()
@@ -728,7 +758,7 @@ def build_operations_tab(
     context._refresh_list()
 
     return OperationsTabBindings(
-        records_listbox=records_listbox,
+        records_tree=records_tree,
         refresh_operation_wallet_menu=refresh_operation_wallet_menu,
         refresh_transfer_wallet_menus=refresh_transfer_wallet_menus,
     )
