@@ -440,6 +440,7 @@ What the script does:
 - writes to SQLite in one explicit transaction with strict order:
   `wallets -> transfers -> records -> mandatory_expenses`;
 - preserves existing `id` values (or builds `old_id -> new_id` mapping when ids are auto-generated);
+- populates precision fields `*_minor` and `rate_at_operation_text` while writing;
 - validates integrity and compares balances/`net worth`;
 - performs `rollback` on any error or mismatch.
 - is safe to rerun: if SQLite already has an equivalent dataset, migration is skipped without failure.
@@ -475,6 +476,12 @@ SQLite behavior by identifiers:
 - With this reindexing, links (`wallet_id`, `transfer_id`, `from_wallet_id`, `to_wallet_id`) are remapped atomically to maintain the integrity of the links.
 - After clearing tables, `sqlite_sequence` is reset so that new records start at `1` again.
 - Data equality checks before/after import should be performed on business fields and invariants, not on specific `id` values.
+
+SQLite behavior for money fields:
+
+- Monetary values are stored in both `REAL` columns and exact integer minor-units (`*_minor`).
+- FX rates additionally store canonical text in `rate_at_operation_text`.
+- `SQLiteStorage` auto-adds and backfills these precision columns for existing databases.
 
 ---
 
@@ -547,7 +554,8 @@ Below are the key classes and functions synchronized with the actual code.
 
 - `Record` — base record (abstract class). It includes mandatory `wallet_id` and optional `transfer_id`.
 - `Record.id` — mandatory record identifier.
-- `Record.with_updated_amount_kzt(new_amount_kzt)` — returns a new record instance with recalculated `rate_at_operation`.
+- Money fields and `rate_at_operation` are normalized via `utils.money` on construction.
+- `Record.with_updated_amount_kzt(new_amount_kzt)` — returns a new record instance with recalculated `rate_at_operation` and money quantization.
 - `IncomeRecord` — income.
 - `ExpenseRecord` — expense.
 - `MandatoryExpenseRecord` — mandatory expense with `description` and `period`.
@@ -577,6 +585,7 @@ Below are the key classes and functions synchronized with the actual code.
 `domain/transfers.py`
 
 - `Transfer` — wallet-to-wallet transfer aggregate.
+- Money fields and FX rate are normalized to the configured money/rate scale.
 
 `domain/validation.py`
 
@@ -648,6 +657,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `SQLiteRecordRepository(db_path="finance.db")` — SQLite `RecordRepository` implementation used by service layer.
 - `db_path` — path to the active SQLite database, exposed for audit reporting.
 - `query_all(...)` / `query_one(...)` — public read-only query APIs used by bootstrap and audit flows.
+- Persists money in dual form: `REAL` + `*_minor`; FX rates in `REAL` + `rate_at_operation_text`.
 
 `storage/base.py`
 
@@ -662,11 +672,13 @@ Below are the key classes and functions synchronized with the actual code.
 - `SQLiteStorage(db_path="records.db")` — SQLite adapter based on `sqlite3`, including:
   - `PRAGMA foreign_keys = ON`;
   - `PRAGMA journal_mode = WAL`;
+  - auto-migration for existing DBs: adds `*_minor` and `rate_at_operation_text`, then backfills them;
   - domain object read/write mapping without business-logic duplication.
 
 `db/schema.sql`
 
 - Database schema with tables `wallets`, `records`, `transfers`, `mandatory_expenses`, constraints, and indexes.
+- Monetary columns have exact integer `*_minor` companions; FX rates have `rate_at_operation_text`.
 
 ### GUI
 
@@ -783,6 +795,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `WalletBalance(wallet_id, name, currency, balance)` — immutable wallet balance snapshot.
 - `CashflowResult(income, expenses, cashflow)` — immutable period aggregate.
 - `BalanceService(repository)` — read-only analytics over `wallets` + `records`.
+- SQL aggregates use `*_minor` when available to avoid accumulated float drift.
 - `get_wallet_balance(wallet_id, date=None)` — wallet balance at a date or over full history.
 - `get_wallet_balances(date=None)` — balances of all active wallets.
 - `get_total_balance(date=None)` — total system balance.
@@ -796,6 +809,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `MonthlyCashflow(month, income, expenses, cashflow)` — immutable monthly cashflow aggregate.
 - `MonthlyCumulative(month, cumulative_income, cumulative_expenses)` — immutable running totals by month.
 - `TimelineService(repository)` — read-only timeline analytics from `wallets` + `records`.
+- Uses SQL helper expressions over `*_minor` for money totals.
 - `get_net_worth_timeline()` — net worth (KZT) at the end of each month (includes transfer pairs, they net to zero).
 - `get_monthly_cashflow(start_date=None, end_date=None)` — monthly income/expense/cashflow (excludes `transfer_id IS NOT NULL`).
 - `get_cumulative_income_expense()` — cumulative income and expenses by month (excludes `transfer_id IS NOT NULL`).
@@ -805,12 +819,17 @@ Below are the key classes and functions synchronized with the actual code.
 - `CategorySpend(category, total_kzt, record_count)` — immutable per-category aggregate.
 - `MonthlySummary(month, income, expenses, cashflow, savings_rate)` — immutable monthly aggregate.
 - `MetricsService(repository)` — read-only metrics analytics over `records`.
+- Uses quantized money and minor-unit SQL for sums and comparisons.
 - `get_savings_rate(start_date, end_date)` — (income - expenses) / income * 100, safe division by zero.
 - `get_burn_rate(start_date, end_date)` — average daily expense (KZT) for date range.
 - `get_spending_by_category(start_date, end_date, limit=None)` — expenses by category, sorted descending.
 - `get_income_by_category(start_date, end_date, limit=None)` — income by category, sorted descending.
 - `get_top_expense_categories(start_date, end_date, top_n=5)` — wrapper over `get_spending_by_category`.
 - `get_monthly_summary(start_date=None, end_date=None)` — per-month aggregates (income/expenses/cashflow/savings_rate).
+
+`services/sqlite_money_sql.py`
+
+- SQL helper expressions for minor-unit sums: `minor_amount_expr`, `money_expr`, `signed_minor_amount_expr`.
 
 ### Utils
 
@@ -819,6 +838,11 @@ Below are the key classes and functions synchronized with the actual code.
 - `compute_checksum(data)` — SHA256 checksum for `data`.
 - `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0, readonly=True, storage_mode="unknown")`.
 - `import_full_backup_from_json(filepath, force=False)`.
+- Backup/import normalizes money values and FX rates via `utils.money`.
+
+`utils/money.py`
+
+- Shared precise money helpers: `quantize_money`, `quantize_rate`, `to_minor_units`, `minor_to_money`, `build_rate`, and diff helpers.
 
 `utils/csv_utils.py`
 
@@ -828,6 +852,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `import_records_from_csv(filepath, policy, currency_service, wallet_ids=None)`.
 - `export_mandatory_expenses_to_csv(expenses, filepath)`.
 - `import_mandatory_expenses_from_csv(filepath, policy, currency_service)`.
+- CSV import/export validates and quantizes amounts/rates without float drift; transfer integrity checks use quantized comparisons.
 
 `utils/excel_utils.py`
 
@@ -837,6 +862,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `import_records_from_xlsx(filepath, policy, currency_service, wallet_ids=None)`.
 - `export_mandatory_expenses_to_xlsx(expenses, filepath)`.
 - `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)`.
+- `existing_initial_balance` is quantized to money scale during import.
 
 `utils/tabular_utils.py`
 
@@ -852,6 +878,10 @@ Below are the key classes and functions synchronized with the actual code.
 - `aggregate_daily_cashflow(records, year, month)`.
 - `aggregate_monthly_cashflow(records, year)`.
 - `extract_years(records)`.
+
+`utils/import_core.py`
+
+- Base import-row parser with Decimal-based money parsing, quantization, and payload validation.
 - `extract_months(records)`.
 
 `utils/import_core.py`
@@ -928,6 +958,7 @@ project/
 │   ├── import_service.py       # Import orchestration via FinanceService
 │   ├── metrics_service.py      # Read-only financial metrics service
 │   ├── report_service.py       # DTOs and helpers for reports UI
+│   ├── sqlite_money_sql.py     # SQL helper expressions for minor-unit sums
 │   └── timeline_service.py     # Read-only timeline service
 │
 ├── utils/                      # Import/export and graphs
@@ -937,6 +968,7 @@ project/
 │   ├── charting.py             # Graphs and Aggregations
 │   ├── csv_utils.py
 │   ├── excel_utils.py
+│   ├── money.py                # Precise money arithmetic and quantization helpers
 │   ├── pdf_utils.py
 │   └── tabular_utils.py        # Shared CSV/XLSX helpers
 │

@@ -440,6 +440,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - пишет в SQLite в одной явной транзакции в порядке:
   `wallets -> transfers -> records -> mandatory_expenses`;
 - сохраняет существующие `id` (или строит mapping `old_id -> new_id` при авто-генерации);
+- при записи заполняет precision-поля `*_minor` и `rate_at_operation_text`;
 - валидирует целостность и сверяет балансы/`net worth`;
 - делает `rollback` при любой ошибке или расхождении.
 - безопасен к повторному запуску: если SQLite уже содержит эквивалентный набор данных, миграция пропускается без ошибки.
@@ -475,6 +476,12 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - При такой переиндексации ссылки (`wallet_id`, `transfer_id`, `from_wallet_id`, `to_wallet_id`) ремапятся атомарно, чтобы сохранить целостность связей.
 - После очистки таблиц сбрасывается `sqlite_sequence`, чтобы новые записи снова начинались с `1`.
 - Проверка равенства данных до/после импорта должна выполняться по бизнес-полям и инвариантам, а не по конкретным значениям `id`.
+
+Поведение SQLite по денежным полям:
+
+- Для денежных значений сохраняются и `REAL`-колонки, и точные integer minor-units (`*_minor`).
+- Для курсов дополнительно сохраняется текстовое представление `rate_at_operation_text`.
+- `SQLiteStorage` автоматически добавляет и backfill'ит эти колонки для существующих баз.
 
 ---
 
@@ -547,7 +554,8 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 
 - `Record` — базовая запись (абстрактный класс). Cодержит обязательный `wallet_id` и опциональный `transfer_id`.
 - `Record.id` — обязательный идентификатор записи.
-- `Record.with_updated_amount_kzt(new_amount_kzt)` — возвращает новый экземпляр записи с пересчитанным `rate_at_operation`.
+- Денежные поля и `rate_at_operation` нормализуются через `utils.money` при создании объекта.
+- `Record.with_updated_amount_kzt(new_amount_kzt)` — возвращает новый экземпляр записи с пересчитанным `rate_at_operation` и money-quantization.
 - `IncomeRecord` — доход.
 - `ExpenseRecord` — расход.
 - `MandatoryExpenseRecord` — обязательный расход с `description` и `period`.
@@ -577,6 +585,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 `domain/transfers.py`
 
 - `Transfer` — агрегат перевода между кошельками.
+- Денежные поля и курс автоматически нормализуются до money/rate scale.
 
 `domain/validation.py`
 
@@ -648,6 +657,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `SQLiteRecordRepository(db_path="finance.db")` — SQLite-реализация `RecordRepository` для сервисного слоя.
 - `db_path` — путь к текущей SQLite-базе для отчёта аудита.
 - `query_all(...)` / `query_one(...)` — публичные read-only query API для bootstrap и audit-сценариев.
+- При записи поддерживает dual storage для денег: `REAL` + `*_minor`, а для курсов — `REAL` + `rate_at_operation_text`.
 
 `storage/base.py`
 
@@ -662,11 +672,13 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `SQLiteStorage(db_path="records.db")` — SQLite-адаптер на `sqlite3`, включает:
   - `PRAGMA foreign_keys = ON`;
   - `PRAGMA journal_mode = WAL`;
+  - auto-migration существующих БД: добавляет `*_minor` и `rate_at_operation_text`, затем backfill'ит их;
   - чтение/запись доменных объектов без дублирования бизнес-логики.
 
 `db/schema.sql`
 
 - SQL-схема БД: таблицы `wallets`, `records`, `transfers`, `mandatory_expenses`, ограничения и индексы.
+- Для денежных полей предусмотрены точные integer-колонки `*_minor`; для курсов — `rate_at_operation_text`.
 
 ### GUI
 
@@ -783,6 +795,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `WalletBalance(wallet_id, name, currency, balance)` — immutable snapshot баланса кошелька.
 - `CashflowResult(income, expenses, cashflow)` — immutable агрегат по периоду.
 - `BalanceService(repository)` — read-only аналитика по `wallets` + `records`.
+- SQL-агрегации опираются на `*_minor`, когда они доступны, чтобы избежать накопления float-ошибок.
 - `get_wallet_balance(wallet_id, date=None)` — баланс кошелька на дату или по полной истории.
 - `get_wallet_balances(date=None)` — список балансов всех активных кошельков.
 - `get_total_balance(date=None)` — суммарный баланс системы.
@@ -796,6 +809,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `MonthlyCashflow(month, income, expenses, cashflow)` — immutable агрегат cashflow по месяцу.
 - `MonthlyCumulative(month, cumulative_income, cumulative_expenses)` — immutable накопительные суммы по месяцам.
 - `TimelineService(repository)` — read-only аналитика по timeline из `wallets` + `records`.
+- Для денежных сумм использует SQL helper-выражения над `*_minor`.
 - `get_net_worth_timeline()` — net worth (KZT) на конец каждого месяца (включая transfer-пары, они нейтральны).
 - `get_monthly_cashflow(start_date=None, end_date=None)` — доходы/расходы/cashflow по месяцам (исключая `transfer_id IS NOT NULL`).
 - `get_cumulative_income_expense()` — накопительные доходы и расходы по месяцам (исключая `transfer_id IS NOT NULL`).
@@ -805,12 +819,17 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `CategorySpend(category, total_kzt, record_count)` — immutable агрегат по категории.
 - `MonthlySummary(month, income, expenses, cashflow, savings_rate)` — immutable агрегат по месяцу.
 - `MetricsService(repository)` — read-only аналитика финансовых метрик по `records`.
+- Для сумм и сравнений использует quantized money / minor-unit SQL.
 - `get_savings_rate(start_date, end_date)` — (income - expenses) / income * 100, safe division by zero.
 - `get_burn_rate(start_date, end_date)` — average daily expenses (KZT) for date range.
 - `get_spending_by_category(start_date, end_date, limit=None)` — расходы по категориям, сортировка по убыванию.
 - `get_income_by_category(start_date, end_date, limit=None)` — доходы по категориям, сортировка по убыванию.
 - `get_top_expense_categories(start_date, end_date, top_n=5)` — wrapper над `get_spending_by_category`.
 - `get_monthly_summary(start_date=None, end_date=None)` — агрегаты по месяцам (income/expenses/cashflow/savings_rate).
+
+`services/sqlite_money_sql.py`
+
+- SQL helper-выражения для minor-unit сумм: `minor_amount_expr`, `money_expr`, `signed_minor_amount_expr`.
 
 ### Utils
 
@@ -819,6 +838,11 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `compute_checksum(data)` — SHA256 для `data`.
 - `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0, readonly=True, storage_mode="unknown")`.
 - `import_full_backup_from_json(filepath, force=False)`.
+- Backup/import нормализует денежные значения и курсы через `utils.money`.
+
+`utils/money.py`
+
+- Общие helper'ы точной денежной арифметики: `quantize_money`, `quantize_rate`, `to_minor_units`, `minor_to_money`, `build_rate`, diff/helper-функции.
 
 `utils/csv_utils.py`
 
@@ -828,6 +852,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `import_records_from_csv(filepath, policy, currency_service, wallet_ids=None)`.
 - `export_mandatory_expenses_to_csv(expenses, filepath)`.
 - `import_mandatory_expenses_from_csv(filepath, policy, currency_service)`.
+- CSV import/export валидирует и квантует суммы/курсы без float-drift; integrity checks transfer используют quantized comparison.
 
 `utils/excel_utils.py`
 
@@ -837,6 +862,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `import_records_from_xlsx(filepath, policy, currency_service, wallet_ids=None)`.
 - `export_mandatory_expenses_to_xlsx(expenses, filepath)`.
 - `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)`.
+- `existing_initial_balance` при импорте quantize'ится до money scale.
 
 `utils/tabular_utils.py`
 
@@ -852,6 +878,10 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `aggregate_daily_cashflow(records, year, month)`.
 - `aggregate_monthly_cashflow(records, year)`.
 - `extract_years(records)`.
+
+`utils/import_core.py`
+
+- Базовый parser import-строк с Decimal-based money parsing, quantization и валидацией payload.
 - `extract_months(records)`.
 
 `utils/import_core.py`
@@ -928,6 +958,7 @@ project/
 │   ├── import_service.py       # Оркестрация импорта через FinanceService
 │   ├── metrics_service.py      # Read-only сервис финансовых метрик
 │   ├── report_service.py       # DTO и helper'ы для UI отчётов
+│   ├── sqlite_money_sql.py     # SQL helper-выражения для minor-unit сумм
 │   └── timeline_service.py     # Read-only сервис временных рядов
 │
 ├── utils/                      # Импорт/экспорт и графики
@@ -937,6 +968,7 @@ project/
 │   ├── charting.py             # Графики и агрегации
 │   ├── csv_utils.py
 │   ├── excel_utils.py
+│   ├── money.py                # Точная денежная арифметика и quantization helper'ы
 │   ├── pdf_utils.py
 │   └── tabular_utils.py        # Общие helper'ы CSV/XLSX
 │

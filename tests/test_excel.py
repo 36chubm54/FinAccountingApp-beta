@@ -4,6 +4,7 @@ import time
 
 from openpyxl import load_workbook
 
+from domain.import_policy import ImportPolicy
 from domain.records import (
     ExpenseRecord,
     IncomeRecord,
@@ -17,6 +18,7 @@ from utils.csv_utils import (
 from utils.excel_utils import (
     export_mandatory_expenses_to_xlsx,
     import_mandatory_expenses_from_xlsx,
+    import_records_from_xlsx,
     report_from_xlsx,
     report_to_xlsx,
 )
@@ -203,3 +205,30 @@ def test_xlsx_export_grouped_drill_down():
                 break
             except PermissionError:
                 time.sleep(0.1)
+
+
+def test_import_records_from_xlsx_quantizes_existing_initial_balance():
+    from openpyxl import Workbook
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        tmp_path = tmp.name
+    try:
+        wb = Workbook()
+        ws = wb.active
+        if ws is not None:
+            ws.title = "Data"
+            ws.append(["date", "type", "amount"])
+        wb.save(tmp_path)
+        wb.close()
+
+        records, initial_balance, summary = import_records_from_xlsx(
+            tmp_path,
+            ImportPolicy.LEGACY,
+            existing_initial_balance=1.005,
+        )
+
+        assert records == []
+        assert initial_balance == 1.01
+        assert summary == (0, 0, [])
+    finally:
+        os.unlink(tmp_path)

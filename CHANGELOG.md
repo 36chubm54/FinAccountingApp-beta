@@ -7,6 +7,34 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.6.0] - 2026-03-19
+
+### Added
+
+- Precise money helpers in `utils/money.py` for quantization, minor units, and canonical FX-rate formatting
+- SQL helper expressions in `services/sqlite_money_sql.py` for minor-unit based sums and signed money calculations
+- Precision columns in SQLite schema: `*_minor` for money and `rate_at_operation_text` for exchange rates
+
+### Changed
+
+- SQLite storage/repository now persist and read money values through dual representation: `REAL` + exact minor units
+- Existing SQLite databases are auto-migrated/backfilled with precision columns on startup
+- Migration, import, backup, and analytics flows now use quantized money/rate helpers instead of raw float arithmetic
+- Balance, metrics, and timeline analytics now aggregate through minor-unit SQL expressions to reduce rounding drift
+
+### Tests
+
+- Extended `tests/test_migrate_json_to_sqlite.py` to verify `*_minor` and `rate_at_operation_text` migration payload
+- Added Excel import coverage for quantized `existing_initial_balance` in `tests/test_excel.py`
+
+### Docs
+
+- Updated `README.md` and `README_EN.md` to document the precision model and new helper modules
+
+No breaking changes.
+
+---
+
 ## [1.5.1] - 2026-03-18
 
 ### Added

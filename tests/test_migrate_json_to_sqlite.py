@@ -124,10 +124,32 @@ def test_migration_moves_all_data_and_preserves_ids(tmp_path) -> None:
     assert sqlite_storage.query_one("SELECT COUNT(*) FROM records")[0] == 2
     assert sqlite_storage.query_one("SELECT COUNT(*) FROM mandatory_expenses")[0] == 1
     row = sqlite_storage.query_one(
-        "SELECT date, auto_pay FROM mandatory_expenses ORDER BY id LIMIT 1"
+        """
+        SELECT date, auto_pay, amount_original_minor, amount_kzt_minor, rate_at_operation_text
+        FROM mandatory_expenses
+        ORDER BY id
+        LIMIT 1
+        """
     )
     assert row[0] == "2026-03-15"
     assert row[1] == 1
+    assert row[2] == 5000
+    assert row[3] == 5000
+    assert row[4] == "1.000000"
+
+    wallet_row = sqlite_storage.query_one("SELECT initial_balance_minor FROM wallets WHERE id = 1")
+    assert wallet_row[0] == 100000
+
+    transfer_row = sqlite_storage.query_one(
+        """
+        SELECT amount_original_minor, amount_kzt_minor, rate_at_operation_text
+        FROM transfers
+        WHERE id = 1
+        """
+    )
+    assert transfer_row[0] == 10000
+    assert transfer_row[1] == 10000
+    assert transfer_row[2] == "1.000000"
 
     wallet_ids = [row[0] for row in sqlite_storage.query_all("SELECT id FROM wallets ORDER BY id")]
     transfer_ids = [

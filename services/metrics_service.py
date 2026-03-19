@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from infrastructure.sqlite_repository import SQLiteRecordRepository
+from services.sqlite_money_sql import minor_amount_expr
 
 
 @dataclass(frozen=True)
@@ -95,7 +96,7 @@ class MetricsService:
             f"""
             SELECT
                 category,
-                COALESCE(SUM(amount_kzt), 0.0) AS total_kzt,
+                COALESCE(SUM({minor_amount_expr("amount_kzt")}), 0.0) AS total_kzt,
                 COUNT(*)                        AS record_count
             FROM records
             WHERE type IN ('expense', 'mandatory_expense')
@@ -110,7 +111,7 @@ class MetricsService:
         return [
             CategorySpend(
                 category=str(row[0]),
-                total_kzt=round(float(row[1]), 2),
+                total_kzt=round(float(row[1]) / 100.0, 2),
                 record_count=int(row[2]),
             )
             for row in rows
@@ -134,7 +135,7 @@ class MetricsService:
             f"""
             SELECT
                 category,
-                COALESCE(SUM(amount_kzt), 0.0) AS total_kzt,
+                COALESCE(SUM({minor_amount_expr("amount_kzt")}), 0.0) AS total_kzt,
                 COUNT(*)                        AS record_count
             FROM records
             WHERE type = 'income'
@@ -149,7 +150,7 @@ class MetricsService:
         return [
             CategorySpend(
                 category=str(row[0]),
-                total_kzt=round(float(row[1]), 2),
+                total_kzt=round(float(row[1]) / 100.0, 2),
                 record_count=int(row[2]),
             )
             for row in rows
@@ -194,10 +195,11 @@ class MetricsService:
             f"""
             SELECT
                 strftime('%Y-%m', date) AS month,
-                COALESCE(SUM(CASE type WHEN 'income' THEN amount_kzt ELSE 0 END), 0.0)
+                COALESCE(SUM(CASE type WHEN 'income'
+                        THEN {minor_amount_expr("amount_kzt")} ELSE 0 END), 0.0)
                     AS income,
                 COALESCE(SUM(CASE WHEN type IN ('expense', 'mandatory_expense')
-                               THEN amount_kzt ELSE 0 END), 0.0)
+                        THEN {minor_amount_expr("amount_kzt")} ELSE 0 END), 0.0)
                     AS expenses
             FROM records
             WHERE {date_filter}
@@ -208,8 +210,8 @@ class MetricsService:
         )
         result: list[MonthlySummary] = []
         for row in rows:
-            income = round(float(row[1]), 2)
-            expenses = round(float(row[2]), 2)
+            income = round(float(row[1]) / 100.0, 2)
+            expenses = round(float(row[2]) / 100.0, 2)
             cashflow = round(income - expenses, 2)
             savings_rate = round(cashflow / income * 100, 2) if income > 0 else 0.0
             result.append(
@@ -227,7 +229,10 @@ class MetricsService:
         """Total income (KZT) in [start_date, end_date], transfers excluded."""
         row = self._repo.query_one(
             """
-            SELECT COALESCE(SUM(amount_kzt), 0.0)
+            SELECT 
+            COALESCE(SUM("""
+            + minor_amount_expr("amount_kzt")
+            + """), 0.0)
             FROM records
             WHERE type = 'income'
               AND transfer_id IS NULL
@@ -235,13 +240,16 @@ class MetricsService:
             """,
             (str(start_date), str(end_date)),
         )
-        return float(row[0]) if row else 0.0
+        return (float(row[0]) / 100.0) if row else 0.0
 
     def _sum_expenses(self, start_date: str, end_date: str) -> float:
         """Total expenses (KZT) in [start_date, end_date], transfers excluded."""
         row = self._repo.query_one(
             """
-            SELECT COALESCE(SUM(amount_kzt), 0.0)
+            SELECT 
+            COALESCE(SUM("""
+            + minor_amount_expr("amount_kzt")
+            + """), 0.0)
             FROM records
             WHERE type IN ('expense', 'mandatory_expense')
               AND transfer_id IS NULL
@@ -249,4 +257,4 @@ class MetricsService:
             """,
             (str(start_date), str(end_date)),
         )
-        return float(row[0]) if row else 0.0
+        return (float(row[0]) / 100.0) if row else 0.0

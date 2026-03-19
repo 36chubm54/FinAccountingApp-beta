@@ -4,6 +4,8 @@ from datetime import date as dt_date
 from itertools import count
 from typing import Literal
 
+from utils.money import quantize_money, to_money_float, to_rate_float
+
 from .validation import parse_ymd
 
 _ID_COUNTER = count(start=1)
@@ -47,18 +49,24 @@ class Record(ABC):
             object.__setattr__(self, "date", date_value)
 
         if self.amount_original is None and amount is not None:
-            object.__setattr__(self, "amount_original", float(amount))
+            object.__setattr__(self, "amount_original", to_money_float(amount))
 
         if self.amount_kzt is None:
             if amount is not None:
-                object.__setattr__(self, "amount_kzt", float(amount))
+                object.__setattr__(self, "amount_kzt", to_money_float(amount))
             elif self.amount_original is not None:
-                object.__setattr__(self, "amount_kzt", float(self.amount_original))
+                object.__setattr__(self, "amount_kzt", to_money_float(self.amount_original))
             else:
                 object.__setattr__(self, "amount_kzt", 0.0)
 
         if self.amount_original is None and self.amount_kzt is not None:
-            object.__setattr__(self, "amount_original", float(self.amount_kzt))
+            object.__setattr__(self, "amount_original", to_money_float(self.amount_kzt))
+
+        if self.amount_original is not None:
+            object.__setattr__(self, "amount_original", to_money_float(self.amount_original))
+        if self.amount_kzt is not None:
+            object.__setattr__(self, "amount_kzt", to_money_float(self.amount_kzt))
+        object.__setattr__(self, "rate_at_operation", to_rate_float(self.rate_at_operation))
 
         if not self.currency:
             object.__setattr__(self, "currency", "KZT")
@@ -81,10 +89,11 @@ class Record(ABC):
             object.__setattr__(self, "transfer_id", transfer_id)
 
     def with_updated_amount_kzt(self, new_amount_kzt: float) -> "Record":
-        if float(self.amount_original or 0.0) == 0.0:
+        amount_original = quantize_money(self.amount_original or 0.0)
+        if amount_original == 0:
             raise ValueError("Cannot update amount_kzt when amount_original is zero")
-        updated_amount_kzt = round(float(new_amount_kzt), 2)
-        new_rate = round(updated_amount_kzt / float(self.amount_original or 1.0), 6)
+        updated_amount_kzt = to_money_float(new_amount_kzt)
+        new_rate = to_rate_float(quantize_money(updated_amount_kzt) / amount_original)
         return replace(
             self,
             amount_kzt=updated_amount_kzt,
@@ -144,11 +153,14 @@ class MandatoryExpenseRecord(Record):
     def with_updated_amount_kzt(self, new_amount_kzt: float) -> "MandatoryExpenseRecord":
         if new_amount_kzt <= 0:
             raise ValueError("amount_kzt must be positive")
+        updated_amount_kzt = to_money_float(new_amount_kzt)
         if self.amount_original and self.amount_original > 0:
-            new_rate = new_amount_kzt / self.amount_original
+            new_rate = to_rate_float(
+                quantize_money(updated_amount_kzt) / quantize_money(self.amount_original)
+            )
         else:
-            new_rate = self.rate_at_operation
-        return replace(self, amount_kzt=new_amount_kzt, rate_at_operation=new_rate)
+            new_rate = to_rate_float(self.rate_at_operation)
+        return replace(self, amount_kzt=updated_amount_kzt, rate_at_operation=new_rate)
 
     def with_updated_date(self, new_date: str) -> "MandatoryExpenseRecord":
         normalized_date = (new_date or "").strip()

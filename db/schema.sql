@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS wallets (
     name TEXT NOT NULL CHECK(length(trim(name)) > 0),
     currency TEXT NOT NULL CHECK(length(trim(currency)) = 3 AND upper(trim(currency)) = trim(currency)),
     initial_balance REAL NOT NULL DEFAULT 0 CHECK(initial_balance >= 0),
+    initial_balance_minor INTEGER DEFAULT NULL CHECK(initial_balance_minor >= 0 OR initial_balance_minor IS NULL),
     system INTEGER NOT NULL DEFAULT 0 CHECK(system IN (0, 1)),
     allow_negative INTEGER NOT NULL DEFAULT 0 CHECK(allow_negative IN (0, 1)),
     is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1))
@@ -21,9 +22,12 @@ CREATE TABLE IF NOT EXISTS transfers (
     to_wallet_id INTEGER NOT NULL,
     date TEXT NOT NULL CHECK(date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
     amount_original REAL NOT NULL CHECK(amount_original > 0),
+    amount_original_minor INTEGER DEFAULT NULL CHECK(amount_original_minor > 0 OR amount_original_minor IS NULL),
     currency TEXT NOT NULL CHECK(length(trim(currency)) = 3 AND upper(trim(currency)) = trim(currency)),
     rate_at_operation REAL NOT NULL CHECK(rate_at_operation > 0),
+    rate_at_operation_text TEXT DEFAULT NULL,
     amount_kzt REAL NOT NULL CHECK(amount_kzt > 0),
+    amount_kzt_minor INTEGER DEFAULT NULL CHECK(amount_kzt_minor > 0 OR amount_kzt_minor IS NULL),
     description TEXT NOT NULL DEFAULT '',
     FOREIGN KEY(from_wallet_id) REFERENCES wallets(id) ON UPDATE CASCADE ON DELETE RESTRICT,
     FOREIGN KEY(to_wallet_id) REFERENCES wallets(id) ON UPDATE CASCADE ON DELETE RESTRICT,
@@ -37,9 +41,12 @@ CREATE TABLE IF NOT EXISTS records (
     wallet_id INTEGER NOT NULL,
     transfer_id INTEGER,
     amount_original REAL NOT NULL CHECK(amount_original >= 0),
+    amount_original_minor INTEGER DEFAULT NULL CHECK(amount_original_minor >= 0 OR amount_original_minor IS NULL),
     currency TEXT NOT NULL CHECK(length(trim(currency)) = 3 AND upper(trim(currency)) = trim(currency)),
     rate_at_operation REAL NOT NULL CHECK(rate_at_operation > 0),
+    rate_at_operation_text TEXT DEFAULT NULL,
     amount_kzt REAL NOT NULL CHECK(amount_kzt >= 0),
+    amount_kzt_minor INTEGER DEFAULT NULL CHECK(amount_kzt_minor >= 0 OR amount_kzt_minor IS NULL),
     category TEXT NOT NULL CHECK(length(trim(category)) > 0),
     description TEXT NOT NULL DEFAULT '',
     period TEXT CHECK(period IN ('daily', 'weekly', 'monthly', 'yearly') OR period IS NULL),
@@ -51,9 +58,12 @@ CREATE TABLE IF NOT EXISTS mandatory_expenses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     wallet_id INTEGER NOT NULL,
     amount_original REAL NOT NULL CHECK(amount_original >= 0),
+    amount_original_minor INTEGER DEFAULT NULL CHECK(amount_original_minor >= 0 OR amount_original_minor IS NULL),
     currency TEXT NOT NULL CHECK(length(trim(currency)) = 3 AND upper(trim(currency)) = trim(currency)),
     rate_at_operation REAL NOT NULL CHECK(rate_at_operation > 0),
+    rate_at_operation_text TEXT DEFAULT NULL,
     amount_kzt REAL NOT NULL CHECK(amount_kzt >= 0),
+    amount_kzt_minor INTEGER DEFAULT NULL CHECK(amount_kzt_minor >= 0 OR amount_kzt_minor IS NULL),
     category TEXT NOT NULL CHECK(length(trim(category)) > 0),
     description TEXT NOT NULL CHECK(length(trim(description)) > 0),
     period TEXT NOT NULL CHECK(period IN ('daily', 'weekly', 'monthly', 'yearly')),
@@ -63,6 +73,16 @@ CREATE TABLE IF NOT EXISTS mandatory_expenses (
 );
 
 -- Migration for existing databases:
+-- ALTER TABLE wallets ADD COLUMN initial_balance_minor INTEGER DEFAULT NULL;
+-- ALTER TABLE transfers ADD COLUMN amount_original_minor INTEGER DEFAULT NULL;
+-- ALTER TABLE transfers ADD COLUMN rate_at_operation_text TEXT DEFAULT NULL;
+-- ALTER TABLE transfers ADD COLUMN amount_kzt_minor INTEGER DEFAULT NULL;
+-- ALTER TABLE records ADD COLUMN amount_original_minor INTEGER DEFAULT NULL;
+-- ALTER TABLE records ADD COLUMN rate_at_operation_text TEXT DEFAULT NULL;
+-- ALTER TABLE records ADD COLUMN amount_kzt_minor INTEGER DEFAULT NULL;
+-- ALTER TABLE mandatory_expenses ADD COLUMN amount_original_minor INTEGER DEFAULT NULL;
+-- ALTER TABLE mandatory_expenses ADD COLUMN rate_at_operation_text TEXT DEFAULT NULL;
+-- ALTER TABLE mandatory_expenses ADD COLUMN amount_kzt_minor INTEGER DEFAULT NULL;
 -- ALTER TABLE mandatory_expenses ADD COLUMN date TEXT DEFAULT NULL;
 -- ALTER TABLE mandatory_expenses ADD COLUMN auto_pay INTEGER NOT NULL DEFAULT 0;
 

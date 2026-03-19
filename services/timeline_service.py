@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from infrastructure.sqlite_repository import SQLiteRecordRepository
+from services.sqlite_money_sql import minor_amount_expr, signed_minor_amount_expr
 
 
 @dataclass(frozen=True)
@@ -62,7 +63,7 @@ class TimelineService:
         base = self._get_total_initial_balance()
 
         rows = self._repo.query_all(
-            """
+            f"""
             SELECT
                 month,
                 SUM(signed_delta) OVER (
@@ -72,12 +73,7 @@ class TimelineService:
             FROM (
                 SELECT
                     strftime('%Y-%m', date) AS month,
-                    SUM(
-                        CASE type
-                            WHEN 'income' THEN amount_kzt
-                            ELSE -amount_kzt
-                        END
-                    ) AS signed_delta
+                    SUM({signed_minor_amount_expr("amount_kzt")}) AS signed_delta
                 FROM records
                 GROUP BY strftime('%Y-%m', date)
             )
@@ -87,7 +83,7 @@ class TimelineService:
         return [
             MonthlyNetWorth(
                 month=str(row[0]),
-                balance=round(base + float(row[1]), 2),
+                balance=round(base + float(row[1]) / 100.0, 2),
             )
             for row in rows
         ]
@@ -120,9 +116,12 @@ class TimelineService:
             f"""
             SELECT
                 strftime('%Y-%m', date) AS month,
-                COALESCE(SUM(CASE type WHEN 'income' THEN amount_kzt ELSE 0 END), 0.0) AS income,
+                COALESCE(SUM(CASE type WHEN 'income'
+                    THEN {minor_amount_expr("amount_kzt")} ELSE 0 END), 0.0)
+                AS income,
                 COALESCE(SUM(CASE WHEN type IN ('expense', 'mandatory_expense')
-                               THEN amount_kzt ELSE 0 END), 0.0) AS expenses
+                    THEN {minor_amount_expr("amount_kzt")} ELSE 0 END), 0.0)
+                AS expenses
             FROM records
             WHERE {date_filter}
             GROUP BY strftime('%Y-%m', date)
@@ -133,9 +132,9 @@ class TimelineService:
         return [
             MonthlyCashflow(
                 month=str(row[0]),
-                income=round(float(row[1]), 2),
-                expenses=round(float(row[2]), 2),
-                cashflow=round(float(row[1]) - float(row[2]), 2),
+                income=round(float(row[1]) / 100.0, 2),
+                expenses=round(float(row[2]) / 100.0, 2),
+                cashflow=round((float(row[1]) - float(row[2])) / 100.0, 2),
             )
             for row in rows
         ]
@@ -149,7 +148,7 @@ class TimelineService:
         Returns list sorted by month ascending.
         """
         rows = self._repo.query_all(
-            """
+            f"""
             SELECT
                 month,
                 SUM(monthly_income)   OVER (ORDER BY month
@@ -159,10 +158,15 @@ class TimelineService:
             FROM (
                 SELECT
                     strftime('%Y-%m', date) AS month,
-                    COALESCE(SUM(CASE type WHEN 'income' THEN amount_kzt ELSE 0 END), 0.0)
+                    COALESCE(SUM(
+                        CASE type
+                        WHEN 'income'
+                            THEN {minor_amount_expr("amount_kzt")} ELSE 0 END), 0.0)
                         AS monthly_income,
-                    COALESCE(SUM(CASE WHEN type IN ('expense', 'mandatory_expense')
-                                   THEN amount_kzt ELSE 0 END), 0.0)
+                    COALESCE(SUM(
+                        CASE
+                        WHEN type IN ('expense', 'mandatory_expense')
+                            THEN {minor_amount_expr("amount_kzt")} ELSE 0 END), 0.0)
                         AS monthly_expenses
                 FROM records
                 WHERE transfer_id IS NULL
@@ -174,8 +178,8 @@ class TimelineService:
         return [
             MonthlyCumulative(
                 month=str(row[0]),
-                cumulative_income=round(float(row[1]), 2),
-                cumulative_expenses=round(float(row[2]), 2),
+                cumulative_income=round(float(row[1]) / 100.0, 2),
+                cumulative_expenses=round(float(row[2]) / 100.0, 2),
             )
             for row in rows
         ]
@@ -183,6 +187,7 @@ class TimelineService:
     def _get_total_initial_balance(self) -> float:
         """SUM of initial_balance across all active wallets."""
         row = self._repo.query_one(
-            "SELECT COALESCE(SUM(initial_balance), 0.0) FROM wallets WHERE is_active = 1"
+            f"SELECT COALESCE(SUM({minor_amount_expr('initial_balance')}), 0.0) "
+            "FROM wallets WHERE is_active = 1"
         )
-        return float(row[0]) if row else 0.0
+        return (float(row[0]) / 100.0) if row else 0.0

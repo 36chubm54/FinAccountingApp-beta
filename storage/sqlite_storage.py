@@ -7,6 +7,7 @@ from pathlib import Path
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 from domain.transfers import Transfer
 from domain.wallets import Wallet
+from utils.money import minor_to_money, rate_to_text, to_minor_units, to_money_float, to_rate_float
 
 from .base import Storage
 
@@ -31,7 +32,95 @@ class SQLiteStorage(Storage):
             schema_path = str(Path(__file__).resolve().parents[1] / "db" / "schema.sql")
         schema = Path(schema_path).read_text(encoding="utf-8")
         self._conn.executescript(schema)
+        self._ensure_money_precision_columns()
         self._conn.commit()
+
+    def _column_names(self, table: str) -> set[str]:
+        return {
+            str(row["name"]) for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+
+    def _add_column_if_missing(self, table: str, column_name: str, definition: str) -> None:
+        if column_name in self._column_names(table):
+            return
+        self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_name} {definition}")
+
+    def _backfill_minor_column(self, table: str, real_column: str, minor_column: str) -> None:
+        rows = self._conn.execute(
+            f"SELECT id, {real_column}, {minor_column} FROM {table}"
+        ).fetchall()
+        updates: list[tuple[int, int]] = []
+        for row in rows:
+            if int(row[minor_column] or 0) != 0:
+                continue
+            updates.append((to_minor_units(row[real_column] or 0.0), int(row["id"])))
+        if updates:
+            self._conn.executemany(
+                f"UPDATE {table} SET {minor_column} = ? WHERE id = ?",
+                updates,
+            )
+
+    def _ensure_money_precision_columns(self) -> None:
+        self._add_column_if_missing("wallets", "initial_balance_minor", "INTEGER DEFAULT NULL")
+        self._add_column_if_missing("transfers", "amount_original_minor", "INTEGER DEFAULT NULL")
+        self._add_column_if_missing("transfers", "rate_at_operation_text", "TEXT DEFAULT NULL")
+        self._add_column_if_missing("transfers", "amount_kzt_minor", "INTEGER DEFAULT NULL")
+        self._add_column_if_missing("records", "amount_original_minor", "INTEGER DEFAULT NULL")
+        self._add_column_if_missing("records", "rate_at_operation_text", "TEXT DEFAULT NULL")
+        self._add_column_if_missing("records", "amount_kzt_minor", "INTEGER DEFAULT NULL")
+        self._add_column_if_missing(
+            "mandatory_expenses", "amount_original_minor", "INTEGER DEFAULT NULL"
+        )
+        self._add_column_if_missing(
+            "mandatory_expenses", "rate_at_operation_text", "TEXT DEFAULT NULL"
+        )
+        self._add_column_if_missing(
+            "mandatory_expenses", "amount_kzt_minor", "INTEGER DEFAULT NULL"
+        )
+        self._backfill_minor_column("wallets", "initial_balance", "initial_balance_minor")
+        self._backfill_minor_column("transfers", "amount_original", "amount_original_minor")
+        self._backfill_minor_column("transfers", "amount_kzt", "amount_kzt_minor")
+        self._backfill_minor_column("records", "amount_original", "amount_original_minor")
+        self._backfill_minor_column("records", "amount_kzt", "amount_kzt_minor")
+        self._backfill_minor_column(
+            "mandatory_expenses", "amount_original", "amount_original_minor"
+        )
+        self._backfill_minor_column("mandatory_expenses", "amount_kzt", "amount_kzt_minor")
+        self._backfill_rate_text("transfers")
+        self._backfill_rate_text("records")
+        self._backfill_rate_text("mandatory_expenses")
+
+    @staticmethod
+    def _money_from_row(row: sqlite3.Row, real_column: str, minor_column: str) -> float:
+        real_value = row[real_column]
+        minor_value = row[minor_column] if minor_column in row.keys() else None
+        if minor_value is not None:
+            if int(minor_value) != 0 or to_money_float(real_value or 0.0) == 0.0:
+                return minor_to_money(minor_value)
+        return to_money_float(real_value or 0.0)
+
+    def _backfill_rate_text(self, table: str) -> None:
+        rows = self._conn.execute(
+            f"SELECT id, rate_at_operation, rate_at_operation_text FROM {table}"
+        ).fetchall()
+        updates: list[tuple[str, int]] = []
+        for row in rows:
+            if str(row["rate_at_operation_text"] or "").strip():
+                continue
+            updates.append((rate_to_text(row["rate_at_operation"] or 1.0), int(row["id"])))
+        if updates:
+            self._conn.executemany(
+                f"UPDATE {table} SET rate_at_operation_text = ? WHERE id = ?",
+                updates,
+            )
+
+    @staticmethod
+    def _rate_from_row(row: sqlite3.Row) -> float:
+        if "rate_at_operation_text" in row.keys():
+            rate_text = str(row["rate_at_operation_text"] or "").strip()
+            if rate_text:
+                return to_rate_float(rate_text)
+        return to_rate_float(row["rate_at_operation"] or 1.0)
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
         return self._conn.execute(sql, params)
@@ -58,7 +147,15 @@ class SQLiteStorage(Storage):
     def get_wallets(self) -> list[Wallet]:
         rows = self._conn.execute(
             """
-            SELECT id, name, currency, initial_balance, system, allow_negative, is_active
+            SELECT
+                id,
+                name,
+                currency,
+                initial_balance,
+                initial_balance_minor,
+                system,
+                allow_negative,
+                is_active
             FROM wallets
             ORDER BY id
             """
@@ -68,7 +165,9 @@ class SQLiteStorage(Storage):
                 id=int(row["id"]),
                 name=str(row["name"]),
                 currency=str(row["currency"]),
-                initial_balance=float(row["initial_balance"]),
+                initial_balance=self._money_from_row(
+                    row, "initial_balance", "initial_balance_minor"
+                ),
                 system=bool(row["system"]),
                 allow_negative=bool(row["allow_negative"]),
                 is_active=bool(row["is_active"]),
@@ -89,6 +188,7 @@ class SQLiteStorage(Storage):
                     name = ?,
                     currency = ?,
                     initial_balance = ?,
+                    initial_balance_minor = ?,
                     system = ?,
                     allow_negative = ?,
                     is_active = ?
@@ -97,7 +197,8 @@ class SQLiteStorage(Storage):
                 (
                     wallet.name,
                     wallet.currency.upper(),
-                    float(wallet.initial_balance),
+                    to_money_float(wallet.initial_balance),
+                    to_minor_units(wallet.initial_balance),
                     int(bool(wallet.system)),
                     int(bool(wallet.allow_negative)),
                     int(bool(wallet.is_active)),
@@ -111,16 +212,18 @@ class SQLiteStorage(Storage):
                     name,
                     currency,
                     initial_balance,
+                    initial_balance_minor,
                     system,
                     allow_negative,
                     is_active
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     wallet.name,
                     wallet.currency.upper(),
-                    float(wallet.initial_balance),
+                    to_money_float(wallet.initial_balance),
+                    to_minor_units(wallet.initial_balance),
                     int(bool(wallet.system)),
                     int(bool(wallet.allow_negative)),
                     int(bool(wallet.is_active)),
@@ -141,9 +244,12 @@ class SQLiteStorage(Storage):
                 wallet_id,
                 transfer_id,
                 amount_original,
+                amount_original_minor,
                 currency,
                 rate_at_operation,
+                rate_at_operation_text,
                 amount_kzt,
+                amount_kzt_minor,
                 category,
                 description,
                 period
@@ -158,10 +264,12 @@ class SQLiteStorage(Storage):
                 "date": str(row["date"]),
                 "wallet_id": int(row["wallet_id"]),
                 "transfer_id": int(row["transfer_id"]) if row["transfer_id"] is not None else None,
-                "amount_original": float(row["amount_original"]),
+                "amount_original": self._money_from_row(
+                    row, "amount_original", "amount_original_minor"
+                ),
                 "currency": str(row["currency"]).upper(),
-                "rate_at_operation": float(row["rate_at_operation"]),
-                "amount_kzt": float(row["amount_kzt"]),
+                "rate_at_operation": self._rate_from_row(row),
+                "amount_kzt": self._money_from_row(row, "amount_kzt", "amount_kzt_minor"),
                 "category": str(row["category"]),
                 "description": str(row["description"] or ""),
             }
@@ -195,9 +303,12 @@ class SQLiteStorage(Storage):
                     wallet_id = ?,
                     transfer_id = ?,
                     amount_original = ?,
+                    amount_original_minor = ?,
                     currency = ?,
                     rate_at_operation = ?,
+                    rate_at_operation_text = ?,
                     amount_kzt = ?,
+                    amount_kzt_minor = ?,
                     category = ?,
                     description = ?,
                     period = ?
@@ -208,10 +319,13 @@ class SQLiteStorage(Storage):
                     self._date_as_text(record.date),
                     int(record.wallet_id),
                     int(record.transfer_id) if record.transfer_id is not None else None,
-                    float(record.amount_original or 0.0),
+                    to_money_float(record.amount_original or 0.0),
+                    to_minor_units(record.amount_original or 0.0),
                     str(record.currency).upper(),
-                    float(record.rate_at_operation),
-                    float(record.amount_kzt or 0.0),
+                    to_rate_float(record.rate_at_operation),
+                    rate_to_text(record.rate_at_operation),
+                    to_money_float(record.amount_kzt or 0.0),
+                    to_minor_units(record.amount_kzt or 0.0),
                     str(record.category),
                     str(record.description or ""),
                     str(period) if period is not None else None,
@@ -227,24 +341,30 @@ class SQLiteStorage(Storage):
                     wallet_id,
                     transfer_id,
                     amount_original,
+                    amount_original_minor,
                     currency,
                     rate_at_operation,
+                    rate_at_operation_text,
                     amount_kzt,
+                    amount_kzt_minor,
                     category,
                     description,
                     period
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     self._record_type(record),
                     self._date_as_text(record.date),
                     int(record.wallet_id),
                     int(record.transfer_id) if record.transfer_id is not None else None,
-                    float(record.amount_original or 0.0),
+                    to_money_float(record.amount_original or 0.0),
+                    to_minor_units(record.amount_original or 0.0),
                     str(record.currency).upper(),
-                    float(record.rate_at_operation),
-                    float(record.amount_kzt or 0.0),
+                    to_rate_float(record.rate_at_operation),
+                    rate_to_text(record.rate_at_operation),
+                    to_money_float(record.amount_kzt or 0.0),
+                    to_minor_units(record.amount_kzt or 0.0),
                     str(record.category),
                     str(record.description or ""),
                     str(period) if period is not None else None,
@@ -264,9 +384,12 @@ class SQLiteStorage(Storage):
                 to_wallet_id,
                 date,
                 amount_original,
+                amount_original_minor,
                 currency,
                 rate_at_operation,
+                rate_at_operation_text,
                 amount_kzt,
+                amount_kzt_minor,
                 description
             FROM transfers
             ORDER BY id
@@ -278,10 +401,12 @@ class SQLiteStorage(Storage):
                 from_wallet_id=int(row["from_wallet_id"]),
                 to_wallet_id=int(row["to_wallet_id"]),
                 date=str(row["date"]),
-                amount_original=float(row["amount_original"]),
+                amount_original=self._money_from_row(
+                    row, "amount_original", "amount_original_minor"
+                ),
                 currency=str(row["currency"]).upper(),
-                rate_at_operation=float(row["rate_at_operation"]),
-                amount_kzt=float(row["amount_kzt"]),
+                rate_at_operation=self._rate_from_row(row),
+                amount_kzt=self._money_from_row(row, "amount_kzt", "amount_kzt_minor"),
                 description=str(row["description"] or ""),
             )
             for row in rows
@@ -301,9 +426,12 @@ class SQLiteStorage(Storage):
                     to_wallet_id = ?,
                     date = ?,
                     amount_original = ?,
+                    amount_original_minor = ?,
                     currency = ?,
                     rate_at_operation = ?,
+                    rate_at_operation_text = ?,
                     amount_kzt = ?,
+                    amount_kzt_minor = ?,
                     description = ?
                 WHERE id = ?
                 """,
@@ -311,10 +439,13 @@ class SQLiteStorage(Storage):
                     int(transfer.from_wallet_id),
                     int(transfer.to_wallet_id),
                     self._date_as_text(transfer.date),
-                    float(transfer.amount_original),
+                    to_money_float(transfer.amount_original),
+                    to_minor_units(transfer.amount_original),
                     str(transfer.currency).upper(),
-                    float(transfer.rate_at_operation),
-                    float(transfer.amount_kzt),
+                    to_rate_float(transfer.rate_at_operation),
+                    rate_to_text(transfer.rate_at_operation),
+                    to_money_float(transfer.amount_kzt),
+                    to_minor_units(transfer.amount_kzt),
                     str(transfer.description or ""),
                     int(transfer.id),
                 ),
@@ -327,21 +458,27 @@ class SQLiteStorage(Storage):
                     to_wallet_id,
                     date,
                     amount_original,
+                    amount_original_minor,
                     currency,
                     rate_at_operation,
+                    rate_at_operation_text,
                     amount_kzt,
+                    amount_kzt_minor,
                     description
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(transfer.from_wallet_id),
                     int(transfer.to_wallet_id),
                     self._date_as_text(transfer.date),
-                    float(transfer.amount_original),
+                    to_money_float(transfer.amount_original),
+                    to_minor_units(transfer.amount_original),
                     str(transfer.currency).upper(),
-                    float(transfer.rate_at_operation),
-                    float(transfer.amount_kzt),
+                    to_rate_float(transfer.rate_at_operation),
+                    rate_to_text(transfer.rate_at_operation),
+                    to_money_float(transfer.amount_kzt),
+                    to_minor_units(transfer.amount_kzt),
                     str(transfer.description or ""),
                 ),
             )
@@ -361,9 +498,12 @@ class SQLiteStorage(Storage):
                 id,
                 wallet_id,
                 amount_original,
+                amount_original_minor,
                 currency,
                 rate_at_operation,
+                rate_at_operation_text,
                 amount_kzt,
+                amount_kzt_minor,
                 category,
                 description,
                 period
@@ -384,10 +524,12 @@ class SQLiteStorage(Storage):
             MandatoryExpenseRecord(
                 id=int(row["id"]),
                 wallet_id=int(row["wallet_id"]),
-                amount_original=float(row["amount_original"]),
+                amount_original=self._money_from_row(
+                    row, "amount_original", "amount_original_minor"
+                ),
                 currency=str(row["currency"]).upper(),
-                rate_at_operation=float(row["rate_at_operation"]),
-                amount_kzt=float(row["amount_kzt"]),
+                rate_at_operation=self._rate_from_row(row),
+                amount_kzt=self._money_from_row(row, "amount_kzt", "amount_kzt_minor"),
                 category=str(row["category"]),
                 description=str(row["description"] or ""),
                 period=str(row["period"] or "monthly"),  # type: ignore[arg-type]

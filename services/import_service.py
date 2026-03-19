@@ -19,6 +19,7 @@ from utils.import_core import (
     parse_optional_strict_int,
     safe_type,
 )
+from utils.money import to_money_float, to_rate_float
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +76,9 @@ class ImportService:
 
     def _prepare_records_payload(self, parsed: ParsedImportData) -> PreparedImportPayload:
         initial_balance = (
-            float(parsed.initial_balance)
+            to_money_float(parsed.initial_balance)
             if parsed.initial_balance is not None
-            else float(self._finance_service.get_system_initial_balance())
+            else to_money_float(self._finance_service.get_system_initial_balance())
         )
         wallets = self._wallets_from_payload(parsed.wallets) if parsed.wallets else []
         if wallets:
@@ -131,10 +132,10 @@ class ImportService:
                         "from_wallet_id": transfer.from_wallet_id,
                         "to_wallet_id": transfer.to_wallet_id,
                         "transfer_date": str(transfer.date),
-                        "amount": float(transfer.amount_original),
-                        "amount_kzt": float(transfer.amount_kzt),
+                        "amount": to_money_float(transfer.amount_original),
+                        "amount_kzt": to_money_float(transfer.amount_kzt),
                         "currency": str(transfer.currency).upper(),
-                        "rate_at_operation": float(transfer.rate_at_operation),
+                        "rate_at_operation": to_rate_float(transfer.rate_at_operation),
                         "description": str(transfer.description or ""),
                     }
                 )
@@ -331,10 +332,10 @@ class ImportService:
                 from_wallet_id=int(source.wallet_id),
                 to_wallet_id=int(target.wallet_id),
                 date=str(source.date),
-                amount_original=float(source.amount_original or 0.0),
+                amount_original=to_money_float(source.amount_original or 0.0),
                 currency=str(source.currency).upper(),
-                rate_at_operation=float(source.rate_at_operation),
-                amount_kzt=float(source.amount_kzt or 0.0),
+                rate_at_operation=to_rate_float(source.rate_at_operation),
+                amount_kzt=to_money_float(source.amount_kzt or 0.0),
                 description=str(source.description or ""),
             )
             transfers.append(transfer)
@@ -344,10 +345,10 @@ class ImportService:
                     date=str(source.date),
                     wallet_id=int(source.wallet_id),
                     transfer_id=int(transfer.id),
-                    amount_original=float(source.amount_original or 0.0),
+                    amount_original=to_money_float(source.amount_original or 0.0),
                     currency=str(source.currency).upper(),
-                    rate_at_operation=float(source.rate_at_operation),
-                    amount_kzt=float(source.amount_kzt or 0.0),
+                    rate_at_operation=to_rate_float(source.rate_at_operation),
+                    amount_kzt=to_money_float(source.amount_kzt or 0.0),
                     category="Transfer",
                 )
             )
@@ -358,10 +359,10 @@ class ImportService:
                     date=str(source.date),
                     wallet_id=int(target.wallet_id),
                     transfer_id=int(transfer.id),
-                    amount_original=float(source.amount_original or 0.0),
+                    amount_original=to_money_float(source.amount_original or 0.0),
                     currency=str(source.currency).upper(),
-                    rate_at_operation=float(source.rate_at_operation),
-                    amount_kzt=float(source.amount_kzt or 0.0),
+                    rate_at_operation=to_rate_float(source.rate_at_operation),
+                    amount_kzt=to_money_float(source.amount_kzt or 0.0),
                     category="Transfer",
                 )
             )
@@ -382,10 +383,10 @@ class ImportService:
                 from_wallet_id=int(transfer_row["from_wallet_id"]),
                 to_wallet_id=int(transfer_row["to_wallet_id"]),
                 date=str(transfer_row["transfer_date"]),
-                amount_original=float(transfer_row["amount"]),
+                amount_original=to_money_float(transfer_row["amount"]),
                 currency=str(transfer_row["currency"]).upper(),
-                rate_at_operation=float(transfer_row["rate_at_operation"]),
-                amount_kzt=float(transfer_row["amount_kzt"]),
+                rate_at_operation=to_rate_float(transfer_row["rate_at_operation"]),
+                amount_kzt=to_money_float(transfer_row["amount_kzt"]),
                 description=str(transfer_row.get("description", "")),
             )
             transfers.append(transfer)
@@ -395,10 +396,10 @@ class ImportService:
                     date=str(transfer.date),
                     wallet_id=int(transfer.from_wallet_id),
                     transfer_id=int(transfer.id),
-                    amount_original=float(transfer.amount_original),
+                    amount_original=to_money_float(transfer.amount_original),
                     currency=str(transfer.currency).upper(),
-                    rate_at_operation=float(transfer.rate_at_operation),
-                    amount_kzt=float(transfer.amount_kzt),
+                    rate_at_operation=to_rate_float(transfer.rate_at_operation),
+                    amount_kzt=to_money_float(transfer.amount_kzt),
                     category="Transfer",
                 )
             )
@@ -409,10 +410,10 @@ class ImportService:
                     date=str(transfer.date),
                     wallet_id=int(transfer.to_wallet_id),
                     transfer_id=int(transfer.id),
-                    amount_original=float(transfer.amount_original),
+                    amount_original=to_money_float(transfer.amount_original),
                     currency=str(transfer.currency).upper(),
-                    rate_at_operation=float(transfer.rate_at_operation),
-                    amount_kzt=float(transfer.amount_kzt),
+                    rate_at_operation=to_rate_float(transfer.rate_at_operation),
+                    amount_kzt=to_money_float(transfer.amount_kzt),
                     category="Transfer",
                 )
             )
@@ -444,10 +445,10 @@ class ImportService:
                     id=index,
                     wallet_id=int(template.wallet_id),
                     date=str(template.date or ""),
-                    amount_original=float(template.amount_original or 0.0),
+                    amount_original=to_money_float(template.amount_original or 0.0),
                     currency=str(template.currency).upper(),
-                    rate_at_operation=float(template.rate_at_operation),
-                    amount_kzt=float(template.amount_kzt or 0.0),
+                    rate_at_operation=to_rate_float(template.rate_at_operation),
+                    amount_kzt=to_money_float(template.amount_kzt or 0.0),
                     category=str(template.category),
                     description=description,
                     period=str(template.period),  # type: ignore[arg-type]
@@ -500,7 +501,7 @@ class ImportService:
                 str(template.category),
             )
             self._finance_service.create_mandatory_expense(
-                amount=float(template.amount_original or 0.0),
+                amount=to_money_float(template.amount_original or 0.0),
                 currency=str(template.currency).upper(),
                 wallet_id=int(template.wallet_id),
                 category=str(template.category),
@@ -549,7 +550,7 @@ class ImportService:
                 str(record.category),
             )
             self._finance_service.create_mandatory_expense(
-                amount=float(record.amount_original or 0.0),
+                amount=to_money_float(record.amount_original or 0.0),
                 currency=str(record.currency).upper(),
                 wallet_id=int(record.wallet_id),
                 category=str(record.category),
@@ -578,7 +579,7 @@ class ImportService:
                 self._finance_service.create_income(
                     date=str(record.date),
                     wallet_id=int(record.wallet_id),
-                    amount=float(record.amount_original or 0.0),
+                    amount=to_money_float(record.amount_original or 0.0),
                     currency=str(record.currency).upper(),
                     category=str(record.category),
                     description=str(record.description or ""),
@@ -595,7 +596,7 @@ class ImportService:
                 self._finance_service.create_mandatory_expense_record(
                     date=str(record.date),
                     wallet_id=int(record.wallet_id),
-                    amount=float(record.amount_original or 0.0),
+                    amount=to_money_float(record.amount_original or 0.0),
                     currency=str(record.currency).upper(),
                     category=str(record.category),
                     description=description,
@@ -608,7 +609,7 @@ class ImportService:
             self._finance_service.create_expense(
                 date=str(record.date),
                 wallet_id=int(record.wallet_id),
-                amount=float(record.amount_original or 0.0),
+                amount=to_money_float(record.amount_original or 0.0),
                 currency=str(record.currency).upper(),
                 category=str(record.category),
                 description=str(record.description or ""),
@@ -658,8 +659,8 @@ class ImportService:
                 raise ValueError(
                     f"Transfer integrity violated for #{transfer_id}: currency mismatch"
                 )
-            source_amount = float(source.amount_original or 0.0)
-            target_amount = float(target.amount_original or 0.0)
+            source_amount = to_money_float(source.amount_original or 0.0)
+            target_amount = to_money_float(target.amount_original or 0.0)
             if abs(source_amount - target_amount) > 1e-9:
                 raise ValueError(
                     f"Transfer integrity violated for #{transfer_id}: amount_original mismatch"
@@ -701,11 +702,11 @@ class ImportService:
                 from_wallet_id=int(transfer["from_wallet_id"]),
                 to_wallet_id=int(transfer["to_wallet_id"]),
                 transfer_date=str(transfer["transfer_date"]),
-                amount=float(transfer["amount"]),
+                amount=to_money_float(transfer["amount"]),
                 currency=str(transfer["currency"]).upper(),
                 description=str(transfer.get("description", "")),
-                amount_kzt=self._fixed_amount_kzt(float(transfer["amount_kzt"])),
-                rate_at_operation=self._fixed_rate(float(transfer["rate_at_operation"])),
+                amount_kzt=self._fixed_amount_kzt(to_money_float(transfer["amount_kzt"])),
+                rate_at_operation=self._fixed_rate(to_rate_float(transfer["rate_at_operation"])),
             )
             transfers_count += 1
         return ImportCounters(
@@ -746,7 +747,9 @@ class ImportService:
                     id=wallet_id,
                     name=str(item.get("name", "") or f"Wallet {wallet_id}"),
                     currency=str(item.get("currency", "KZT") or "KZT").upper(),
-                    initial_balance=float(as_float(item.get("initial_balance"), 0.0) or 0.0),
+                    initial_balance=to_money_float(
+                        as_float(item.get("initial_balance"), 0.0) or 0.0
+                    ),
                     system=bool(item.get("system", wallet_id == 1)),
                     allow_negative=bool(item.get("allow_negative", False)),
                     is_active=bool(item.get("is_active", True)),
@@ -861,14 +864,14 @@ class ImportService:
             return None
         if amount_kzt is None:
             return None
-        return float(amount_kzt)
+        return to_money_float(amount_kzt)
 
     def _fixed_rate(self, rate_at_operation: float | None) -> float | None:
         if self._policy == ImportPolicy.CURRENT_RATE:
             return None
         if rate_at_operation is None:
             return None
-        return float(rate_at_operation)
+        return to_rate_float(rate_at_operation)
 
     @staticmethod
     def _record_sort_key(record: Record) -> tuple[str, int, int]:

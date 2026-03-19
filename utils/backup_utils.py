@@ -12,6 +12,7 @@ from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, 
 from domain.transfers import Transfer
 from domain.wallets import Wallet
 from utils.import_core import ImportSummary, parse_import_row, record_type_name
+from utils.money import to_money_float, to_rate_float
 from version import __version__
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ def _wallet_to_payload(wallet: Wallet) -> dict:
         "id": int(wallet.id),
         "name": str(wallet.name),
         "currency": str(wallet.currency or "KZT").upper(),
-        "initial_balance": float(wallet.initial_balance),
+        "initial_balance": to_money_float(wallet.initial_balance),
         "system": bool(wallet.system),
         "allow_negative": bool(wallet.allow_negative),
         "is_active": bool(wallet.is_active),
@@ -67,10 +68,10 @@ def _transfer_to_payload(transfer: Transfer) -> dict:
         "from_wallet_id": int(transfer.from_wallet_id),
         "to_wallet_id": int(transfer.to_wallet_id),
         "date": transfer.date.isoformat() if isinstance(transfer.date, dt_date) else transfer.date,
-        "amount_original": float(transfer.amount_original),
+        "amount_original": to_money_float(transfer.amount_original),
         "currency": str(transfer.currency).upper(),
-        "rate_at_operation": float(transfer.rate_at_operation),
-        "amount_kzt": float(transfer.amount_kzt),
+        "rate_at_operation": to_rate_float(transfer.rate_at_operation),
+        "amount_kzt": to_money_float(transfer.amount_kzt),
         "description": str(transfer.description or ""),
     }
 
@@ -215,10 +216,10 @@ def _derive_transfers_from_linked_records(
                     from_wallet_id=expense_record.wallet_id,
                     to_wallet_id=income_record.wallet_id,
                     date=expense_record.date,
-                    amount_original=float(expense_record.amount_original or 0.0),
+                    amount_original=to_money_float(expense_record.amount_original or 0.0),
                     currency=str(expense_record.currency or "KZT").upper(),
-                    rate_at_operation=float(expense_record.rate_at_operation),
-                    amount_kzt=float(expense_record.amount_kzt or 0.0),
+                    rate_at_operation=to_rate_float(expense_record.rate_at_operation),
+                    amount_kzt=to_money_float(expense_record.amount_kzt or 0.0),
                     description=str(expense_record.description or ""),
                 )
             )
@@ -335,7 +336,7 @@ def import_full_backup_from_json(
                     id=int(item.get("id", 0)),
                     name=str(item.get("name", "") or f"Wallet {idx}"),
                     currency=str(item.get("currency", "KZT") or "KZT").upper(),
-                    initial_balance=float(item.get("initial_balance", 0.0) or 0.0),
+                    initial_balance=to_money_float(item.get("initial_balance", 0.0) or 0.0),
                     system=bool(item.get("system", int(item.get("id", 0)) == SYSTEM_WALLET_ID)),
                     allow_negative=bool(item.get("allow_negative", False)),
                     is_active=bool(item.get("is_active", True)),
@@ -347,7 +348,7 @@ def import_full_backup_from_json(
                 errors.append(f"wallets[{idx}]: invalid wallet ({exc})")
     else:
         # Legacy migration: move global initial_balance into system wallet.
-        legacy_balance = float(source_payload.get("initial_balance", 0.0) or 0.0)
+        legacy_balance = to_money_float(source_payload.get("initial_balance", 0.0) or 0.0)
         wallets = [
             Wallet(
                 id=SYSTEM_WALLET_ID,
@@ -444,10 +445,10 @@ def import_full_backup_from_json(
                     from_wallet_id=int(item.get("from_wallet_id", 0)),
                     to_wallet_id=int(item.get("to_wallet_id", 0)),
                     date=str(item.get("date", "") or ""),
-                    amount_original=float(item.get("amount_original", 0.0) or 0.0),
+                    amount_original=to_money_float(item.get("amount_original", 0.0) or 0.0),
                     currency=str(item.get("currency", "KZT") or "KZT").upper(),
-                    rate_at_operation=float(item.get("rate_at_operation", 1.0) or 1.0),
-                    amount_kzt=float(item.get("amount_kzt", 0.0) or 0.0),
+                    rate_at_operation=to_rate_float(item.get("rate_at_operation", 1.0) or 1.0),
+                    amount_kzt=to_money_float(item.get("amount_kzt", 0.0) or 0.0),
                     description=str(item.get("description", "") or ""),
                 )
             except Exception as exc:

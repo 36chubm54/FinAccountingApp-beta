@@ -16,6 +16,14 @@ from utils.import_core import (
     parse_optional_strict_int,
     safe_type,
 )
+from utils.money import (
+    money_diff,
+    quantize_money,
+    rate_diff,
+    to_decimal,
+    to_money_float,
+    to_rate_float,
+)
 from utils.tabular_utils import (
     mandatory_expense_export_rows,
     record_export_rows,
@@ -98,13 +106,13 @@ def _parse_transfer_row(
             return None, None, next_transfer_id, f"{row_label}: invalid amount"
         currency = "KZT"
         rate_at_operation = 1.0
-        amount_kzt = float(abs(amount_original))
-        amount_original = float(abs(amount_original))
+        amount_original = to_money_float(abs(to_decimal(amount_original)))
+        amount_kzt = amount_original
     else:
         amount_original = as_float(row_lc.get("amount_original"), None)
         if amount_original is None:
             return None, None, next_transfer_id, f"{row_label}: invalid amount_original"
-        amount_original = abs(float(amount_original))
+        amount_original = to_money_float(abs(to_decimal(amount_original)))
 
         currency = str(row_lc.get("currency", "KZT") or "KZT").strip().upper()
         if not _validate_currency(currency):
@@ -121,8 +129,10 @@ def _parse_transfer_row(
                     f"{row_label}: current-rate policy requires currency service",
                 )
             try:
-                rate_at_operation = float(get_rate(currency))
-                amount_kzt = float(amount_original * rate_at_operation)
+                rate_at_operation = to_rate_float(get_rate(currency))
+                amount_kzt = to_money_float(
+                    quantize_money(amount_original) * to_decimal(rate_at_operation)
+                )
             except Exception as exc:
                 return (
                     None,
@@ -157,8 +167,8 @@ def _parse_transfer_row(
             date=date_value,
             amount_original=amount_original,
             currency=currency,
-            rate_at_operation=float(rate_at_operation),
-            amount_kzt=float(amount_kzt),
+            rate_at_operation=to_rate_float(rate_at_operation),
+            amount_kzt=to_money_float(amount_kzt),
             description=description,
         )
     except Exception as exc:
@@ -170,8 +180,8 @@ def _parse_transfer_row(
         transfer_id=transfer.id,
         amount_original=amount_original,
         currency=currency,
-        rate_at_operation=float(rate_at_operation),
-        amount_kzt=float(amount_kzt),
+        rate_at_operation=to_rate_float(rate_at_operation),
+        amount_kzt=to_money_float(amount_kzt),
         category=category,
         description=description,
     )
@@ -181,8 +191,8 @@ def _parse_transfer_row(
         transfer_id=transfer.id,
         amount_original=amount_original,
         currency=currency,
-        rate_at_operation=float(rate_at_operation),
-        amount_kzt=float(amount_kzt),
+        rate_at_operation=to_rate_float(rate_at_operation),
+        amount_kzt=to_money_float(amount_kzt),
         category=category,
         description=description,
     )
@@ -232,10 +242,10 @@ def _restore_missing_transfers(records: list[Record], transfers: dict[int, Trans
             from_wallet_id=expense_record.wallet_id,
             to_wallet_id=income_record.wallet_id,
             date=expense_record.date,
-            amount_original=float(expense_record.amount_original or 0.0),
+            amount_original=to_money_float(expense_record.amount_original or 0.0),
             currency=str(expense_record.currency or "KZT").upper(),
-            rate_at_operation=float(expense_record.rate_at_operation),
-            amount_kzt=float(expense_record.amount_kzt or 0.0),
+            rate_at_operation=to_rate_float(expense_record.rate_at_operation),
+            amount_kzt=to_money_float(expense_record.amount_kzt or 0.0),
             description=str(expense_record.description or ""),
         )
 
@@ -291,30 +301,22 @@ def _validate_transfer_integrity(
             errors.append(f"Transfer #{transfer_id}: transfer currency mismatch")
         if (
             abs(
-                float(expense_record.amount_original or 0.0)
-                - float(income_record.amount_original or 0.0)
+                money_diff(
+                    expense_record.amount_original or 0.0, income_record.amount_original or 0.0
+                )
             )
-            > 1e-9
+            > 0
         ):
             errors.append(f"Transfer #{transfer_id}: linked records amount_original mismatch")
-        if (
-            abs(float(expense_record.amount_original or 0.0) - float(transfer.amount_original))
-            > 1e-9
-        ):
+        if abs(money_diff(expense_record.amount_original or 0.0, transfer.amount_original)) > 0:
             errors.append(f"Transfer #{transfer_id}: transfer amount_original mismatch")
-        if (
-            abs(float(expense_record.amount_kzt or 0.0) - float(income_record.amount_kzt or 0.0))
-            > 1e-9
-        ):
+        if abs(money_diff(expense_record.amount_kzt or 0.0, income_record.amount_kzt or 0.0)) > 0:
             errors.append(f"Transfer #{transfer_id}: linked records amount_kzt mismatch")
-        if abs(float(expense_record.amount_kzt or 0.0) - float(transfer.amount_kzt)) > 1e-9:
+        if abs(money_diff(expense_record.amount_kzt or 0.0, transfer.amount_kzt)) > 0:
             errors.append(f"Transfer #{transfer_id}: transfer amount_kzt mismatch")
-        if (
-            abs(float(expense_record.rate_at_operation) - float(income_record.rate_at_operation))
-            > 1e-9
-        ):
+        if abs(rate_diff(expense_record.rate_at_operation, income_record.rate_at_operation)) > 0:
             errors.append(f"Transfer #{transfer_id}: linked records rate mismatch")
-        if abs(float(expense_record.rate_at_operation) - float(transfer.rate_at_operation)) > 1e-9:
+        if abs(rate_diff(expense_record.rate_at_operation, transfer.rate_at_operation)) > 0:
             errors.append(f"Transfer #{transfer_id}: transfer rate mismatch")
 
         if wallet_ids is not None:
@@ -408,7 +410,7 @@ def import_records_from_csv(
         raise ValueError(f"CSV file is too large: {os.path.getsize(filepath)} bytes")
 
     records: list[Record] = []
-    initial_balance = float(existing_initial_balance)
+    initial_balance = to_money_float(existing_initial_balance)
     errors: list[str] = []
     skipped = 0
     imported = 0

@@ -3,14 +3,12 @@ from __future__ import annotations
 from domain.records import Record
 from domain.wallets import Wallet
 from infrastructure.repositories import RecordRepository
+from utils.money import build_rate as build_precise_rate
+from utils.money import quantize_money
 
 
 def build_rate(amount: float, amount_kzt: float, currency: str) -> float:
-    if currency.upper() == "KZT":
-        return 1.0
-    if amount == 0:
-        return 1.0
-    return amount_kzt / amount
+    return build_precise_rate(amount, amount_kzt, currency)
 
 
 def commission_marker(transfer_id: int) -> str:
@@ -27,11 +25,11 @@ def is_commission_for_transfer(record: Record, transfer_id: int) -> bool:
 
 
 def wallet_balance_kzt(wallet: Wallet, records: list[Record]) -> float:
-    total = float(wallet.initial_balance)
+    total = quantize_money(wallet.initial_balance)
     for record in records:
         if record.wallet_id == wallet.id:
-            total += record.signed_amount_kzt()
-    return total
+            total += quantize_money(record.signed_amount_kzt())
+    return float(total)
 
 
 def wallet_by_id(repository: RecordRepository, wallet_id: int) -> Wallet:

@@ -7,6 +7,7 @@ from hashlib import sha1
 from domain.records import IncomeRecord, MandatoryExpenseRecord, Record
 from domain.transfers import Transfer
 from domain.wallets import Wallet
+from utils.money import to_money_float
 
 
 @dataclass(frozen=True)
@@ -51,10 +52,10 @@ def rebuild_transfers(records: Iterable[Record]) -> list[Transfer]:
                 from_wallet_id=source.wallet_id,
                 to_wallet_id=target.wallet_id,
                 date=source.date,
-                amount_original=float(source.amount_original or 0.0),
+                amount_original=to_money_float(source.amount_original or 0.0),
                 currency=str(source.currency or "KZT").upper(),
-                rate_at_operation=float(source.rate_at_operation),
-                amount_kzt=float(source.amount_kzt or 0.0),
+                rate_at_operation=source.rate_at_operation,
+                amount_kzt=to_money_float(source.amount_kzt or 0.0),
                 description=str(source.description or ""),
             )
         )
@@ -72,8 +73,8 @@ def build_list_items(records: Iterable[Record]) -> list[RecordListItem]:
             plain.append((repository_index, record))
 
     for repository_index, record in plain:
-        amount_original = float(record.amount_original or 0.0)
-        amount_kzt = float(record.amount_kzt or 0.0)
+        amount_original = to_money_float(record.amount_original or 0.0)
+        amount_kzt = to_money_float(record.amount_kzt or 0.0)
         if isinstance(record, IncomeRecord):
             record_type = "Income"
             kind = "income"
@@ -120,14 +121,14 @@ def build_list_items(records: Iterable[Record]) -> list[RecordListItem]:
         source = next((r for _, r in grouped if not isinstance(r, IncomeRecord)), grouped[0][1])
         target = next((r for _, r in grouped if isinstance(r, IncomeRecord)), grouped[0][1])
         commission = sum(
-            float(r.amount_kzt or 0.0)
+            to_money_float(r.amount_kzt or 0.0)
             for _, r in grouped
             if r.category == "Commission" and not isinstance(r, IncomeRecord)
         )
         signature = f"transfer|{transfer_id}|{repository_index}"
         record_id = sha1(signature.encode("utf-8")).hexdigest()[:12]
-        amount_original = float(source.amount_original or 0.0)
-        amount_kzt = float(source.amount_kzt or 0.0)
+        amount_original = to_money_float(source.amount_original or 0.0)
+        amount_kzt = to_money_float(source.amount_kzt or 0.0)
         date_value = source.date if isinstance(source.date, str) else source.date.isoformat()
         currency = str(source.currency or "KZT").upper()
         wallet_label = f"W{int(source.wallet_id)} -> W{int(target.wallet_id)}"
@@ -189,7 +190,7 @@ def wallets_with_system_initial_balance(
         target_wallet = updated_wallets[target_index]
         updated_wallets[target_index] = replace(
             target_wallet,
-            initial_balance=float(initial_balance),
+            initial_balance=to_money_float(initial_balance),
             system=True,
         )
         return updated_wallets
@@ -199,7 +200,7 @@ def wallets_with_system_initial_balance(
         id=1,
         name="Main wallet",
         currency=str(base_currency or "KZT").upper(),
-        initial_balance=float(initial_balance),
+        initial_balance=to_money_float(initial_balance),
         system=True,
         allow_negative=False,
         is_active=True,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import math
 import sys
 from pathlib import Path
 
@@ -9,8 +8,8 @@ from domain.records import MandatoryExpenseRecord, Record
 from domain.wallets import Wallet
 from storage.json_storage import JsonStorage
 from storage.sqlite_storage import SQLiteStorage
+from utils.money import minor_to_money, rate_to_text, to_minor_units, to_money_float, to_rate_float
 
-EPSILON = 0.00001
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 
@@ -141,22 +140,44 @@ def _set_sqlite_sequence(sqlite_storage: SQLiteStorage, table: str) -> None:
     )
 
 
+def _wallet_balance_payload(balance: object) -> tuple[float, int]:
+    return (to_money_float(balance), to_minor_units(balance))
+
+
+def _money_payload(
+    amount_original: object,
+    rate_at_operation: object,
+    amount_kzt: object,
+) -> tuple[float, int, float, str, float, int]:
+    return (
+        to_money_float(amount_original),
+        to_minor_units(amount_original),
+        to_rate_float(rate_at_operation),
+        rate_to_text(rate_at_operation),
+        to_money_float(amount_kzt),
+        to_minor_units(amount_kzt),
+    )
+
+
 def _insert_wallets(sqlite_storage: SQLiteStorage, wallets: list[Wallet]) -> dict[int, int]:
     mapping: dict[int, int] = {}
     preserve_ids = _all_positive_unique_ids(wallets, lambda wallet: wallet.id)
     for wallet in wallets:
+        initial_balance, initial_balance_minor = _wallet_balance_payload(wallet.initial_balance)
         if preserve_ids:
             cursor = sqlite_storage.execute(
                 """
                 INSERT INTO wallets (
-                    id, name, currency, initial_balance, system, allow_negative, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    id, name, currency, initial_balance, initial_balance_minor,
+                    system, allow_negative, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(wallet.id),
                     wallet.name,
                     wallet.currency.upper(),
-                    float(wallet.initial_balance),
+                    initial_balance,
+                    initial_balance_minor,
                     int(bool(wallet.system)),
                     int(bool(wallet.allow_negative)),
                     int(bool(wallet.is_active)),
@@ -167,13 +188,15 @@ def _insert_wallets(sqlite_storage: SQLiteStorage, wallets: list[Wallet]) -> dic
             cursor = sqlite_storage.execute(
                 """
                 INSERT INTO wallets (
-                    name, currency, initial_balance, system, allow_negative, is_active)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    name, currency, initial_balance, initial_balance_minor,
+                    system, allow_negative, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     wallet.name,
                     wallet.currency.upper(),
-                    float(wallet.initial_balance),
+                    initial_balance,
+                    initial_balance_minor,
                     int(bool(wallet.system)),
                     int(bool(wallet.allow_negative)),
                     int(bool(wallet.is_active)),
@@ -196,14 +219,28 @@ def _insert_transfers(
     for transfer in transfers:
         from_wallet_id = wallet_map[int(transfer.from_wallet_id)]
         to_wallet_id = wallet_map[int(transfer.to_wallet_id)]
+        (
+            amount_original,
+            amount_original_minor,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_kzt,
+            amount_kzt_minor,
+        ) = _money_payload(
+            transfer.amount_original,
+            transfer.rate_at_operation,
+            transfer.amount_kzt,
+        )
         if preserve_ids:
             cursor = sqlite_storage.execute(
                 """
                 INSERT INTO transfers (
-                    id, from_wallet_id, to_wallet_id, date, amount_original, currency,
-                    rate_at_operation, amount_kzt, description
+                    id, from_wallet_id, to_wallet_id, date,
+                    amount_original, amount_original_minor, currency,
+                    rate_at_operation, rate_at_operation_text,
+                    amount_kzt, amount_kzt_minor, description
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(transfer.id),
@@ -214,10 +251,13 @@ def _insert_transfers(
                         if hasattr(transfer.date, "isoformat")
                         else str(transfer.date)
                     ),
-                    float(transfer.amount_original),
+                    amount_original,
+                    amount_original_minor,
                     transfer.currency.upper(),
-                    float(transfer.rate_at_operation),
-                    float(transfer.amount_kzt),
+                    rate_at_operation,
+                    rate_at_operation_text,
+                    amount_kzt,
+                    amount_kzt_minor,
                     transfer.description or "",
                 ),
             )
@@ -226,10 +266,12 @@ def _insert_transfers(
             cursor = sqlite_storage.execute(
                 """
                 INSERT INTO transfers (
-                    from_wallet_id, to_wallet_id, date, amount_original, currency,
-                    rate_at_operation, amount_kzt, description
+                    from_wallet_id, to_wallet_id, date,
+                    amount_original, amount_original_minor, currency,
+                    rate_at_operation, rate_at_operation_text,
+                    amount_kzt, amount_kzt_minor, description
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     from_wallet_id,
@@ -239,10 +281,13 @@ def _insert_transfers(
                         if hasattr(transfer.date, "isoformat")
                         else str(transfer.date)
                     ),
-                    float(transfer.amount_original),
+                    amount_original,
+                    amount_original_minor,
                     transfer.currency.upper(),
-                    float(transfer.rate_at_operation),
-                    float(transfer.amount_kzt),
+                    rate_at_operation,
+                    rate_at_operation_text,
+                    amount_kzt,
+                    amount_kzt_minor,
                     transfer.description or "",
                 ),
             )
@@ -262,6 +307,18 @@ def _record_row_payload(
     if record.transfer_id is not None:
         transfer_id = transfer_map[int(record.transfer_id)]
     period = record.period if isinstance(record, MandatoryExpenseRecord) else None
+    (
+        amount_original,
+        amount_original_minor,
+        rate_at_operation,
+        rate_at_operation_text,
+        amount_kzt,
+        amount_kzt_minor,
+    ) = _money_payload(
+        record.amount_original or 0.0,
+        record.rate_at_operation,
+        record.amount_kzt or 0.0,
+    )
     return (
         (
             record.date.isoformat()
@@ -270,10 +327,13 @@ def _record_row_payload(
         ),
         wallet_map[int(record.wallet_id)],
         transfer_id,
-        float(record.amount_original or 0.0),
+        amount_original,
+        amount_original_minor,
         str(record.currency).upper(),
-        float(record.rate_at_operation),
-        float(record.amount_kzt or 0.0),
+        rate_at_operation,
+        rate_at_operation_text,
+        amount_kzt,
+        amount_kzt_minor,
         str(record.category),
         str(record.description or ""),
         str(period) if period is not None else None,
@@ -295,14 +355,17 @@ def _insert_records(
             cursor = sqlite_storage.execute(
                 """
                 INSERT INTO records (
-                    id, type, date, wallet_id, transfer_id, amount_original,
-                    currency, rate_at_operation, amount_kzt, category, description, period
+                    id, type, date, wallet_id, transfer_id,
+                    amount_original, amount_original_minor, currency,
+                    rate_at_operation, rate_at_operation_text,
+                    amount_kzt, amount_kzt_minor,
+                    category, description, period
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(record.id),
-                    payload[10],
+                    payload[13],
                     payload[0],
                     payload[1],
                     payload[2],
@@ -313,6 +376,9 @@ def _insert_records(
                     payload[7],
                     payload[8],
                     payload[9],
+                    payload[10],
+                    payload[11],
+                    payload[12],
                 ),
             )
             mapping[int(record.id)] = int(record.id)
@@ -320,13 +386,16 @@ def _insert_records(
             cursor = sqlite_storage.execute(
                 """
                 INSERT INTO records (
-                    type, date, wallet_id, transfer_id, amount_original,
-                    currency, rate_at_operation, amount_kzt, category, description, period
+                    type, date, wallet_id, transfer_id,
+                    amount_original, amount_original_minor, currency,
+                    rate_at_operation, rate_at_operation_text,
+                    amount_kzt, amount_kzt_minor,
+                    category, description, period
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    payload[10],
+                    payload[13],
                     payload[0],
                     payload[1],
                     payload[2],
@@ -337,6 +406,9 @@ def _insert_records(
                     payload[7],
                     payload[8],
                     payload[9],
+                    payload[10],
+                    payload[11],
+                    payload[12],
                 ),
             )
             lastrowid = cursor.lastrowid
@@ -356,22 +428,40 @@ def _insert_mandatory_expenses(
     mapping: dict[int, int] = {}
     preserve_ids = _all_positive_unique_ids(expenses, lambda expense: expense.id)
     for expense in expenses:
+        (
+            amount_original,
+            amount_original_minor,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_kzt,
+            amount_kzt_minor,
+        ) = _money_payload(
+            expense.amount_original or 0.0,
+            expense.rate_at_operation,
+            expense.amount_kzt or 0.0,
+        )
         if preserve_ids:
             cursor = sqlite_storage.execute(
                 """
                 INSERT INTO mandatory_expenses (
-                    id, wallet_id, amount_original, currency, rate_at_operation,
-                    amount_kzt, category, description, period, date, auto_pay
+                    id, wallet_id,
+                    amount_original, amount_original_minor, currency,
+                    rate_at_operation, rate_at_operation_text,
+                    amount_kzt, amount_kzt_minor,
+                    category, description, period, date, auto_pay
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(expense.id),
                     wallet_map[int(expense.wallet_id)],
-                    float(expense.amount_original or 0.0),
+                    amount_original,
+                    amount_original_minor,
                     str(expense.currency).upper(),
-                    float(expense.rate_at_operation),
-                    float(expense.amount_kzt or 0.0),
+                    rate_at_operation,
+                    rate_at_operation_text,
+                    amount_kzt,
+                    amount_kzt_minor,
                     str(expense.category),
                     str(expense.description or ""),
                     str(expense.period),
@@ -384,17 +474,23 @@ def _insert_mandatory_expenses(
             cursor = sqlite_storage.execute(
                 """
                 INSERT INTO mandatory_expenses (
-                    wallet_id, amount_original, currency, rate_at_operation,
-                    amount_kzt, category, description, period, date, auto_pay
+                    wallet_id,
+                    amount_original, amount_original_minor, currency,
+                    rate_at_operation, rate_at_operation_text,
+                    amount_kzt, amount_kzt_minor,
+                    category, description, period, date, auto_pay
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     wallet_map[int(expense.wallet_id)],
-                    float(expense.amount_original or 0.0),
+                    amount_original,
+                    amount_original_minor,
                     str(expense.currency).upper(),
-                    float(expense.rate_at_operation),
-                    float(expense.amount_kzt or 0.0),
+                    rate_at_operation,
+                    rate_at_operation_text,
+                    amount_kzt,
+                    amount_kzt_minor,
                     str(expense.category),
                     str(expense.description or ""),
                     str(expense.period),
@@ -422,37 +518,54 @@ def _counts_from_sqlite(sqlite_storage: SQLiteStorage) -> dict[str, int]:
     }
 
 
-def _wallet_balances_from_json(wallets: list[Wallet], records: list[Record]) -> dict[int, float]:
-    result = {wallet.id: float(wallet.initial_balance) for wallet in wallets}
+def _wallet_balances_minor_from_json(
+    wallets: list[Wallet], records: list[Record]
+) -> dict[int, int]:
+    result = {wallet.id: to_minor_units(wallet.initial_balance) for wallet in wallets}
     for record in records:
-        result[int(record.wallet_id)] = result.get(int(record.wallet_id), 0.0) + float(
+        result[int(record.wallet_id)] = result.get(int(record.wallet_id), 0) + to_minor_units(
             record.signed_amount_kzt()
         )
     return result
 
 
-def _wallet_balances_from_sqlite(sqlite_storage: SQLiteStorage) -> dict[int, float]:
+def _wallet_balances_minor_from_sqlite(sqlite_storage: SQLiteStorage) -> dict[int, int]:
     rows = sqlite_storage.query_all(
         """
         SELECT
             w.id AS wallet_id,
-            w.initial_balance
+            COALESCE(
+                w.initial_balance_minor,
+                CAST(ROUND(w.initial_balance * 100.0) AS INTEGER),
+                0
+            )
             + COALESCE(
                 SUM(
                     CASE
-                        WHEN r.type = 'income' THEN r.amount_kzt
-                        ELSE -ABS(r.amount_kzt)
+                        WHEN r.type = 'income' THEN
+                            COALESCE(
+                                r.amount_kzt_minor,
+                                CAST(ROUND(r.amount_kzt * 100.0) AS INTEGER),
+                                0
+                            )
+                        ELSE -ABS(
+                            COALESCE(
+                                r.amount_kzt_minor,
+                                CAST(ROUND(r.amount_kzt * 100.0) AS INTEGER),
+                                0
+                            )
+                        )
                     END
                 ),
                 0
             ) AS balance
         FROM wallets AS w
         LEFT JOIN records AS r ON r.wallet_id = w.id
-        GROUP BY w.id, w.initial_balance
+        GROUP BY w.id, w.initial_balance, w.initial_balance_minor
         ORDER BY w.id
         """
     )
-    return {int(row[0]): float(row[1]) for row in rows}
+    return {int(row[0]): int(row[1]) for row in rows}
 
 
 def validate_migration(
@@ -481,8 +594,8 @@ def validate_migration(
         if expected != actual:
             errors.append(f"Count mismatch for {name}: json={expected}, sqlite={actual}")
 
-    json_balances = _wallet_balances_from_json(wallets, records)
-    sqlite_balances = _wallet_balances_from_sqlite(sqlite_storage)
+    json_balances = _wallet_balances_minor_from_json(wallets, records)
+    sqlite_balances = _wallet_balances_minor_from_sqlite(sqlite_storage)
     for old_wallet_id, json_balance in sorted(json_balances.items()):
         sqlite_wallet_id = wallet_map.get(old_wallet_id)
         if sqlite_wallet_id is None:
@@ -494,16 +607,19 @@ def validate_migration(
                 f"Wallet #{old_wallet_id} -> #{sqlite_wallet_id} is absent in SQLite balance set"
             )
             continue
-        if not math.isclose(json_balance, sqlite_balance, abs_tol=EPSILON):
+        if json_balance != sqlite_balance:
             errors.append(
                 f"Wallet balance mismatch for wallet #{old_wallet_id} -> #{sqlite_wallet_id}: "
-                f"json={json_balance}, sqlite={sqlite_balance}"
+                f"json={minor_to_money(json_balance)}, sqlite={minor_to_money(sqlite_balance)}"
             )
 
     net_worth_json = sum(json_balances.values())
     net_worth_sqlite = sum(sqlite_balances.values())
-    if not math.isclose(net_worth_json, net_worth_sqlite, abs_tol=EPSILON):
-        errors.append(f"Net worth mismatch: json={net_worth_json}, sqlite={net_worth_sqlite}")
+    if net_worth_json != net_worth_sqlite:
+        errors.append(
+            f"Net worth mismatch: json={minor_to_money(net_worth_json)}, "
+            f"sqlite={minor_to_money(net_worth_sqlite)}"
+        )
 
     if len(record_map) != len(records):
         errors.append("Record id mapping is incomplete")

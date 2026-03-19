@@ -8,6 +8,7 @@ from domain.transfers import Transfer
 from domain.wallets import Wallet
 from infrastructure.repositories import RecordRepository
 from storage.sqlite_storage import SQLiteStorage
+from utils.money import rate_to_text, to_minor_units, to_money_float, to_rate_float
 
 SYSTEM_WALLET_ID = 1
 
@@ -116,6 +117,25 @@ class SQLiteRecordRepository(RecordRepository):
             raise RuntimeError(f"Failed to obtain lastrowid for {table} insert")
         return int(lastrowid)
 
+    @staticmethod
+    def _wallet_balance_columns(balance: object) -> tuple[float, int]:
+        return (to_money_float(balance), to_minor_units(balance))
+
+    @staticmethod
+    def _money_columns(
+        amount_original: object,
+        rate_at_operation: object,
+        amount_kzt: object,
+    ) -> tuple[float, int, float, str, float, int]:
+        return (
+            to_money_float(amount_original),
+            to_minor_units(amount_original),
+            to_rate_float(rate_at_operation),
+            rate_to_text(rate_at_operation),
+            to_money_float(amount_kzt),
+            to_minor_units(amount_kzt),
+        )
+
     def _validate_transfer_integrity(
         self, records: list[Record], transfers: list[Transfer]
     ) -> None:
@@ -165,22 +185,27 @@ class SQLiteRecordRepository(RecordRepository):
         )
 
     def _insert_wallet_row(self, wallet: Wallet) -> int:
+        initial_balance, initial_balance_minor = self._wallet_balance_columns(
+            wallet.initial_balance
+        )
         cursor = self._conn.execute(
             """
             INSERT INTO wallets (
                 name,
                 currency,
                 initial_balance,
+                initial_balance_minor,
                 system,
                 allow_negative,
                 is_active
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(wallet.name),
                 str(wallet.currency).upper(),
-                float(wallet.initial_balance),
+                initial_balance,
+                initial_balance_minor,
                 int(bool(wallet.system)),
                 int(bool(wallet.allow_negative)),
                 int(bool(wallet.is_active)),
@@ -189,6 +214,9 @@ class SQLiteRecordRepository(RecordRepository):
         return self._require_lastrowid(cursor.lastrowid, "wallets")
 
     def _update_wallet_row(self, wallet_id: int, wallet: Wallet) -> None:
+        initial_balance, initial_balance_minor = self._wallet_balance_columns(
+            wallet.initial_balance
+        )
         self._conn.execute(
             """
             UPDATE wallets
@@ -196,6 +224,7 @@ class SQLiteRecordRepository(RecordRepository):
                 name = ?,
                 currency = ?,
                 initial_balance = ?,
+                initial_balance_minor = ?,
                 system = ?,
                 allow_negative = ?,
                 is_active = ?
@@ -204,7 +233,8 @@ class SQLiteRecordRepository(RecordRepository):
             (
                 str(wallet.name),
                 str(wallet.currency).upper(),
-                float(wallet.initial_balance),
+                initial_balance,
+                initial_balance_minor,
                 int(bool(wallet.system)),
                 int(bool(wallet.allow_negative)),
                 int(bool(wallet.is_active)),
@@ -219,6 +249,18 @@ class SQLiteRecordRepository(RecordRepository):
         from_wallet_id: int | None = None,
         to_wallet_id: int | None = None,
     ) -> int:
+        (
+            amount_original,
+            amount_original_minor,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_kzt,
+            amount_kzt_minor,
+        ) = self._money_columns(
+            transfer.amount_original,
+            transfer.rate_at_operation,
+            transfer.amount_kzt,
+        )
         cursor = self._conn.execute(
             """
             INSERT INTO transfers (
@@ -226,21 +268,27 @@ class SQLiteRecordRepository(RecordRepository):
                 to_wallet_id,
                 date,
                 amount_original,
+                amount_original_minor,
                 currency,
                 rate_at_operation,
+                rate_at_operation_text,
                 amount_kzt,
+                amount_kzt_minor,
                 description
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 int(from_wallet_id if from_wallet_id is not None else transfer.from_wallet_id),
                 int(to_wallet_id if to_wallet_id is not None else transfer.to_wallet_id),
                 self._date_as_text(transfer.date),
-                float(transfer.amount_original),
+                amount_original,
+                amount_original_minor,
                 str(transfer.currency).upper(),
-                float(transfer.rate_at_operation),
-                float(transfer.amount_kzt),
+                rate_at_operation,
+                rate_at_operation_text,
+                amount_kzt,
+                amount_kzt_minor,
                 str(transfer.description or ""),
             ),
         )
@@ -254,6 +302,18 @@ class SQLiteRecordRepository(RecordRepository):
         from_wallet_id: int | None = None,
         to_wallet_id: int | None = None,
     ) -> None:
+        (
+            amount_original,
+            amount_original_minor,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_kzt,
+            amount_kzt_minor,
+        ) = self._money_columns(
+            transfer.amount_original,
+            transfer.rate_at_operation,
+            transfer.amount_kzt,
+        )
         self._conn.execute(
             """
             UPDATE transfers
@@ -262,9 +322,12 @@ class SQLiteRecordRepository(RecordRepository):
                 to_wallet_id = ?,
                 date = ?,
                 amount_original = ?,
+                amount_original_minor = ?,
                 currency = ?,
                 rate_at_operation = ?,
+                rate_at_operation_text = ?,
                 amount_kzt = ?,
+                amount_kzt_minor = ?,
                 description = ?
             WHERE id = ?
             """,
@@ -272,10 +335,13 @@ class SQLiteRecordRepository(RecordRepository):
                 int(from_wallet_id if from_wallet_id is not None else transfer.from_wallet_id),
                 int(to_wallet_id if to_wallet_id is not None else transfer.to_wallet_id),
                 self._date_as_text(transfer.date),
-                float(transfer.amount_original),
+                amount_original,
+                amount_original_minor,
                 str(transfer.currency).upper(),
-                float(transfer.rate_at_operation),
-                float(transfer.amount_kzt),
+                rate_at_operation,
+                rate_at_operation_text,
+                amount_kzt,
+                amount_kzt_minor,
                 str(transfer.description or ""),
                 int(transfer_id),
             ),
@@ -289,6 +355,18 @@ class SQLiteRecordRepository(RecordRepository):
         transfer_id: int | None = None,
     ) -> int:
         period = record.period if isinstance(record, MandatoryExpenseRecord) else None
+        (
+            amount_original,
+            amount_original_minor,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_kzt,
+            amount_kzt_minor,
+        ) = self._money_columns(
+            record.amount_original or 0.0,
+            record.rate_at_operation,
+            record.amount_kzt or 0.0,
+        )
         cursor = self._conn.execute(
             """
             INSERT INTO records (
@@ -297,24 +375,30 @@ class SQLiteRecordRepository(RecordRepository):
                 wallet_id,
                 transfer_id,
                 amount_original,
+                amount_original_minor,
                 currency,
                 rate_at_operation,
+                rate_at_operation_text,
                 amount_kzt,
+                amount_kzt_minor,
                 category,
                 description,
                 period
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 self._record_type(record),
                 self._date_as_text(record.date),
                 int(wallet_id if wallet_id is not None else record.wallet_id),
                 int(transfer_id) if transfer_id is not None else None,
-                float(record.amount_original or 0.0),
+                amount_original,
+                amount_original_minor,
                 str(record.currency).upper(),
-                float(record.rate_at_operation),
-                float(record.amount_kzt or 0.0),
+                rate_at_operation,
+                rate_at_operation_text,
+                amount_kzt,
+                amount_kzt_minor,
                 str(record.category),
                 str(record.description or ""),
                 str(period) if period is not None else None,
@@ -331,6 +415,18 @@ class SQLiteRecordRepository(RecordRepository):
         transfer_id: int | None = None,
     ) -> None:
         period = record.period if isinstance(record, MandatoryExpenseRecord) else None
+        (
+            amount_original,
+            amount_original_minor,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_kzt,
+            amount_kzt_minor,
+        ) = self._money_columns(
+            record.amount_original or 0.0,
+            record.rate_at_operation,
+            record.amount_kzt or 0.0,
+        )
         self._conn.execute(
             """
             UPDATE records
@@ -340,9 +436,12 @@ class SQLiteRecordRepository(RecordRepository):
                 wallet_id = ?,
                 transfer_id = ?,
                 amount_original = ?,
+                amount_original_minor = ?,
                 currency = ?,
                 rate_at_operation = ?,
+                rate_at_operation_text = ?,
                 amount_kzt = ?,
+                amount_kzt_minor = ?,
                 category = ?,
                 description = ?,
                 period = ?
@@ -353,10 +452,13 @@ class SQLiteRecordRepository(RecordRepository):
                 self._date_as_text(record.date),
                 int(wallet_id if wallet_id is not None else record.wallet_id),
                 int(transfer_id) if transfer_id is not None else None,
-                float(record.amount_original or 0.0),
+                amount_original,
+                amount_original_minor,
                 str(record.currency).upper(),
-                float(record.rate_at_operation),
-                float(record.amount_kzt or 0.0),
+                rate_at_operation,
+                rate_at_operation_text,
+                amount_kzt,
+                amount_kzt_minor,
                 str(record.category),
                 str(record.description or ""),
                 str(period) if period is not None else None,
@@ -365,28 +467,46 @@ class SQLiteRecordRepository(RecordRepository):
         )
 
     def _insert_mandatory_row(self, expense: MandatoryExpenseRecord, *, wallet_id: int) -> int:
+        (
+            amount_original,
+            amount_original_minor,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_kzt,
+            amount_kzt_minor,
+        ) = self._money_columns(
+            expense.amount_original or 0.0,
+            expense.rate_at_operation,
+            expense.amount_kzt or 0.0,
+        )
         cursor = self._conn.execute(
             """
             INSERT INTO mandatory_expenses (
                 wallet_id,
                 amount_original,
+                amount_original_minor,
                 currency,
                 rate_at_operation,
+                rate_at_operation_text,
                 amount_kzt,
+                amount_kzt_minor,
                 category,
                 description,
                 period,
                 date,
                 auto_pay
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 int(wallet_id),
-                float(expense.amount_original or 0.0),
+                amount_original,
+                amount_original_minor,
                 str(expense.currency).upper(),
-                float(expense.rate_at_operation),
-                float(expense.amount_kzt or 0.0),
+                rate_at_operation,
+                rate_at_operation_text,
+                amount_kzt,
+                amount_kzt_minor,
                 str(expense.category),
                 str(expense.description or ""),
                 str(expense.period),
@@ -397,14 +517,20 @@ class SQLiteRecordRepository(RecordRepository):
         return self._require_lastrowid(cursor.lastrowid, "mandatory_expenses")
 
     def _upsert_system_wallet_balance(self, balance: float) -> None:
+        initial_balance, initial_balance_minor = self._wallet_balance_columns(balance)
         row = self._conn.execute(
             "SELECT id FROM wallets WHERE id = ?",
             (SYSTEM_WALLET_ID,),
         ).fetchone()
         if row is not None:
             self._conn.execute(
-                "UPDATE wallets SET initial_balance = ?, system = 1 WHERE id = ?",
-                (float(balance), SYSTEM_WALLET_ID),
+                """
+                UPDATE wallets 
+                    SET initial_balance = ?, 
+                    initial_balance_minor = ?, 
+                    system = 1 WHERE id = ?
+                """,
+                (initial_balance, initial_balance_minor, SYSTEM_WALLET_ID),
             )
             return
 
@@ -413,8 +539,13 @@ class SQLiteRecordRepository(RecordRepository):
         ).fetchone()
         if fallback_row is not None:
             self._conn.execute(
-                "UPDATE wallets SET initial_balance = ?, system = 1 WHERE id = ?",
-                (float(balance), int(fallback_row[0])),
+                """
+                UPDATE wallets 
+                SET initial_balance = ?, 
+                initial_balance_minor = ?, 
+                system = 1 WHERE id = ?
+                """,
+                (initial_balance, initial_balance_minor, int(fallback_row[0])),
             )
             return
 
@@ -422,7 +553,7 @@ class SQLiteRecordRepository(RecordRepository):
             id=SYSTEM_WALLET_ID,
             name="Main wallet",
             currency="KZT",
-            initial_balance=float(balance),
+            initial_balance=to_money_float(balance),
             system=True,
             allow_negative=False,
             is_active=True,
@@ -446,7 +577,7 @@ class SQLiteRecordRepository(RecordRepository):
                 id=SYSTEM_WALLET_ID,
                 name=str(name or "Wallet"),
                 currency=str(currency or "KZT").upper(),
-                initial_balance=float(initial_balance),
+                initial_balance=to_money_float(initial_balance),
                 system=bool(system),
                 allow_negative=bool(allow_negative),
                 is_active=True,
@@ -589,7 +720,7 @@ class SQLiteRecordRepository(RecordRepository):
 
     def save_initial_balance(self, balance: float) -> None:
         with self._conn:
-            self._upsert_system_wallet_balance(float(balance))
+            self._upsert_system_wallet_balance(to_money_float(balance))
 
     def load_initial_balance(self) -> float:
         return float(self.get_system_wallet().initial_balance)
@@ -623,15 +754,30 @@ class SQLiteRecordRepository(RecordRepository):
         expense_id = int(getattr(expense, "id", 0) or 0)
         if expense_id <= 0:
             raise ValueError("id обязательного расхода должен быть положительным")
+        (
+            amount_original,
+            amount_original_minor,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_kzt,
+            amount_kzt_minor,
+        ) = self._money_columns(
+            expense.amount_original or 0.0,
+            expense.rate_at_operation,
+            expense.amount_kzt or 0.0,
+        )
         with self._conn:
             self._conn.execute(
                 """
                 UPDATE mandatory_expenses
                 SET wallet_id         = ?,
                     amount_original   = ?,
+                    amount_original_minor = ?,
                     currency          = ?,
                     rate_at_operation = ?,
+                    rate_at_operation_text = ?,
                     amount_kzt        = ?,
+                    amount_kzt_minor  = ?,
                     category          = ?,
                     description       = ?,
                     period            = ?,
@@ -641,10 +787,13 @@ class SQLiteRecordRepository(RecordRepository):
                 """,
                 (
                     int(expense.wallet_id),
-                    float(expense.amount_original or 0.0),
+                    amount_original,
+                    amount_original_minor,
                     str(expense.currency).upper(),
-                    float(expense.rate_at_operation),
-                    float(expense.amount_kzt or 0.0),
+                    rate_at_operation,
+                    rate_at_operation_text,
+                    amount_kzt,
+                    amount_kzt_minor,
                     str(expense.category),
                     str(expense.description or ""),
                     str(expense.period),
@@ -670,7 +819,7 @@ class SQLiteRecordRepository(RecordRepository):
 
     def replace_records(self, records: list[Record], initial_balance: float) -> None:
         with self._conn:
-            self._upsert_system_wallet_balance(float(initial_balance))
+            self._upsert_system_wallet_balance(to_money_float(initial_balance))
             self._conn.execute("DELETE FROM records")
             self._reset_autoincrement("records")
             for record in sorted(records, key=lambda item: item.id):
@@ -700,7 +849,7 @@ class SQLiteRecordRepository(RecordRepository):
                     id=SYSTEM_WALLET_ID,
                     name="Main wallet",
                     currency="KZT",
-                    initial_balance=float(initial_balance),
+                    initial_balance=to_money_float(initial_balance),
                     system=True,
                     allow_negative=False,
                     is_active=True,

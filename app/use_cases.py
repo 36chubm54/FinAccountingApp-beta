@@ -21,6 +21,7 @@ from domain.transfers import Transfer
 from domain.wallets import Wallet
 from infrastructure.repositories import RecordRepository
 from services.audit_service import AuditService
+from utils.money import quantize_money, to_money_float, to_rate_float
 
 from .services import CurrencyService
 
@@ -60,10 +61,10 @@ class CreateIncome:
         record = IncomeRecord(
             date=date,
             wallet_id=wallet_id,
-            amount_original=amount,
+            amount_original=to_money_float(amount),
             currency=currency.upper(),
-            rate_at_operation=float(rate_at_operation),
-            amount_kzt=amount_kzt,
+            rate_at_operation=to_rate_float(rate_at_operation),
+            amount_kzt=to_money_float(amount_kzt),
             category=category,
             description=description,
         )
@@ -102,17 +103,18 @@ class CreateExpense:
             amount_kzt = self._currency.convert(amount, currency)
         if rate_at_operation is None:
             rate_at_operation = build_rate(amount, amount_kzt, currency)
+        amount_kzt_value = to_money_float(amount_kzt)
         if not wallet.allow_negative:
             balance = wallet_balance_kzt(wallet, self._repository.load_all())
-            if balance - amount_kzt < 0:
+            if to_money_float(quantize_money(balance) - quantize_money(amount_kzt_value)) < 0:
                 raise ValueError("Insufficient funds in wallet")
         record = ExpenseRecord(
             date=date,
             wallet_id=wallet_id,
-            amount_original=amount,
+            amount_original=to_money_float(amount),
             currency=currency.upper(),
-            rate_at_operation=float(rate_at_operation),
-            amount_kzt=amount_kzt,
+            rate_at_operation=to_rate_float(rate_at_operation),
+            amount_kzt=amount_kzt_value,
             category=category,
             description=description,
         )
@@ -238,15 +240,17 @@ class CalculateNetWorth:
     def execute_current(self) -> float:
         wallets = self._repository.load_active_wallets()
         records = self._repository.load_all()
-        total = 0.0
+        total = quantize_money(0)
         for wallet in wallets:
-            total += float(self._currency.convert(wallet.initial_balance, wallet.currency))
+            total += quantize_money(self._currency.convert(wallet.initial_balance, wallet.currency))
         for record in records:
             if record.amount_original is not None:
-                converted = float(self._currency.convert(record.amount_original, record.currency))
+                converted = quantize_money(
+                    self._currency.convert(record.amount_original, record.currency)
+                )
                 sign = 1.0 if record.signed_amount_kzt() >= 0 else -1.0
-                total += sign * abs(converted)
-        return total
+                total += converted if sign >= 0 else -abs(converted)
+        return float(total)
 
 
 class CreateTransfer:
@@ -270,9 +274,9 @@ class CreateTransfer:
     ) -> int:
         if from_wallet_id == to_wallet_id:
             raise ValueError("Transfer wallets must be different")
-        if amount_original <= 0:
+        if to_money_float(amount_original) <= 0:
             raise ValueError("Transfer amount must be positive")
-        if commission_amount < 0:
+        if to_money_float(commission_amount) < 0:
             raise ValueError("Commission amount cannot be negative")
 
         wallets = {wallet.id: wallet for wallet in self._repository.load_wallets()}
@@ -286,24 +290,30 @@ class CreateTransfer:
             raise ValueError("Transfers are allowed only between active wallets")
 
         if amount_kzt is None:
-            transfer_kzt = float(self._currency.convert(amount_original, currency))
+            transfer_kzt = to_money_float(self._currency.convert(amount_original, currency))
         else:
-            transfer_kzt = float(amount_kzt)
+            transfer_kzt = to_money_float(amount_kzt)
         if rate_at_operation is None:
             transfer_rate = build_rate(amount_original, transfer_kzt, currency)
         else:
-            transfer_rate = float(rate_at_operation)
+            transfer_rate = to_rate_float(rate_at_operation)
 
         commission_ccy = (commission_currency or currency).upper()
         commission_kzt = 0.0
         commission_rate = 1.0
         if commission_amount > 0:
-            commission_kzt = float(self._currency.convert(commission_amount, commission_ccy))
+            commission_kzt = to_money_float(
+                self._currency.convert(commission_amount, commission_ccy)
+            )
             commission_rate = build_rate(commission_amount, commission_kzt, commission_ccy)
 
         records = self._repository.load_all()
         from_balance = wallet_balance_kzt(from_wallet, records)
-        projected_balance = from_balance - transfer_kzt - commission_kzt
+        projected_balance = to_money_float(
+            quantize_money(from_balance)
+            - quantize_money(transfer_kzt)
+            - quantize_money(commission_kzt)
+        )
         if not from_wallet.allow_negative and projected_balance < 0:
             raise ValueError("Insufficient funds in source wallet")
         next_record_id = max((int(record.id) for record in records), default=0) + 1
@@ -314,7 +324,7 @@ class CreateTransfer:
             from_wallet_id=from_wallet_id,
             to_wallet_id=to_wallet_id,
             date=transfer_date,
-            amount_original=float(amount_original),
+            amount_original=to_money_float(amount_original),
             currency=currency.upper(),
             rate_at_operation=transfer_rate,
             amount_kzt=transfer_kzt,
@@ -326,7 +336,7 @@ class CreateTransfer:
             date=transfer_date,
             wallet_id=from_wallet_id,
             transfer_id=transfer_id,
-            amount_original=float(amount_original),
+            amount_original=to_money_float(amount_original),
             currency=currency.upper(),
             rate_at_operation=transfer_rate,
             amount_kzt=transfer_kzt,
@@ -337,7 +347,7 @@ class CreateTransfer:
             date=transfer_date,
             wallet_id=to_wallet_id,
             transfer_id=transfer_id,
-            amount_original=float(amount_original),
+            amount_original=to_money_float(amount_original),
             currency=currency.upper(),
             rate_at_operation=transfer_rate,
             amount_kzt=transfer_kzt,
@@ -353,7 +363,7 @@ class CreateTransfer:
                 date=transfer_date,
                 wallet_id=from_wallet_id,
                 transfer_id=None,
-                amount_original=float(commission_amount),
+                amount_original=to_money_float(commission_amount),
                 currency=commission_ccy,
                 rate_at_operation=commission_rate,
                 amount_kzt=commission_kzt,
@@ -486,10 +496,10 @@ class ImportFromCSV:
                     from_wallet_id=source.wallet_id,
                     to_wallet_id=target.wallet_id,
                     date=source.date,
-                    amount_original=float(source.amount_original or 0.0),
+                    amount_original=to_money_float(source.amount_original or 0.0),
                     currency=str(source.currency or "KZT").upper(),
-                    rate_at_operation=float(source.rate_at_operation),
-                    amount_kzt=float(source.amount_kzt or 0.0),
+                    rate_at_operation=to_rate_float(source.rate_at_operation),
+                    amount_kzt=to_money_float(source.amount_kzt or 0.0),
                     description=str(source.description or ""),
                 )
             )
@@ -501,7 +511,7 @@ class ImportFromCSV:
                 reindexed_records.append(record)
         records = reindexed_records
         self._repository.replace_records_and_transfers(records, transfers)
-        self._repository.save_initial_balance(float(initial_balance))
+        self._repository.save_initial_balance(to_money_float(initial_balance))
         return imported_count
 
 
@@ -544,10 +554,10 @@ class CreateMandatoryExpense:
             rate_at_operation = build_rate(amount, amount_kzt, currency)
         expense = MandatoryExpenseRecord(
             wallet_id=int(wallet_id),
-            amount_original=amount,
+            amount_original=to_money_float(amount),
             currency=currency.upper(),
-            rate_at_operation=float(rate_at_operation),
-            amount_kzt=amount_kzt,
+            rate_at_operation=to_rate_float(rate_at_operation),
+            amount_kzt=to_money_float(amount_kzt),
             category=category,
             description=description,
             period=period,  # type: ignore
@@ -594,18 +604,19 @@ class CreateMandatoryExpenseRecord:
             amount_kzt = self._currency.convert(amount, currency)
         if rate_at_operation is None:
             rate_at_operation = build_rate(amount, amount_kzt, currency)
+        amount_kzt_value = to_money_float(amount_kzt)
         if not wallet.allow_negative:
             balance = wallet_balance_kzt(wallet, self._repository.load_all())
-            if balance - amount_kzt < 0:
+            if to_money_float(quantize_money(balance) - quantize_money(amount_kzt_value)) < 0:
                 raise ValueError("Insufficient funds in wallet")
 
         record = MandatoryExpenseRecord(
             date=date,
             wallet_id=wallet_id,
-            amount_original=amount,
+            amount_original=to_money_float(amount),
             currency=currency.upper(),
-            rate_at_operation=float(rate_at_operation),
-            amount_kzt=amount_kzt,
+            rate_at_operation=to_rate_float(rate_at_operation),
+            amount_kzt=amount_kzt_value,
             category=category,
             description=description,
             period=period,  # type: ignore[arg-type]

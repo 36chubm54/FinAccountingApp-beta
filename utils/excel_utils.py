@@ -19,6 +19,7 @@ from utils.import_core import (
     parse_import_row,
     safe_type,
 )
+from utils.money import to_money_float
 from utils.tabular_utils import (
     mandatory_expense_export_rows,
     record_export_rows,
@@ -210,7 +211,7 @@ def import_records_from_xlsx(
 
         headers = [norm_key(_safe_str(h)) for h in header_row]
         records: list[Record] = []
-        initial_balance = float(existing_initial_balance)
+        initial_balance = to_money_float(existing_initial_balance)
         errors: list[str] = []
         skipped = 0
         imported = 0

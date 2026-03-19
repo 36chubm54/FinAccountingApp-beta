@@ -6,6 +6,7 @@ from typing import Any
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 from domain.validation import ensure_valid_period, parse_ymd
+from utils.money import quantize_money, to_decimal, to_money_float, to_rate_float
 
 MANDATORY_PERIODS = {"daily", "weekly", "monthly", "yearly"}
 
@@ -21,11 +22,14 @@ def as_float(value: Any, default: float | None = None) -> float | None:
         raw = str(value).strip()
         if raw.startswith("(") and raw.endswith(")"):
             raw = "-" + raw[1:-1]
-        parsed = float(raw)
-        if not math.isfinite(parsed):
+        parsed = to_decimal(raw)
+        if not parsed.is_finite():
             return default
-        return parsed
-    except (TypeError, ValueError):
+        result = float(parsed)
+        if not math.isfinite(result):
+            return default
+        return result
+    except Exception:
         return default
 
 
@@ -104,7 +108,7 @@ def parse_import_row(
         )
         if balance is None:
             return None, None, f"{row_label}: invalid initial_balance amount"
-        return None, float(balance), None
+        return None, to_money_float(balance), None
 
     if mandatory_only:
         row_type = "mandatory_expense"
@@ -145,10 +149,10 @@ def parse_import_row(
         amount = as_float(row_lc.get("amount"), None)
         if amount is None:
             return None, None, f"{row_label}: invalid amount"
-        amount_original = abs(float(amount))
+        amount_original = to_money_float(abs(to_decimal(amount)))
         currency = "KZT"
         rate_at_operation = 1.0
-        amount_kzt = abs(float(amount))
+        amount_kzt = amount_original
     else:
         amount_original = as_float(row_lc.get("amount_original"), None)
         if amount_original is None:
@@ -167,8 +171,10 @@ def parse_import_row(
                     f"{row_label}: current-rate policy requires currency service",
                 )
             try:
-                rate_at_operation = float(get_rate(currency))
-                amount_kzt = float(amount_original * rate_at_operation)
+                rate_at_operation = to_rate_float(get_rate(currency))
+                amount_kzt = to_money_float(
+                    quantize_money(amount_original) * to_decimal(rate_at_operation)
+                )
             except Exception as exc:
                 return (
                     None,
@@ -185,14 +191,12 @@ def parse_import_row(
         if amount_kzt is None:
             return None, None, f"{row_label}: missing required field 'amount_kzt'"
 
-    if amount_original < 0:
+    amount_original_value = to_money_float(amount_original)
+    rate_value = to_rate_float(rate_at_operation)
+    amount_kzt_value = to_money_float(amount_kzt)
+
+    if amount_original_value < 0:
         return None, None, f"{row_label}: amount_original must be >= 0"
-    if not math.isfinite(float(amount_original)):
-        return None, None, f"{row_label}: invalid amount_original"
-    if not math.isfinite(float(rate_at_operation)):
-        return None, None, f"{row_label}: invalid rate_at_operation"
-    if not math.isfinite(float(amount_kzt)):
-        return None, None, f"{row_label}: invalid amount_kzt"
 
     wallet_value = row_lc.get("wallet_id")
     if mandatory_only or policy == ImportPolicy.LEGACY:
@@ -217,10 +221,10 @@ def parse_import_row(
         "date": date_value,
         "wallet_id": wallet_id,
         "transfer_id": None,
-        "amount_original": float(amount_original),
+        "amount_original": amount_original_value,
         "currency": currency,
-        "rate_at_operation": float(rate_at_operation),
-        "amount_kzt": float(amount_kzt),
+        "rate_at_operation": rate_value,
+        "amount_kzt": amount_kzt_value,
         "category": category,
         "description": description,
     }

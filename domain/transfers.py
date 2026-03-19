@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from datetime import date as dt_date
 
+from utils.money import to_money_float, to_rate_float
+
 from .validation import parse_ymd
 
 
@@ -29,6 +31,9 @@ class Transfer:
             raise ValueError("Transfer wallet ids must be positive")
         if int(self.from_wallet_id) == int(self.to_wallet_id):
             raise ValueError("Transfer source and destination wallets must be different")
+        object.__setattr__(self, "amount_original", to_money_float(self.amount_original))
+        object.__setattr__(self, "amount_kzt", to_money_float(self.amount_kzt))
+        object.__setattr__(self, "rate_at_operation", to_rate_float(self.rate_at_operation))
         if float(self.amount_original) <= 0:
             raise ValueError("Transfer amount must be positive")
         if float(self.amount_kzt) <= 0:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from infrastructure.sqlite_repository import SQLiteRecordRepository
+from services.sqlite_money_sql import minor_amount_expr, money_expr, signed_minor_amount_expr
 
 
 @dataclass(frozen=True)
@@ -49,8 +50,12 @@ class BalanceService:
         Returns a list sorted by wallet_id.
         """
         wallets = self._repo.query_all(
-            "SELECT id, name, currency, initial_balance FROM wallets "
-            "WHERE is_active = 1 ORDER BY id"
+            f"""
+            SELECT id, name, currency,
+            COALESCE({money_expr("initial_balance")}, 0.0)
+            AS initial_balance FROM wallets
+            WHERE is_active = 1 ORDER BY id
+            """
         )
         result: list[WalletBalance] = []
         for row in wallets:
@@ -93,7 +98,7 @@ class BalanceService:
 
     def _get_initial_balance(self, wallet_id: int) -> float:
         row = self._repo.query_one(
-            "SELECT initial_balance FROM wallets WHERE id = ? AND is_active = 1",
+            f"SELECT {money_expr('initial_balance')} FROM wallets WHERE id = ? AND is_active = 1",
             (int(wallet_id),),
         )
         return float(row[0]) if row else 0.0
@@ -111,7 +116,9 @@ class BalanceService:
         if up_to_date is None:
             sql = """
                 SELECT COALESCE(SUM(
-                    CASE type WHEN 'income' THEN amount_kzt ELSE -amount_kzt END
+                    """
+            sql += signed_minor_amount_expr("amount_kzt")
+            sql += """
                 ), 0.0)
                 FROM records
                 WHERE wallet_id = ?
@@ -120,13 +127,15 @@ class BalanceService:
         else:
             sql = """
                 SELECT COALESCE(SUM(
-                    CASE type WHEN 'income' THEN amount_kzt ELSE -amount_kzt END
+                    """
+            sql += signed_minor_amount_expr("amount_kzt")
+            sql += """
                 ), 0.0)
                 FROM records
                 WHERE wallet_id = ? AND date <= ?
             """
             row = self._repo.query_one(sql, (int(wallet_id), str(up_to_date)))
-        return float(row[0]) if row else 0.0
+        return (float(row[0]) / 100.0) if row else 0.0
 
     def _sum_by_type(self, record_type: str, start_date: str, end_date: str) -> float:
         """
@@ -136,7 +145,11 @@ class BalanceService:
         """
         if record_type == "expense":
             sql = """
-                SELECT COALESCE(SUM(amount_kzt), 0.0)
+                SELECT COALESCE(SUM(
+                    """
+            sql += minor_amount_expr("amount_kzt")
+            sql += """
+                ), 0.0)
                 FROM records
                 WHERE type IN ('expense', 'mandatory_expense')
                   AND category != 'Transfer'
@@ -145,7 +158,11 @@ class BalanceService:
             row = self._repo.query_one(sql, (str(start_date), str(end_date)))
         else:
             sql = """
-                SELECT COALESCE(SUM(amount_kzt), 0.0)
+                SELECT COALESCE(SUM(
+                    """
+            sql += minor_amount_expr("amount_kzt")
+            sql += """
+                ), 0.0)
                 FROM records
                 WHERE type = ?
                   AND category != 'Transfer'
@@ -155,4 +172,4 @@ class BalanceService:
                 sql,
                 (str(record_type), str(start_date), str(end_date)),
             )
-        return float(row[0]) if row else 0.0
+        return (float(row[0]) / 100.0) if row else 0.0

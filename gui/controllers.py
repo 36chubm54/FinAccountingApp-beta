@@ -48,6 +48,7 @@ from services.balance_service import BalanceService, CashflowResult, WalletBalan
 from services.import_service import ImportService
 from services.metrics_service import MetricsService
 from services.timeline_service import TimelineService
+from utils.money import to_money_float
 
 logger = logging.getLogger(__name__)
 
@@ -99,13 +100,13 @@ class FinancialController:
 
     def get_record_amount_kzt(self, record_id: int) -> float:
         record = self._repository.get_by_id(int(record_id))
-        return float(record.amount_kzt or 0.0)
+        return to_money_float(record.amount_kzt or 0.0)
 
     def get_record_for_edit(self, record_id: int) -> Record:
         return self._repository.get_by_id(int(record_id))
 
     def set_system_initial_balance(self, balance: float) -> None:
-        self._repository.save_initial_balance(float(balance))
+        self._repository.save_initial_balance(to_money_float(balance))
 
     def get_system_initial_balance(self) -> float:
         return self._repository.load_initial_balance()
@@ -245,7 +246,7 @@ class FinancialController:
         return CreateWallet(self._repository).execute(
             name=name.strip(),
             currency=currency.strip().upper(),
-            initial_balance=float(initial_balance),
+            initial_balance=to_money_float(initial_balance),
             allow_negative=allow_negative,
         )
 
@@ -305,10 +306,10 @@ class FinancialController:
             from_wallet_id=int(from_wallet_id),
             to_wallet_id=int(to_wallet_id),
             transfer_date=transfer_date,
-            amount_original=float(amount),
+            amount_original=to_money_float(amount),
             currency=currency.strip().upper(),
             description=description.strip(),
-            commission_amount=float(commission_amount),
+            commission_amount=to_money_float(commission_amount),
             commission_currency=(commission_currency or currency).strip().upper(),
             amount_kzt=amount_kzt,
             rate_at_operation=rate_at_operation,
@@ -332,7 +333,7 @@ class FinancialController:
 
     def reset_operations_for_import(self, *, initial_balance: float) -> None:
         self._repository.replace_records_and_transfers([], [])
-        self._repository.save_initial_balance(float(initial_balance))
+        self._repository.save_initial_balance(to_money_float(initial_balance))
 
     def reset_mandatory_for_import(self) -> None:
         self._repository.delete_all_mandatory_expenses()
@@ -344,7 +345,7 @@ class FinancialController:
             mandatory_expenses=[],
             transfers=[],
         )
-        self._repository.save_initial_balance(float(initial_balance))
+        self._repository.save_initial_balance(to_money_float(initial_balance))
 
     def replace_all_for_import(
         self,
@@ -357,7 +358,9 @@ class FinancialController:
         preserve_existing_mandatory: bool,
     ) -> None:
         target_wallets = list(wallets) if wallets else list(self._repository.load_wallets())
-        target_wallets = wallets_with_system_initial_balance(target_wallets, float(initial_balance))
+        target_wallets = wallets_with_system_initial_balance(
+            target_wallets, to_money_float(initial_balance)
+        )
 
         mandatory_payload: list[MandatoryExpenseRecord] = []
         if preserve_existing_mandatory:

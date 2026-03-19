@@ -6,6 +6,14 @@ from typing import Any
 from domain.audit import AuditFinding, AuditReport, AuditSeverity
 from domain.validation import ensure_not_future, parse_ymd
 from infrastructure.sqlite_repository import SQLiteRecordRepository
+from utils.money import (
+    money_diff,
+    quantize_money,
+    rate_diff,
+    to_decimal,
+    to_money_float,
+    to_rate_float,
+)
 
 
 class AuditService:
@@ -69,19 +77,19 @@ class AuditService:
             """
         ):
             record_id = int(row["id"])
-            amount_original = float(row["amount_original"] or 0.0)
-            rate_at_operation = float(row["rate_at_operation"] or 0.0)
-            amount_kzt = float(row["amount_kzt"] or 0.0)
+            amount_original = to_money_float(row["amount_original"] or 0.0)
+            rate_at_operation = to_rate_float(row["rate_at_operation"] or 0.0)
+            amount_kzt = to_money_float(row["amount_kzt"] or 0.0)
 
-            expected = amount_original * rate_at_operation
-            delta = amount_kzt - expected
-            if abs(delta) > 0.01:
+            expected = quantize_money(amount_original) * to_decimal(rate_at_operation)
+            delta = quantize_money(amount_kzt) - quantize_money(expected)
+            if abs(delta) > to_decimal("0.01"):
                 self._record_amount_consistency_findings.append(
                     AuditFinding(
                         check="amount_consistency",
                         severity=AuditSeverity.WARNING,
                         message=f"Record id={record_id} has inconsistent amount_kzt.",
-                        detail=f"delta {delta:.2f} KZT",
+                        detail=f"delta {float(delta):.2f} KZT",
                     )
                 )
 
@@ -271,24 +279,23 @@ class AuditService:
                 continue
 
             mismatches: list[str] = []
-            if float(transfer["amount_original"]) != float(expense["amount_original"]) or float(
-                transfer["amount_original"]
-            ) != float(income["amount_original"]):
+            if (
+                abs(money_diff(transfer["amount_original"], expense["amount_original"])) > 0
+                or abs(money_diff(transfer["amount_original"], income["amount_original"])) > 0
+            ):
                 mismatches.append("amount_original mismatch")
             if str(transfer["currency"]) != str(expense["currency"]) or str(
                 transfer["currency"]
             ) != str(income["currency"]):
                 mismatches.append("currency mismatch")
             if (
-                abs(float(transfer["rate_at_operation"]) - float(expense["rate_at_operation"]))
-                > 1e-9
-                or abs(float(transfer["rate_at_operation"]) - float(income["rate_at_operation"]))
-                > 1e-9
+                abs(rate_diff(transfer["rate_at_operation"], expense["rate_at_operation"])) > 0
+                or abs(rate_diff(transfer["rate_at_operation"], income["rate_at_operation"])) > 0
             ):
                 mismatches.append("rate_at_operation mismatch")
             if (
-                abs(float(transfer["amount_kzt"]) - float(expense["amount_kzt"])) > 0.01
-                or abs(float(transfer["amount_kzt"]) - float(income["amount_kzt"])) > 0.01
+                abs(money_diff(transfer["amount_kzt"], expense["amount_kzt"])) > 0
+                or abs(money_diff(transfer["amount_kzt"], income["amount_kzt"])) > 0
             ):
                 mismatches.append("amount_kzt mismatch")
             if mismatches:
