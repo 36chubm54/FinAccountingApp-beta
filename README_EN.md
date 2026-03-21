@@ -61,6 +61,7 @@ After launch, the graphical window of the Financial Accounting application will 
 ### Main window
 
 After running `python main.py` from the `project` directory, a window will open with control tabs and an infographic block.
+The bottom of the window now includes a persistent status bar with the app version, currency-rate status, and an `Online` toggle that can be switched at runtime without restarting.
 
 Tabs and actions:
 
@@ -91,6 +92,7 @@ Financial analytics for an arbitrary period.
 The period filter uses `YYYY-MM-DD` in the `From` / `To` fields. Transfers are excluded from calculations.
 
 > **Note:** After launching the application, mandatory payments are automatically applied with a detailed GUI message displayed.
+> If online mode was saved previously, the application restores it on startup and refreshes currency rates in the background.
 
 ### Budget tab
 
@@ -276,11 +278,11 @@ Transfer records (`category='Transfer'`) are excluded from cashflow calculations
 
 Analytical service that builds historical financial dynamics.
 
-| Method | Description |
-| --- | --- |
-| `get_net_worth_timeline()` | Net worth (KZT) at the end of each month |
-| `get_monthly_cashflow(start_date, end_date)` | Monthly income, expenses, and cashflow |
-| `get_cumulative_income_expense()` | Running totals of income and expenses by month |
+| Method                                       | Description                                    |
+| -------------------------------------------- | ---------------------------------------------- |
+| `get_net_worth_timeline()`                   | Net worth (KZT) at the end of each month       |
+| `get_monthly_cashflow(start_date, end_date)` | Monthly income, expenses, and cashflow         |
+| `get_cumulative_income_expense()`            | Running totals of income and expenses by month |
 
 All methods are read-only. Transfers (`transfer_id IS NOT NULL`) are excluded from cashflow calculations
 to prevent double-counting; they are included in net worth (expense + income = 0, neutral).
@@ -290,14 +292,14 @@ Initial balances (`wallets.initial_balance`) are included in every timeline poin
 
 Analytical service for calculating financial metrics on the fly.
 
-| Method | Description |
-| --- | --- |
-| `get_savings_rate(start, end)` | Savings rate (%) for a custom period |
-| `get_burn_rate(start, end)` | Average daily expense (KZT) |
-| `get_spending_by_category(start, end)` | Expenses by category, sorted descending |
-| `get_income_by_category(start, end)` | Income by category, sorted descending |
-| `get_top_expense_categories(start, end, top_n)` | Top N expense categories |
-| `get_monthly_summary(start, end)` | Monthly income/expenses/cashflow/savings rate |
+| Method                                          | Description                                   |
+| ----------------------------------------------- | --------------------------------------------- |
+| `get_savings_rate(start, end)`                  | Savings rate (%) for a custom period          |
+| `get_burn_rate(start, end)`                     | Average daily expense (KZT)                   |
+| `get_spending_by_category(start, end)`          | Expenses by category, sorted descending       |
+| `get_income_by_category(start, end)`            | Income by category, sorted descending         |
+| `get_top_expense_categories(start, end, top_n)` | Top N expense categories                      |
+| `get_monthly_summary(start, end)`               | Monthly income/expenses/cashflow/savings rate |
 
 All methods are read-only. Transfers are excluded from all calculations (`transfer_id IS NULL`).
 Metrics are computed via SQL aggregates with no intermediate storage.
@@ -623,7 +625,9 @@ Below are the key classes and functions synchronized with the actual code.
 `app/services.py`
 
 - `CurrencyService(rates=None, base="KZT", use_online=False)` - adapter for domain service.
-- When `use_online=True` tries to load the rates of the National Bank of the Republic of Kazakhstan and caches them in `currency_rates.json`.
+- When `use_online=True`, it attempts to load National Bank of Kazakhstan rates on startup and caches them in `currency_rates.json`.
+- Supports runtime switching via `set_online(enabled)`, the `is_online` flag, the `last_fetched_at` timestamp, and manual refresh through `refresh_rates()`.
+- In the GUI, online mode is controlled by the global bottom status-bar toggle and persisted between sessions via `schema_meta`.
 
 `app/use_cases.py`
 
@@ -958,7 +962,7 @@ project/
 ├── migrate_json_to_sqlite.py   # Data migration from JSON to SQLite
 ├── version.py                  # Application version for snapshot metadata
 ├── data.json                   # Optional JSON import/export/backup file
-├── currency_rates.json         # Currency rate cache (use_online=True)
+├── currency_rates.json         # Currency rate cache for online mode
 ├── requirements.txt            # Runtime dependencies
 ├── requirements-dev.txt        # Dev dependencies (tests, coverage)
 ├── pytest.ini                  # pytest settings
@@ -1052,16 +1056,15 @@ project/
     ├── test_analytics_tab.py
     ├── test_audit_engine.py
     ├── test_balance_service.py
+    ├── test_bootstrap_backup.py
+    ├── test_bootstrap_migration_verification.py
+    ├── test_budget_service.py
     ├── test_charting.py
     ├── test_csv.py
     ├── test_currency.py
     ├── test_excel.py
     ├── test_gui_exporters_importers.py
     ├── test_import_balance_contract.py
-    ├── test_bootstrap_backup.py
-    ├── test_bootstrap_migration_verification.py
-    ├── test_budget_service.py
-    ├── test_migrate_json_to_sqlite.py
     ├── test_import_core.py
     ├── test_import_dry_run.py
     ├── test_import_parser.py
@@ -1070,6 +1073,8 @@ project/
     ├── test_import_service.py
     ├── test_mandatory_ux.py
     ├── test_metrics_service.py
+    ├── test_migrate_json_to_sqlite.py
+    ├── test_online_mode.py
     ├── test_pdf.py
     ├── test_records.py
     ├── test_reports.py
@@ -1078,10 +1083,10 @@ project/
     ├── test_services.py
     ├── test_sqlite_runtime_storage.py
     ├── test_timeline_service.py
-    ├── test_use_cases.py
-    ├── test_validation.py
     ├── test_transfer_integrity.py
     ├── test_transfer_order_sqlite.py
+    ├── test_use_cases.py
+    ├── test_validation.py
     ├── test_wallet_phase1.py
     ├── test_wallet_phase2.py
     ├── test_wallet_phase3.py
@@ -1138,7 +1143,7 @@ Default application rates:
 | Euro              | EUR  | 590.0        | 1 EUR = 590 KZT |
 | Russian ruble     | RUB  | 6.5          | 1 RUB = 6.5 KZT |
 
-If you create `CurrencyService(use_online=True)`, then the rates will be downloaded from the National Bank of the Republic of Kazakhstan and saved in `currency_rates.json`.
+By default, the application uses local exchange rates. Online mode can be enabled either at construction time with `CurrencyService(use_online=True)` or later via `CurrencyService.set_online(True)` or the `Online` toggle in the bottom status bar. After a successful fetch, National Bank of Kazakhstan rates are saved to `currency_rates.json`, and the status bar shows the latest update time.
 
 ---
 

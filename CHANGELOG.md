@@ -7,6 +7,29 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.7.1] - 2026-03-21
+
+### Added
+
+- Global status bar at the bottom of the main window with an `Online` toggle and runtime currency status
+- `CurrencyService.set_online(bool)`, `CurrencyService.is_online`, `CurrencyService.last_fetched_at`, and `CurrencyService.refresh_rates()`
+- `FinancialController` online-mode helpers with persistent `schema_meta["online_mode"]`
+- `tests/test_online_mode.py` covering runtime online/offline switching scenarios
+
+### Changed
+
+- Saved online mode is restored on application startup without requiring a restart
+- Currency status text refreshes periodically so the last update timestamp stays current
+- Online-mode switching no longer blocks the GUI while exchange rates are being fetched in the background
+
+### Docs
+
+- Updated `README.md` and `README_EN.md` to describe the new status bar and online toggle
+
+No breaking changes.
+
+---
+
 ## [1.7.0] - 2026-03-21
 
 ### Added

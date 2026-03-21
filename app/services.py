@@ -1,5 +1,7 @@
 import json
 import logging
+import threading
+from datetime import datetime
 from pathlib import Path
 
 from domain.currency import CurrencyService as DomainCurrencyService
@@ -25,6 +27,10 @@ class CurrencyService:
         base: str = "KZT",
         use_online: bool = False,  # connect to online source if no rates provided
     ):
+        self._use_online = bool(use_online)
+        self._online_lock = threading.Lock()
+        self._last_fetched_at: datetime | None = None
+
         # If explicit rates provided, use them.
         if rates is not None:
             self._service = DomainCurrencyService(rates=rates, base=base)
@@ -32,9 +38,10 @@ class CurrencyService:
 
         # If online fetching requested, try to fetch and cache; else fall back to defaults.
         if use_online:
-            parsed = self._fetch_and_cache_rates()
+            parsed = self._fetch_online_rates()
             if parsed:
                 self._service = DomainCurrencyService(rates=parsed, base=base)
+                self._last_fetched_at = datetime.now()
                 return
             logger.info("Falling back to default currency rates after online fetch")
 
@@ -64,7 +71,64 @@ class CurrencyService:
     def get_all_rates(self) -> dict[str, float]:
         return self._service.get_all_rates()
 
-    def _fetch_and_cache_rates(self) -> dict[str, float] | None:
+    @property
+    def is_online(self) -> bool:
+        """Current online mode state."""
+        return bool(self._use_online)
+
+    @property
+    def last_fetched_at(self) -> datetime | None:
+        """Datetime of the last successful rate fetch, or None."""
+        return self._last_fetched_at
+
+    def set_online(self, enabled: bool) -> bool:
+        """
+        Switch online mode at runtime without restarting the application.
+
+        Returns True if the mode was actually changed.
+        """
+        enabled = bool(enabled)
+        with self._online_lock:
+            if enabled == bool(self._use_online):
+                return False
+
+            self._use_online = enabled
+            if enabled:
+                try:
+                    if self._fetch_online_rates():
+                        self._last_fetched_at = datetime.now()
+                except Exception:
+                    logger.warning(
+                        "CurrencyService: failed to fetch rates on mode switch",
+                        exc_info=True,
+                    )
+            else:
+                self._load_offline_rates()
+        return True
+
+    def refresh_rates(self) -> bool:
+        """Manually refresh rates if online mode is active."""
+        if not self._use_online:
+            return False
+        with self._online_lock:
+            try:
+                if not self._fetch_online_rates():
+                    return False
+                self._last_fetched_at = datetime.now()
+                return True
+            except Exception:
+                logger.warning("CurrencyService: manual rate refresh failed", exc_info=True)
+                return False
+
+    def _load_offline_rates(self) -> None:
+        cached = self._load_cached()
+        if cached:
+            self._service = DomainCurrencyService(rates=cached, base=self.base_currency)
+            return
+        defaults = {"USD": 500.0, "EUR": 590.0, "RUB": 6.5}
+        self._service = DomainCurrencyService(rates=defaults, base=self.base_currency)
+
+    def _fetch_online_rates(self) -> dict[str, float] | None:
         """Попытаться получить курсы с RSS-фида НБРК и сохранить в кеш.
 
         Возвращает словарь rates или None при ошибке.
@@ -116,11 +180,15 @@ class CurrencyService:
                 self._save_cache(rates)
             except Exception as e:
                 logger.warning("Failed to save cache: %s", e)
+            self._service = DomainCurrencyService(rates=rates, base=self.base_currency)
             return rates
         else:
             logger.warning("No valid rates found in XML")
             logger.info("Falling back to cached currency rates")
-            return self._load_cached()
+            cached = self._load_cached()
+            if cached:
+                self._service = DomainCurrencyService(rates=cached, base=self.base_currency)
+            return cached
 
     def _load_cached(self) -> dict[str, float] | None:
         try:

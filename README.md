@@ -61,6 +61,7 @@ python main.py
 ### Главное окно
 
 После запуска `python main.py` из каталога `project` откроется окно с вкладками управления и блоком инфографики.
+В нижней части окна всегда видна статус-строка с версией приложения, статусом валютных курсов и переключателем `Online`, который можно включать и выключать без перезапуска.
 
 Вкладки и действия:
 
@@ -91,6 +92,7 @@ python main.py
 Фильтр периода задаётся в формате `YYYY-MM-DD` в полях `From` / `To`. Переводы исключаются из расчётов.
 
 > **Примечание:** После запуска приложения автоматически применяются обязательные платежи с выводом детального GUI-сообщения.
+> Если ранее был сохранён online-режим, приложение восстановит его при старте и попытается обновить курсы в фоне.
 
 ### Budget tab
 
@@ -276,11 +278,11 @@ python main.py
 
 Аналитический сервис для построения исторической динамики финансов.
 
-| Метод | Описание |
-| --- | --- |
-| `get_net_worth_timeline()` | Net worth (KZT) на конец каждого месяца |
-| `get_monthly_cashflow(start_date, end_date)` | Доходы, расходы, сальдо по месяцам |
-| `get_cumulative_income_expense()` | Накопительные суммы доходов и расходов |
+| Метод                                        | Описание                                |
+| -------------------------------------------- | --------------------------------------- |
+| `get_net_worth_timeline()`                   | Net worth (KZT) на конец каждого месяца |
+| `get_monthly_cashflow(start_date, end_date)` | Доходы, расходы, сальдо по месяцам      |
+| `get_cumulative_income_expense()`            | Накопительные суммы доходов и расходов  |
 
 Все методы read-only. Переводы (`transfer_id IS NOT NULL`) исключаются из cashflow-расчётов,
 чтобы избежать двойного счёта; в net worth включаются (expense + income = 0, нейтральны).
@@ -290,14 +292,14 @@ python main.py
 
 Аналитический сервис для вычисления финансовых метрик на лету.
 
-| Метод | Описание |
-| --- | --- |
-| `get_savings_rate(start, end)` | Норма сбережений (%) за период |
-| `get_burn_rate(start, end)` | Средний дневной расход (KZT) |
-| `get_spending_by_category(start, end)` | Расходы по категориям, сортировка по убыванию |
-| `get_income_by_category(start, end)` | Доходы по категориям, сортировка по убыванию |
-| `get_top_expense_categories(start, end, top_n)` | Топ N категорий расходов |
-| `get_monthly_summary(start, end)` | Доходы, расходы, сальдо, норма сбережений по месяцам |
+| Метод                                           | Описание                                             |
+| ----------------------------------------------- | ---------------------------------------------------- |
+| `get_savings_rate(start, end)`                  | Норма сбережений (%) за период                       |
+| `get_burn_rate(start, end)`                     | Средний дневной расход (KZT)                         |
+| `get_spending_by_category(start, end)`          | Расходы по категориям, сортировка по убыванию        |
+| `get_income_by_category(start, end)`            | Доходы по категориям, сортировка по убыванию         |
+| `get_top_expense_categories(start, end, top_n)` | Топ N категорий расходов                             |
+| `get_monthly_summary(start, end)`               | Доходы, расходы, сальдо, норма сбережений по месяцам |
 
 Все методы read-only. Переводы (`transfer_id IS NULL`) исключаются из всех расчётов.
 Метрики вычисляются через SQL-агрегаты без промежуточного хранения.
@@ -623,7 +625,9 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 `app/services.py`
 
 - `CurrencyService(rates=None, base="KZT", use_online=False)` — адаптер для доменного сервиса.
-- При `use_online=True` пытается загрузить курсы НБ РК и кэширует в `currency_rates.json`.
+- При `use_online=True` на старте пытается загрузить курсы НБ РК и кэширует их в `currency_rates.json`.
+- Поддерживает runtime-переключение через `set_online(enabled)`, флаг `is_online`, метку `last_fetched_at` и ручное обновление `refresh_rates()`.
+- В GUI online-режим управляется глобальным тумблером в нижней статус-строке и сохраняется между сессиями через `schema_meta`.
 
 `app/use_cases.py`
 
@@ -958,7 +962,7 @@ project/
 ├── migrate_json_to_sqlite.py   # Миграция данных из JSON в SQLite
 ├── version.py                  # Версия приложения для snapshot metadata
 ├── data.json                   # JSON import/export/backup файл (опционально)
-├── currency_rates.json         # Кэш курсов валют (use_online=True)
+├── currency_rates.json         # Кэш курсов валют для online-режима
 ├── requirements.txt            # Runtime-зависимости
 ├── requirements-dev.txt        # Dev-зависимости (тесты, coverage)
 ├── pytest.ini                  # Настройки pytest
@@ -1052,16 +1056,15 @@ project/
     ├── test_analytics_tab.py
     ├── test_audit_engine.py
     ├── test_balance_service.py
+    ├── test_bootstrap_backup.py
+    ├── test_bootstrap_migration_verification.py
+    ├── test_budget_service.py
     ├── test_charting.py
     ├── test_csv.py
     ├── test_currency.py
     ├── test_excel.py
     ├── test_gui_exporters_importers.py
     ├── test_import_balance_contract.py
-    ├── test_bootstrap_backup.py
-    ├── test_bootstrap_migration_verification.py
-    ├── test_budget_service.py
-    ├── test_migrate_json_to_sqlite.py
     ├── test_import_core.py
     ├── test_import_dry_run.py
     ├── test_import_parser.py
@@ -1070,6 +1073,8 @@ project/
     ├── test_import_service.py
     ├── test_mandatory_ux.py
     ├── test_metrics_service.py
+    ├── test_migrate_json_to_sqlite.py
+    ├── test_online_mode.py
     ├── test_pdf.py
     ├── test_records.py
     ├── test_reports.py
@@ -1078,10 +1083,10 @@ project/
     ├── test_services.py
     ├── test_sqlite_runtime_storage.py
     ├── test_timeline_service.py
-    ├── test_use_cases.py
-    ├── test_validation.py
     ├── test_transfer_integrity.py
     ├── test_transfer_order_sqlite.py
+    ├── test_use_cases.py
+    ├── test_validation.py
     ├── test_wallet_phase1.py
     ├── test_wallet_phase2.py
     ├── test_wallet_phase3.py
@@ -1138,7 +1143,7 @@ python -m pytest --cov=. --cov-report=html
 | Евро                | EUR | 590.0          | 1 EUR = 590 KZT |
 | Российский рубль    | RUB | 6.5            | 1 RUB = 6.5 KZT |
 
-Если создать `CurrencyService(use_online=True)`, то курсы будут загружены с НБ РК и сохранены в `currency_rates.json`.
+По умолчанию приложение использует локальные курсы. Online-режим можно включить как при создании `CurrencyService(use_online=True)`, так и позже через `CurrencyService.set_online(True)` или тумблер `Online` в нижней статус-строке. При успешной загрузке курсы НБ РК сохраняются в `currency_rates.json`, а статус-строка показывает время последнего обновления.
 
 ---
 

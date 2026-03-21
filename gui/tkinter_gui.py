@@ -26,6 +26,7 @@ from utils.charting import (
     extract_months,
     extract_years,
 )
+from version import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,11 @@ class FinancialApp(tk.Tk):
         self.refresh_operation_wallet_menu: Callable[[], None] | None = None
         self.refresh_transfer_wallet_menus: Callable[[], None] | None = None
         self.refresh_wallets: Callable[[], None] | None = None
+        self._status_refresh_job: str | None = None
+        self._online_var: tk.BooleanVar | None = None
+        self._currency_status_label: ttk.Label | None = None
+        self._price_status_label: ttk.Label | None = None
+        self._online_toggle_running = False
 
         self.pie_month_var: tk.StringVar | None = None
         self.pie_month_menu: ttk.OptionMenu | None = None
@@ -98,6 +104,9 @@ class FinancialApp(tk.Tk):
         self.expense_legend_frame: tk.Frame | None = None
         self.daily_bar_canvas: tk.Canvas | None = None
         self.monthly_bar_canvas: tk.Canvas | None = None
+
+        self._status_bar = self._build_status_bar()
+        self._status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
         notebook = ttk.Notebook(self)
         notebook.pack(fill=tk.BOTH, expand=True)
@@ -153,8 +162,14 @@ class FinancialApp(tk.Tk):
 
         self._refresh_list()
         self._refresh_charts()
+        self._apply_saved_online_mode()
 
     def destroy(self) -> None:
+        if self._status_refresh_job is not None:
+            try:
+                self.after_cancel(self._status_refresh_job)
+            except Exception:
+                pass
         self._executor.shutdown(wait=False, cancel_futures=True)
         close_method = getattr(self.repository, "close", None)
         if callable(close_method):
@@ -185,18 +200,21 @@ class FinancialApp(tk.Tk):
         on_success: Callable[[Any], None],
         on_error: Callable[[BaseException], None] | None = None,
         busy_message: str = "Processing...",
+        block_ui: bool = True,
     ) -> None:
-        if self._busy:
+        if block_ui and self._busy:
             messagebox.showinfo("Please wait", "Operation is already running.")
             return
-        self._set_busy(True, busy_message)
+        if block_ui:
+            self._set_busy(True, busy_message)
         future: Future[Any] = self._executor.submit(task)
 
         def _poll() -> None:
             if not future.done():
                 self.after(100, _poll)
                 return
-            self._set_busy(False)
+            if block_ui:
+                self._set_busy(False)
             error = future.exception()
             if error is not None:
                 if on_error is not None:
@@ -208,6 +226,111 @@ class FinancialApp(tk.Tk):
             on_success(future.result())
 
         self.after(100, _poll)
+
+    def _build_status_bar(self) -> ttk.Frame:
+        bar = ttk.Frame(self, relief="sunken")
+        self._online_var = tk.BooleanVar(value=False)
+        online_check = ttk.Checkbutton(
+            bar,
+            text="Online",
+            variable=self._online_var,
+            command=self._on_online_toggle,
+            style="StatusBar.TCheckbutton",
+        )
+        online_check.pack(side=tk.LEFT, padx=(8, 4), pady=2)
+        ttk.Separator(bar, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=4, pady=3)
+        self._currency_status_label = ttk.Label(bar, text="Offline rates", width=22)
+        self._currency_status_label.pack(side=tk.LEFT, padx=4, pady=2)
+        ttk.Separator(bar, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=4, pady=3)
+        self._price_status_label = ttk.Label(bar, text="", width=20)
+        self._price_status_label.pack(side=tk.LEFT, padx=4, pady=2)
+        ttk.Label(bar, text=f"v{__version__}", foreground="gray").pack(
+            side=tk.RIGHT, padx=8, pady=2
+        )
+        return bar
+
+    def _on_online_toggle(self) -> None:
+        """Called when the Online/Offline toggle is clicked."""
+        if self._online_var is None or self._currency_status_label is None:
+            return
+        if self._online_toggle_running:
+            return
+
+        enabled = self._online_var.get()
+        self._online_toggle_running = True
+        self._currency_status_label.config(text="Fetching rates..." if enabled else "Offline rates")
+
+        def task() -> None:
+            self.controller.set_online_mode(enabled)
+
+        def on_success(_result: Any) -> None:
+            self._online_toggle_running = False
+            self._refresh_status_bar()
+
+        def on_error(exc: BaseException) -> None:
+            self._online_toggle_running = False
+            logger.warning("Online mode toggle error: %s", exc)
+            self._refresh_status_bar()
+
+        self._run_background(
+            task,
+            on_success=on_success,
+            on_error=on_error,
+            busy_message="",
+            block_ui=False,
+        )
+
+    def _refresh_status_bar(self) -> None:
+        """Update status bar labels from controller state."""
+        if self._online_var is None or self._currency_status_label is None:
+            return
+        try:
+            status = self.controller.get_online_status()
+        except Exception:
+            return
+        self._online_var.set(self.controller.get_online_mode())
+        self._currency_status_label.config(text=status["currency"])
+        if self._price_status_label is not None and not self._price_status_label.cget("text"):
+            self._price_status_label.config(text="")
+
+    def _start_status_refresh_timer(self) -> None:
+        """Refresh status bar every 60 seconds to update timestamps."""
+        self._refresh_status_bar()
+        self._status_refresh_job = self.after(60_000, self._start_status_refresh_timer)
+
+    def _apply_saved_online_mode(self) -> None:
+        """Load and apply the saved online mode preference."""
+        if self._online_var is None or self._currency_status_label is None:
+            return
+        saved = self.controller.load_online_mode_preference()
+        if saved:
+            self._online_var.set(True)
+            self._currency_status_label.config(text="Fetching rates...")
+            self._online_toggle_running = True
+
+            def task() -> None:
+                self.controller.set_online_mode(True)
+
+            def on_success(_result: Any) -> None:
+                self._online_toggle_running = False
+                self._refresh_status_bar()
+
+            def on_error(exc: BaseException) -> None:
+                self._online_toggle_running = False
+                logger.warning("Saved online mode apply error: %s", exc)
+                self._refresh_status_bar()
+
+            self._run_background(
+                task,
+                on_success=on_success,
+                on_error=on_error,
+                busy_message="",
+                block_ui=False,
+            )
+        else:
+            self._online_var.set(False)
+            self._refresh_status_bar()
+        self._start_status_refresh_timer()
 
     def _import_policy_from_ui(self, mode_label: str) -> ImportPolicy:
         if mode_label == "Full Backup":

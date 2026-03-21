@@ -120,6 +120,38 @@ class FinancialController:
     def get_currency_rate(self, currency: str) -> float:
         return float(self._currency.get_rate(currency))
 
+    def set_online_mode(self, enabled: bool) -> None:
+        """
+        Switch online mode for all API-dependent services.
+        Persists the setting to schema_meta.
+        """
+        self._currency.set_online(enabled)
+        if isinstance(self._repository, SQLiteRecordRepository):
+            self._repository.set_schema_meta("online_mode", "1" if enabled else "0")
+
+    def get_online_mode(self) -> bool:
+        """Return current online mode state."""
+        return self._currency.is_online
+
+    def get_online_status(self) -> dict[str, str]:
+        """Return human-readable status strings for the status bar."""
+        mode = "Online" if self._currency.is_online else "Offline"
+        last = self._currency.last_fetched_at
+        if last is not None:
+            currency_status = f"Updated {last.strftime('%H:%M')}"
+        elif self._currency.is_online:
+            currency_status = "Fetching..."
+        else:
+            currency_status = "Offline rates"
+        return {"mode": mode, "currency": currency_status}
+
+    def load_online_mode_preference(self) -> bool:
+        """Load saved online mode preference from schema_meta."""
+        if not isinstance(self._repository, SQLiteRecordRepository):
+            return False
+        value = self._repository.get_schema_meta("online_mode")
+        return value == "1"
+
     def create_income(
         self,
         *,
