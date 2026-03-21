@@ -35,3 +35,20 @@ def test_schema_period_constraints_match_domain_contract() -> None:
         flags=re.IGNORECASE | re.DOTALL,
     )
     assert mandatory_period_check is not None
+
+
+def test_schema_contains_budgets_table_with_expected_columns() -> None:
+    schema = _schema_sql()
+
+    assert "CREATE TABLE IF NOT EXISTS budgets" in schema
+    assert "category TEXT NOT NULL" in schema
+    assert "start_date TEXT NOT NULL" in schema
+    assert "end_date TEXT NOT NULL" in schema
+    assert "limit_kzt REAL NOT NULL" in schema
+    assert "limit_kzt_minor INTEGER NOT NULL DEFAULT 0" in schema
+    assert "include_mandatory INTEGER NOT NULL DEFAULT 0" in schema
+    assert "CHECK(start_date <= end_date)" in schema
+    assert "CREATE INDEX IF NOT EXISTS idx_budgets_category ON budgets(category);" in schema
+    assert (
+        "CREATE INDEX IF NOT EXISTS idx_budgets_dates ON budgets(start_date, end_date);" in schema
+    )

@@ -26,6 +26,8 @@ from utils.money import quantize_money, to_money_float, to_rate_float
 from .services import CurrencyService
 
 if TYPE_CHECKING:
+    from domain.budget import Budget
+    from services.budget_service import BudgetService
     from services.metrics_service import MetricsService
     from services.timeline_service import TimelineService
 
@@ -841,3 +843,57 @@ class RunMetrics:
         end_date: str | None = None,
     ) -> list:
         return self._service.get_monthly_summary(start_date=start_date, end_date=end_date)
+
+
+class CreateBudget:
+    def __init__(self, budget_service: "BudgetService") -> None:
+        self._service = budget_service
+
+    def execute(
+        self,
+        category: str,
+        start_date: str,
+        end_date: str,
+        limit_kzt: float,
+        *,
+        include_mandatory: bool = False,
+    ) -> "Budget":
+        return self._service.create_budget(
+            category,
+            start_date,
+            end_date,
+            limit_kzt,
+            include_mandatory=include_mandatory,
+        )
+
+
+class DeleteBudget:
+    def __init__(self, budget_service: "BudgetService") -> None:
+        self._service = budget_service
+
+    def execute(self, budget_id: int) -> None:
+        self._service.delete_budget(budget_id)
+
+
+class UpdateBudgetLimit:
+    def __init__(self, budget_service: "BudgetService") -> None:
+        self._service = budget_service
+
+    def execute(self, budget_id: int, new_limit_kzt: float) -> "Budget":
+        return self._service.update_budget_limit(budget_id, new_limit_kzt)
+
+
+class GetBudgets:
+    def __init__(self, budget_service: "BudgetService") -> None:
+        self._service = budget_service
+
+    def execute(self) -> list["Budget"]:
+        return self._service.get_budgets()
+
+
+class GetBudgetResults:
+    def __init__(self, budget_service: "BudgetService") -> None:
+        self._service = budget_service
+
+    def execute(self) -> list:
+        return self._service.get_all_results()

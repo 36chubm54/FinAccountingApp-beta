@@ -7,6 +7,38 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.7.0] - 2026-03-21
+
+### Added
+
+- Budget System with persistent `budgets` table, overlap-safe date ranges, `limit_kzt_minor`, and `include_mandatory`
+- `domain/budget.py` with `Budget`, `BudgetResult`, `BudgetStatus`, `PaceStatus`, and pace computation helpers
+- `services/budget_service.py` for budget CRUD, spend aggregation, overlap checks, and category suggestions
+- New Budget tab between Analytics and Settings with creation form, Treeview summary, and pace-aware progress canvas
+- Budget use cases and controller delegation methods for create/list/delete/update/result flows
+- Distinct income / expense / mandatory-expense category helpers in `services/metrics_service.py`
+- `tests/test_budget_service.py` plus schema contract coverage for the new table/indexes
+
+### Changed
+
+- `gui/tabs/operations_tab.py` category inputs now use editable `ttk.Combobox` widgets with suggestions that switch by operation type
+- Inline category editing in `Operations` now uses category-specific `Combobox` suggestions for income / expense / mandatory records
+- `gui/tabs/settings_tab.py` restores the `Refresh` button in the mandatory expenses action bar
+- `Add to Records` now validates empty selection early and shows a clearer error dialog instead of proceeding without a selected template
+- SQLite schema initialization now creates the `budgets` table automatically for existing and new databases
+
+### Tests
+
+- 19 scenarios in `tests/test_budget_service.py` covering CRUD, overlap detection, pace states, include_mandatory flag, transfer exclusion, category queries, and precision with minor units.
+
+### Docs
+
+- Updated `README.md` and `README_EN.md` to document the budget system and its features
+
+No breaking changes.
+
+---
+
 ## [1.6.0] - 2026-03-19
 
 ### Added

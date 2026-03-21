@@ -179,9 +179,9 @@ def build_operations_tab(
     currency_entry.grid(row=3, column=1, sticky="ew", padx=6, pady=4)
 
     ttk.Label(form_frame, text="Category:").grid(row=4, column=0, sticky="w", padx=6, pady=4)
-    category_entry = ttk.Entry(form_frame)
-    category_entry.insert(0, "General")
-    category_entry.grid(row=4, column=1, sticky="ew", padx=6, pady=4)
+    category_combo = ttk.Combobox(form_frame, state="normal")
+    category_combo.insert(0, "General")
+    category_combo.grid(row=4, column=1, sticky="ew", padx=6, pady=4)
 
     ttk.Label(form_frame, text="Description (optional):").grid(
         row=5, column=0, sticky="w", padx=6, pady=4
@@ -194,6 +194,19 @@ def build_operations_tab(
     operation_wallet_menu = ttk.OptionMenu(form_frame, operation_wallet_var, "")
     operation_wallet_menu.grid(row=6, column=1, sticky="ew", padx=6, pady=4)
     operation_wallet_map: dict[str, int] = {}
+
+    def _refresh_category_combo() -> None:
+        try:
+            if type_var.get() == "Income":
+                category_combo["values"] = context.controller.get_income_categories()
+            else:
+                category_combo["values"] = context.controller.get_expense_categories()
+        except Exception:
+            pass
+        category_combo.set("General")
+
+    def _on_type_change(*_args: object) -> None:
+        _refresh_category_combo()
 
     def refresh_operation_wallet_menu() -> None:
         nonlocal operation_wallet_map
@@ -280,7 +293,7 @@ def build_operations_tab(
             return
 
         currency = (currency_entry.get() or "KZT").strip()
-        category = (category_entry.get() or "General").strip()
+        category = (category_combo.get() or "General").strip()
         description = description_entry.get().strip()
         wallet_id = operation_wallet_map.get(operation_wallet_var.get())
         if wallet_id is None:
@@ -311,8 +324,9 @@ def build_operations_tab(
 
             date_entry.delete(0, tk.END)
             amount_entry.delete(0, tk.END)
-            category_entry.delete(0, tk.END)
+            category_combo.delete(0, tk.END)
             description_entry.delete(0, tk.END)
+            _refresh_category_combo()
             context._refresh_list()
             context._refresh_charts()
             context._refresh_wallets()
@@ -398,8 +412,8 @@ def build_operations_tab(
         wallet_edit_menu = ttk.OptionMenu(edit_panel, wallet_edit_var, "")
         wallet_edit_menu.grid(row=2, column=1, sticky="ew", padx=4)
         ttk.Label(edit_panel, text="Category:").grid(row=3, column=0, sticky="w", padx=4)
-        category_edit_entry = ttk.Entry(edit_panel)
-        category_edit_entry.grid(row=3, column=1, sticky="ew", padx=4)
+        category_edit_combo = ttk.Combobox(edit_panel, state="normal")
+        category_edit_combo.grid(row=3, column=1, sticky="ew", padx=4)
         ttk.Label(edit_panel, text="Description (optional):").grid(
             row=4, column=0, sticky="w", padx=4
         )
@@ -413,7 +427,18 @@ def build_operations_tab(
             record.date.isoformat() if hasattr(record.date, "isoformat") else str(record.date)
         )
         date_edit_entry.insert(0, date_value)
-        category_edit_entry.insert(0, str(record.category or ""))
+        try:
+            if record.type == "income":
+                category_edit_combo["values"] = context.controller.get_income_categories()
+            elif record.type == "expense":
+                category_edit_combo["values"] = context.controller.get_expense_categories()
+            else:
+                category_edit_combo["values"] = (
+                    context.controller.get_mandatory_expense_categories()
+                )
+        except Exception:
+            pass
+        category_edit_combo.insert(0, str(record.category or ""))
         description_edit_entry.insert(0, str(record.description or ""))
 
         wallet_edit_map: dict[str, int] = {
@@ -444,7 +469,7 @@ def build_operations_tab(
             if not new_date:
                 messagebox.showerror("Error", "Date is required.")
                 return
-            new_category = category_edit_entry.get().strip()
+            new_category = category_edit_combo.get().strip()
             if not new_category:
                 messagebox.showerror("Error", "Category is required.")
                 return
@@ -756,6 +781,9 @@ def build_operations_tab(
     )
 
     context._refresh_list()
+
+    type_var.trace_add("write", _on_type_change)
+    parent.after(150, _refresh_category_combo)
 
     return OperationsTabBindings(
         records_tree=records_tree,

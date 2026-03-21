@@ -156,6 +156,54 @@ class MetricsService:
             for row in rows
         ]
 
+    def get_distinct_income_categories(self) -> list[str]:
+        """
+        Returns a list of distinct income categories (excluding transfers).
+        """
+        rows = self._repo.query_all(
+            """
+            SELECT DISTINCT category
+            FROM records
+            WHERE type = 'income'
+              AND transfer_id IS NULL
+              AND length(trim(category)) > 0
+            ORDER BY category COLLATE NOCASE, category
+            """
+        )
+        return [str(row[0]) for row in rows]
+
+    def get_distinct_expense_categories(self) -> list[str]:
+        """
+        Returns a list of distinct expense categories (excluding transfers).
+        """
+        rows = self._repo.query_all(
+            """
+            SELECT DISTINCT category
+            FROM records
+            WHERE type = 'expense'
+              AND transfer_id IS NULL
+              AND length(trim(category)) > 0
+            ORDER BY category COLLATE NOCASE, category
+            """
+        )
+        return [str(row[0]) for row in rows]
+
+    def get_distinct_mandatory_expense_categories(self) -> list[str]:
+        """
+        Returns a list of distinct mandatory expense categories (excluding transfers).
+        """
+        rows = self._repo.query_all(
+            """
+            SELECT DISTINCT category
+            FROM records
+            WHERE type = 'mandatory_expense'
+              AND transfer_id IS NULL
+              AND length(trim(category)) > 0
+            ORDER BY category COLLATE NOCASE, category
+            """
+        )
+        return [str(row[0]) for row in rows]
+
     def get_top_expense_categories(
         self,
         start_date: str,

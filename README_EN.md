@@ -68,6 +68,7 @@ Tabs and actions:
 - `Operations` — management of records and transfers (adding, editing, deleting, importing/exporting).
 - `Reports` — report generation, export.
 - `Analytics` — financial analytics for an arbitrary period (dashboard, categories, monthly report).
+- `Budget` — category budgets with arbitrary date ranges, pace tracking, and live progress.
 - `Settings` — management of mandatory expenses and wallets.
 
 Infographics:
@@ -91,6 +92,18 @@ The period filter uses `YYYY-MM-DD` in the `From` / `To` fields. Transfers are e
 
 > **Note:** After launching the application, mandatory payments are automatically applied with a detailed GUI message displayed.
 
+### Budget tab
+
+Planning and tracking category budgets across arbitrary date ranges.
+
+- `New Budget` form: `Category`, `From`, `To`, `Limit (KZT)`, and `Include mandatory expenses`.
+- Budget Treeview columns: `Category`, `Period`, `Limit`, `Spent`, `Remaining`, `Usage %`, `Pace`, `Status`.
+- Pace states: `on_track`, `overpace`, `overspent`.
+- Period states: `future`, `active`, `expired`.
+- The progress canvas is displayed below the table:
+  colored bar = share of budget spent, blue vertical = share of time elapsed.
+- Multiple budgets per category are allowed as long as their date ranges do not overlap.
+
 ### Adding income/expense
 
 1. Open the `Operations` tab.
@@ -99,6 +112,7 @@ The period filter uses `YYYY-MM-DD` in the `From` / `To` fields. Transfers are e
 4. Enter the amount.
 5. Specify the currency (default is `KZT`).
 6. Specify a category (default is `General`).
+   The category field is an editable `Combobox`: for `Income` it suggests known income categories, for `Expense` it suggests expense categories; manual input is still allowed.
 7. Optionally fill in `Description`.
 8. Click `Save`.
 
@@ -311,7 +325,8 @@ Import architecture:
 
 Formats:
 
-- `JSON`, `CSV`, `XLSX`.
+- Through the `Operations` tab UI: `CSV`, `XLSX`.
+- At the controller/service level, `JSON` is also supported.
 - Import pipeline: `parser -> dry-run validation -> user confirmation -> SQLite transaction`.
 - For `CSV/XLSX`, the real import replaces runtime data with valid rows from the file; invalid rows remain only in the import report.
 - For readonly `JSON` snapshots, `force=True` is required; readonly/checksum validation happens before the commit stage.
@@ -418,7 +433,7 @@ A dedicated `storage/` layer is used for data access:
 - `storage/base.py` — `Storage` contract (data-access operations only).
 - `storage/json_storage.py` — JSON adapter for import/export/backup only.
 - `storage/sqlite_storage.py` — `SQLiteStorage` based on standard `sqlite3`.
-- `db/schema.sql` — SQL schema for `wallets`, `records`, `transfers`, `mandatory_expenses`.
+- `db/schema.sql` — SQL schema for `wallets`, `records`, `transfers`, `mandatory_expenses`, `budgets`.
 
 ### JSON -> SQLite migration
 
@@ -489,7 +504,7 @@ SQLite behavior for money fields:
 
 The project follows a layered architecture:
 
-- `domain/` — business models and rules (records, reports, data audit, date/period validation, currencies, wallets, transfers).
+- `domain/` — business models and rules (records, budgets, reports, data audit, date/period validation, currencies, wallets, transfers).
 - `app/` — use cases, including audit execution, and the currency service adapter.
 - `infrastructure/` — JSON and SQLite `RecordRepository` implementations.
 - `storage/` — storage abstraction and JSON/SQLite adapters.
@@ -497,7 +512,7 @@ The project follows a layered architecture:
 - `bootstrap.py` — SQLite initialization and startup validation.
 - `backup.py` — JSON backup and SQLite -> JSON export.
 - `config.py` — runtime SQLite and JSON import/export paths.
-- `services/` — service layer for import orchestration, read-only SQLite audit, and balance analytics.
+- `services/` — service layer for import orchestration, read-only SQLite audit, budgets, and analytics.
 - `utils/` — import/export and preparation of data for graphs.
 - `gui/` — GUI layer (Tkinter).
 
@@ -559,6 +574,14 @@ Below are the key classes and functions synchronized with the actual code.
 - `IncomeRecord` — income.
 - `ExpenseRecord` — expense.
 - `MandatoryExpenseRecord` — mandatory expense with `description` and `period`.
+
+`domain/budget.py`
+
+- `Budget` — immutable category budget model with date range and spending limit.
+- `BudgetResult` — live tracking result: spent, remaining, usage/time percentage, pace/status.
+- `BudgetStatus` — `future` / `active` / `expired`.
+- `PaceStatus` — `on_track` / `overpace` / `overspent`.
+- `compute_pace_status(...)` — derives the pace state from spent/limit/time inputs.
 
 `domain/reports.py`
 
@@ -626,6 +649,11 @@ Below are the key classes and functions synchronized with the actual code.
 - `DeleteAllMandatoryExpenses.execute()`.
 - `AddMandatoryExpenseToReport.execute(index, date)`.
 - `RunAudit.execute()` — runs the read-only data audit and returns an `AuditReport`.
+- `CreateBudget.execute(category, start_date, end_date, limit_kzt, include_mandatory=False)` — creates a budget.
+- `DeleteBudget.execute(budget_id)` — deletes a budget.
+- `UpdateBudgetLimit.execute(budget_id, new_limit_kzt)` — updates a budget limit.
+- `GetBudgets.execute()` — returns the list of budgets.
+- `GetBudgetResults.execute()` — returns live budget tracking results.
 
 `app/use_case_support.py`
 
@@ -657,6 +685,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `SQLiteRecordRepository(db_path="finance.db")` — SQLite `RecordRepository` implementation used by service layer.
 - `db_path` — path to the active SQLite database, exposed for audit reporting.
 - `query_all(...)` / `query_one(...)` — public read-only query APIs used by bootstrap and audit flows.
+- `execute(...)` / `commit()` — low-level operations used by budget and audit services.
 - Persists money in dual form: `REAL` + `*_minor`; FX rates in `REAL` + `rate_at_operation_text`.
 
 `storage/base.py`
@@ -677,8 +706,9 @@ Below are the key classes and functions synchronized with the actual code.
 
 `db/schema.sql`
 
-- Database schema with tables `wallets`, `records`, `transfers`, `mandatory_expenses`, constraints, and indexes.
+- Database schema with tables `wallets`, `records`, `transfers`, `mandatory_expenses`, `budgets`, constraints, and indexes.
 - Monetary columns have exact integer `*_minor` companions; FX rates have `rate_at_operation_text`.
+- Budgets include `limit_kzt_minor`, `include_mandatory`, and indexes for category/date lookups.
 
 ### GUI
 
@@ -696,7 +726,12 @@ Below are the key classes and functions synchronized with the actual code.
 - `OperationsTabContext` — the context of the operations tab.
 - `OperationsTabBindings` — class for binding events to interface elements of the `Operations` tab.
 - `show_import_preview_dialog(parent, filepath, policy_label, preview, force=False)` — modal dry-run preview dialog for imports.
-- `build_operations_tab(parent, context, import_formats)` — builds the `Operations` tab. The tab supports adding/deleting records, editing currency values, creating transfers, and the two-step import flow `dry-run -> preview -> commit`.
+- `build_operations_tab(parent, context, import_formats)` — builds the `Operations` tab. The tab supports adding/deleting records, editing currency values, creating transfers, category `Combobox` suggestions, and the two-step import flow `dry-run -> preview -> commit`.
+
+`gui/tabs/budget_tab.py`
+
+- `BudgetTabBindings` — widget bindings for the `Budget` tab.
+- `build_budget_tab(parent, context)` — builds the `Budget` tab with creation form, budget table, and progress canvas.
 
 `gui/tabs/reports_tab.py`
 
@@ -733,6 +768,9 @@ Below are the key classes and functions synchronized with the actual code.
 `gui/controllers.py`
 
 - `FinancialController` — class for managing the business logic of the application.
+- `get_income_categories()` — returns known income categories for editable `Combobox` widgets.
+- `get_expense_categories()` — returns known expense categories for editable `Combobox` widgets.
+- `get_mandatory_expense_categories()` — returns known mandatory expense categories for editable `Combobox` widgets.
 - `import_records(fmt, filepath, policy, force=False, dry_run=False)` — single entry point for dry-run and real record imports.
 - `import_mandatory(fmt, filepath)` — imports mandatory templates and returns `ImportResult`.
 - `run_audit()` — runs the Data Audit Engine through a use case and returns `AuditReport`.
@@ -745,6 +783,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `get_income_by_category(start_date, end_date, limit=None)` — income by category (Metrics Engine, SQLite-only).
 - `get_top_expense_categories(start_date, end_date, top_n=5)` — top expense categories (Metrics Engine, SQLite-only).
 - `get_monthly_summary(start_date=None, end_date=None)` — monthly aggregates (Metrics Engine, SQLite-only).
+- `create_budget(...)`, `get_budgets()`, `get_budget_results()`, `delete_budget(...)`, `update_budget_limit(...)` — Budget System API surface.
 
 `gui/exporters.py`
 
@@ -785,12 +824,12 @@ Below are the key classes and functions synchronized with the actual code.
 - `run()` — scans SQLite data and executes 10 integrity/consistency checks.
 - Each check returns `AuditFinding` entries and emits one `OK` finding when no violations are found.
 
-`services/balance_service.py`
-
 `services/report_service.py`
 
 - DTOs and helpers for the reports UI: `ReportFilters`, `ReportSummary`, `ReportsResult`,
   `build_operations_rows(report)`, `build_monthly_rows(report)`, `extract_categories(rows)`.
+
+`services/balance_service.py`
 
 - `WalletBalance(wallet_id, name, currency, balance)` — immutable wallet balance snapshot.
 - `CashflowResult(income, expenses, cashflow)` — immutable period aggregate.
@@ -824,8 +863,21 @@ Below are the key classes and functions synchronized with the actual code.
 - `get_burn_rate(start_date, end_date)` — average daily expense (KZT) for date range.
 - `get_spending_by_category(start_date, end_date, limit=None)` — expenses by category, sorted descending.
 - `get_income_by_category(start_date, end_date, limit=None)` — income by category, sorted descending.
+- `get_distinct_income_categories()` — unique income categories.
+- `get_distinct_expense_categories()` — unique expense categories.
+- `get_distinct_mandatory_expense_categories()` — unique mandatory expense categories.
 - `get_top_expense_categories(start_date, end_date, top_n=5)` — wrapper over `get_spending_by_category`.
 - `get_monthly_summary(start_date=None, end_date=None)` — per-month aggregates (income/expenses/cashflow/savings_rate).
+
+`services/budget_service.py`
+
+- `BudgetService(repository)` — budget management and live spend-tracking service.
+- `create_budget(category, start_date, end_date, limit_kzt, include_mandatory)` — creating a new budget.
+- `get_budgets()` — list of all budgets.
+- `delete_budget(budget_id)` — deleting a budget.
+- `update_budget_limit(budget_id, new_limit_kzt)` — updating the budget limit.
+- `get_budget_result(budget, today)` — budget results for the specified date.
+- `get_all_results(today)` — all results for budgets for the specified date.
 
 `services/sqlite_money_sql.py`
 
@@ -927,6 +979,7 @@ project/
 ├── domain/                     # Domain layer
 │   ├── __init__.py
 │   ├── audit.py                # Audit models and logic
+│   ├── budget.py               # Budgets, pace/status, and live tracking DTOs
 │   ├── records.py              # Records
 │   ├── reports.py              # Reports
 │   ├── currency.py             # Domain CurrencyService
@@ -950,10 +1003,11 @@ project/
 ├── db/                         # SQL schema for SQLite
 │   └── schema.sql
 │
-├── services/                   # Import service layer
+├── services/                   # Service layer
 │   ├── __init__.py
 │   ├── audit_service.py        # Audit service
 │   ├── balance_service.py      # Read-only balance and cashflow service
+│   ├── budget_service.py       # Budget CRUD and live spend tracking
 │   ├── import_parser.py        # CSV/XLSX/JSON parser -> DTO
 │   ├── import_service.py       # Import orchestration via FinanceService
 │   ├── metrics_service.py      # Read-only financial metrics service
@@ -979,6 +1033,7 @@ project/
 │   │   ├── reports_tab.py      # Tab with reports
 │   │   ├── reports_controller.py # Reports tab controller (UI adapter)
 │   │   ├── analytics_tab.py    # Analytics tab (dashboard, categories, report)
+│   │   ├── budget_tab.py       # Budget tab and progress canvas
 │   │   └── settings_tab.py     # Tab with wallets and mandatory expenses
 │   │
 │   ├── __init__.py
@@ -1005,6 +1060,7 @@ project/
     ├── test_import_balance_contract.py
     ├── test_bootstrap_backup.py
     ├── test_bootstrap_migration_verification.py
+    ├── test_budget_service.py
     ├── test_migrate_json_to_sqlite.py
     ├── test_import_core.py
     ├── test_import_dry_run.py

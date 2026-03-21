@@ -451,9 +451,7 @@ def build_settings_tab(
 
                         parse_ymd(date_val)
                     except ValueError:
-                        messagebox.showerror(
-                            "Ошибка", "Неверный формат даты. Используйте YYYY-MM-DD."
-                        )
+                        messagebox.showerror("Error", "Invalid date format. Use YYYY-MM-DD.")
                         return
                 wallet_id = mandatory_wallet_map.get(mandatory_wallet_var.get())
                 if wallet_id is None:
@@ -620,6 +618,11 @@ def build_settings_tab(
         ttk.Button(edit_panel, text="Cancel", command=cancel_edit).grid(row=4, column=1, padx=6)
 
     def add_to_records_inline() -> None:
+        selection = mand_tree.selection()
+        if not selection:
+            selection = mand_tree.selection()
+            messagebox.showerror("Error", "Select a required expense to add to records.")
+            return
         close_inline_panels()
 
         add_to_report_panel = tk.Frame(mand_frame)
@@ -669,22 +672,16 @@ def build_settings_tab(
                     messagebox.showerror("Error", "Wallet is required.")
                     return
 
-                if context.controller.add_mandatory_to_report(index, date_value, wallet_id):
-                    messagebox.showinfo(
-                        "Success", f"Mandatory expense added to report for {date_value}."
-                    )
-                    add_to_report_panel.destroy()
-                    current_panel["report"] = None
-                    refresh_mandatory()
-                    refresh_wallets()
-                    context._refresh_list()
-                    context._refresh_charts()
-                else:
-                    messagebox.showerror(
-                        "Error",
-                        "Please select a mandatory expense to add to records."
-                        "\nThen click 'Add to Records' and try again.",
-                    )
+                context.controller.add_mandatory_to_report(index, date_value, wallet_id)
+                messagebox.showinfo(
+                    "Success", f"Mandatory expense added to report for {date_value}."
+                )
+                add_to_report_panel.destroy()
+                current_panel["report"] = None
+                refresh_mandatory()
+                refresh_wallets()
+                context._refresh_list()
+                context._refresh_charts()
             except ValueError as error:
                 messagebox.showerror("Error", f"Invalid date: {str(error)}. Use YYYY-MM-DD.")
 
@@ -739,7 +736,8 @@ def build_settings_tab(
     ttk.Button(actions, text="Delete All", command=delete_all_mandatory).grid(
         row=0, column=4, padx=6
     )
-    ttk.OptionMenu(actions, format_var, "CSV", "CSV", "XLSX").grid(row=0, column=5, padx=6)
+    ttk.Button(actions, text="Refresh", command=refresh_mandatory).grid(row=0, column=5, padx=6)
+    ttk.OptionMenu(actions, format_var, "CSV", "CSV", "XLSX").grid(row=0, column=6, padx=6)
 
     def import_mand() -> None:
         fmt = format_var.get()

@@ -93,6 +93,13 @@ def build_operations_rows(report: Report) -> list[ReportOperationRow]:
     return rows
 
 
+def build_monthly_rows(
+    report: Report, *, year: int | None = None, up_to_month: int | None = None
+) -> list[MonthlySummaryRow]:
+    _, rows = report.monthly_income_expense_rows(year=year, up_to_month=up_to_month)
+    return [MonthlySummaryRow(month=m, income=float(i), expense=float(e)) for m, i, e in rows]
+
+
 def extract_categories(rows: Iterable[ReportOperationRow]) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
@@ -104,13 +111,6 @@ def extract_categories(rows: Iterable[ReportOperationRow]) -> list[str]:
         out.append(key)
     out.sort(key=lambda s: s.casefold())
     return out
-
-
-def build_monthly_rows(
-    report: Report, *, year: int | None = None, up_to_month: int | None = None
-) -> list[MonthlySummaryRow]:
-    _, rows = report.monthly_income_expense_rows(year=year, up_to_month=up_to_month)
-    return [MonthlySummaryRow(month=m, income=float(i), expense=float(e)) for m, i, e in rows]
 
 
 #

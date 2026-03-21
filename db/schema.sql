@@ -72,6 +72,17 @@ CREATE TABLE IF NOT EXISTS mandatory_expenses (
     FOREIGN KEY(wallet_id) REFERENCES wallets(id) ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
+CREATE TABLE IF NOT EXISTS budgets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category TEXT NOT NULL CHECK(length(trim(category)) > 0),
+    start_date TEXT NOT NULL CHECK(length(start_date) = 10),
+    end_date TEXT NOT NULL CHECK(length(end_date) = 10),
+    limit_kzt REAL NOT NULL CHECK(limit_kzt > 0),
+    limit_kzt_minor INTEGER NOT NULL DEFAULT 0,
+    include_mandatory INTEGER NOT NULL DEFAULT 0 CHECK(include_mandatory IN (0, 1)),
+    CHECK(start_date <= end_date)
+);
+
 -- Migration for existing databases:
 -- ALTER TABLE wallets ADD COLUMN initial_balance_minor INTEGER DEFAULT NULL;
 -- ALTER TABLE transfers ADD COLUMN amount_original_minor INTEGER DEFAULT NULL;
@@ -93,3 +104,5 @@ CREATE INDEX IF NOT EXISTS idx_transfers_date ON transfers(date);
 CREATE INDEX IF NOT EXISTS idx_transfers_wallet_from ON transfers(from_wallet_id);
 CREATE INDEX IF NOT EXISTS idx_transfers_wallet_to ON transfers(to_wallet_id);
 CREATE INDEX IF NOT EXISTS idx_mandatory_expenses_wallet_id ON mandatory_expenses(wallet_id);
+CREATE INDEX IF NOT EXISTS idx_budgets_category ON budgets(category);
+CREATE INDEX IF NOT EXISTS idx_budgets_dates ON budgets(start_date, end_date);

@@ -10,6 +10,7 @@ from app.use_cases import (
     ApplyMandatoryAutoPayments,
     CalculateNetWorth,
     CalculateWalletBalance,
+    CreateBudget,
     CreateExpense,
     CreateIncome,
     CreateMandatoryExpense,
@@ -18,15 +19,19 @@ from app.use_cases import (
     CreateWallet,
     DeleteAllMandatoryExpenses,
     DeleteAllRecords,
+    DeleteBudget,
     DeleteMandatoryExpense,
     DeleteRecord,
     DeleteTransfer,
     GenerateReport,
     GetActiveWallets,
+    GetBudgetResults,
+    GetBudgets,
     GetMandatoryExpenses,
     GetWallets,
     RunAudit,
     SoftDeleteWallet,
+    UpdateBudgetLimit,
 )
 from domain.audit import AuditReport
 from domain.import_policy import ImportPolicy
@@ -45,6 +50,7 @@ from infrastructure.repositories import RecordRepository
 from infrastructure.sqlite_repository import SQLiteRecordRepository
 from services.audit_service import AuditService
 from services.balance_service import BalanceService, CashflowResult, WalletBalance
+from services.budget_service import BudgetService
 from services.import_service import ImportService
 from services.metrics_service import MetricsService
 from services.timeline_service import TimelineService
@@ -230,6 +236,15 @@ class FinancialController:
 
     def update_mandatory_expense_period(self, expense_id: int, new_period: str) -> None:
         self._record_service.update_mandatory_period(expense_id, new_period)
+
+    def get_income_categories(self) -> list[str]:
+        return self._metrics_service().get_distinct_income_categories()
+
+    def get_expense_categories(self) -> list[str]:
+        return self._metrics_service().get_distinct_expense_categories()
+
+    def get_mandatory_expense_categories(self) -> list[str]:
+        return self._metrics_service().get_distinct_mandatory_expense_categories()
 
     def create_wallet(
         self,
@@ -440,6 +455,40 @@ class FinancialController:
             raise TypeError("Audit is supported only for SQLite repository")
         use_case = RunAudit(AuditService(self._repository))
         return use_case.execute()
+
+    def _budget_service(self) -> BudgetService:
+        if not isinstance(self._repository, SQLiteRecordRepository):
+            raise TypeError("Budget System is supported only for SQLite repository")
+        return BudgetService(self._repository)
+
+    def create_budget(
+        self,
+        *,
+        category: str,
+        start_date: str,
+        end_date: str,
+        limit_kzt: float,
+        include_mandatory: bool = False,
+    ):
+        return CreateBudget(self._budget_service()).execute(
+            category,
+            start_date,
+            end_date,
+            limit_kzt,
+            include_mandatory=include_mandatory,
+        )
+
+    def get_budgets(self) -> list:
+        return GetBudgets(self._budget_service()).execute()
+
+    def get_budget_results(self) -> list:
+        return GetBudgetResults(self._budget_service()).execute()
+
+    def delete_budget(self, budget_id: int) -> None:
+        DeleteBudget(self._budget_service()).execute(budget_id)
+
+    def update_budget_limit(self, budget_id: int, new_limit_kzt: float):
+        return UpdateBudgetLimit(self._budget_service()).execute(budget_id, new_limit_kzt)
 
     def _balance_service(self) -> BalanceService:
         if not isinstance(self._repository, SQLiteRecordRepository):
