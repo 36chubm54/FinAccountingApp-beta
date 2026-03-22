@@ -283,9 +283,14 @@ def build_settings_tab(
     ttk.Button(wallet_actions, text="Delete wallet", command=delete_wallet).grid(
         row=0,
         column=0,
-        columnspan=2,
         sticky="ew",
-        pady=(6, 0),
+        padx=(0, 4),
+    )
+    ttk.Button(wallet_actions, text="Refresh", command=refresh_wallets).grid(
+        row=0,
+        column=1,
+        sticky="ew",
+        padx=(4, 0),
     )
 
     refresh_wallets()

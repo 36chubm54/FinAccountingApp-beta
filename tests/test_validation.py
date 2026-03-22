@@ -3,6 +3,7 @@ from datetime import date, timedelta
 import pytest
 
 from domain.validation import (
+    ensure_not_before_unix_epoch,
     ensure_not_future,
     ensure_valid_period,
     parse_report_period_end,
@@ -37,6 +38,16 @@ def test_ensure_not_future_raises():
     future_date = date.today() + timedelta(days=1)
     with pytest.raises(ValueError):
         ensure_not_future(future_date)
+
+
+def test_parse_ymd_rejects_pre_unix_epoch_date():
+    with pytest.raises(ValueError, match="1970-01-01"):
+        parse_ymd("1969-12-31")
+
+
+def test_ensure_not_before_unix_epoch_raises():
+    with pytest.raises(ValueError, match="1970-01-01"):
+        ensure_not_before_unix_epoch(date(1960, 1, 1))
 
 
 @pytest.mark.parametrize("period", ["daily", "weekly", "monthly", "yearly"])

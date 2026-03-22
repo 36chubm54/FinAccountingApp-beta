@@ -7,6 +7,27 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.7.2] - 2026-03-22
+
+### Added
+
+- Expanded support for date validation in `validation.py` (dates are now rejected if they are earlier than UNIX time)
+- After deleting an entry, wallets are updated
+
+### Changed
+
+- `gui/tabs/settings_tab.py` restores the `Refresh` button in the wallet frame
+
+### Tests
+
+- 2 scenarios in `tests/test_validation.py` covering date validation before UNIX time
+
+### Docs
+
+- Updated `README.md` and `README_EN.md` to describe the new date validation rules
+
+---
+
 ## [1.7.1] - 2026-03-21
 
 ### Added

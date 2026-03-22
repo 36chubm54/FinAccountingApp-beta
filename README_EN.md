@@ -124,7 +124,7 @@ The amount is converted into the base currency `KZT` at the current rates of the
 
 1. Open the `Operations` tab.
 2. In the `Transfer` block, select `From wallet` and `To wallet`.
-3. Enter the date in the format `YYYY-MM-DD` (the date cannot be in the future).
+3. Enter the date in the format `YYYY-MM-DD` (the date cannot be in the future and cannot be earlier than UNIX time).
 4. Enter the amount.
 5. Specify the currency (default is `KZT`).
 6. Optionally enter `Commission` and its currency.
@@ -151,7 +151,7 @@ The amount is converted into the base currency `KZT` at the current rates of the
 4. Change `Date`, `Wallet`, `Amount KZT`, `Category`, and optionally `Description`.
 5. Click `Save`.
 
-The update is applied through the immutable domain model: a new record instance is created, `rate_at_operation` is recalculated automatically, and `description` remains optional. The date is validated (`YYYY-MM-DD`, not in the future) and the wallet must be active. Transfer-linked records and records with category `"Transfer"` cannot be edited.
+The update is applied through the immutable domain model: a new record instance is created, `rate_at_operation` is recalculated automatically, and `description` remains optional. The date is validated (`YYYY-MM-DD`, not in the future and not earlier than UNIX time) and the wallet must be active. Transfer-linked records and records with category `"Transfer"` cannot be edited.
 
 ### Report generation
 
@@ -615,6 +615,7 @@ Below are the key classes and functions synchronized with the actual code.
 `domain/validation.py`
 
 - `parse_ymd(value)` — parsing and validating the date `YYYY-MM-DD`.
+- `ensure_not_before_unix(date)` — prohibition of dates earlier than UNIX time.
 - `ensure_not_future(date)` — prohibition of future dates.
 - `ensure_valid_period(period)` — period validation.
 - `parse_report_period_start(value)` — validates report period filter (`YYYY`/`YYYY-MM`/`YYYY-MM-DD`) and returns period start date while rejecting future dates.

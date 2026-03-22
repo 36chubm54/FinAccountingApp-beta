@@ -360,6 +360,7 @@ def build_operations_tab(
                 return
             context._refresh_list()
             context._refresh_charts()
+            context._refresh_wallets()
         except Exception as error:
             messagebox.showerror("Error", f"Failed to delete: {str(error)}")
 

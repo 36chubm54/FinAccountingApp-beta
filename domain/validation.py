@@ -3,23 +3,32 @@ import re
 from datetime import date
 
 VALID_PERIODS: tuple[str, ...] = ("daily", "weekly", "monthly", "yearly")
+UNIX_EPOCH_DATE = date(1970, 1, 1)
 
 
 def parse_ymd(value: str | date) -> date:
     if isinstance(value, date):
-        return value
-    if not value:
-        raise ValueError("Date value is empty")
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
-        raise ValueError("Invalid date format")
-    parts = value.split("-")
-    year, month, day = map(int, parts)
-    if not (1 <= month <= 12):
-        raise ValueError("Invalid month")
-    last_day = calendar.monthrange(year, month)[1]
-    if not (1 <= day <= last_day):
-        raise ValueError("Invalid day")
-    return date(year, month, day)
+        parsed = value
+    else:
+        if not value:
+            raise ValueError("Date value is empty")
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            raise ValueError("Invalid date format")
+        parts = value.split("-")
+        year, month, day = map(int, parts)
+        if not (1 <= month <= 12):
+            raise ValueError("Invalid month")
+        last_day = calendar.monthrange(year, month)[1]
+        if not (1 <= day <= last_day):
+            raise ValueError("Invalid day")
+        parsed = date(year, month, day)
+    ensure_not_before_unix_epoch(parsed)
+    return parsed
+
+
+def ensure_not_before_unix_epoch(value: date) -> None:
+    if value < UNIX_EPOCH_DATE:
+        raise ValueError(f"Date cannot be earlier than {UNIX_EPOCH_DATE.isoformat()}")
 
 
 def ensure_not_future(value: date) -> None:
