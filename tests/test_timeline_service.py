@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from app.services import CurrencyService
 from infrastructure.sqlite_repository import SQLiteRecordRepository
 from services.timeline_service import (
     MonthlyCashflow,
@@ -30,6 +31,21 @@ def _insert_wallet(conn: sqlite3.Connection, wallet_id: int, initial_balance: fl
         "INSERT INTO wallets (id, name, currency, initial_balance, is_active) "
         "VALUES (?, 'Test', 'KZT', ?, 1)",
         (int(wallet_id), float(initial_balance)),
+    )
+    conn.commit()
+
+
+def _insert_wallet_with_currency(
+    conn: sqlite3.Connection,
+    wallet_id: int,
+    *,
+    currency: str,
+    initial_balance: float = 0.0,
+) -> None:
+    conn.execute(
+        "INSERT INTO wallets (id, name, currency, initial_balance, is_active) "
+        "VALUES (?, 'Test', ?, ?, 1)",
+        (int(wallet_id), str(currency), float(initial_balance)),
     )
     conn.commit()
 
@@ -164,6 +180,26 @@ def test_get_net_worth_timeline_includes_wallet_initial_balance(tmp_path: Path) 
     try:
         svc = TimelineService(repo)
         assert svc.get_net_worth_timeline() == [MonthlyNetWorth(month="2026-01", balance=51000.0)]
+    finally:
+        repo.close()
+
+
+def test_get_net_worth_timeline_converts_multi_currency_initial_balance(tmp_path: Path) -> None:
+    db_path = tmp_path / "timeline_fx.db"
+    _init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        _insert_wallet_with_currency(conn, 1, currency="USD", initial_balance=10.0)
+        _insert_record(
+            conn, record_type="income", date="2026-01-01", wallet_id=1, amount_kzt=1000.0
+        )
+    finally:
+        conn.close()
+
+    repo = SQLiteRecordRepository(str(db_path), schema_path=_schema_path())
+    try:
+        svc = TimelineService(repo, CurrencyService())
+        assert svc.get_net_worth_timeline() == [MonthlyNetWorth(month="2026-01", balance=6000.0)]
     finally:
         repo.close()
 

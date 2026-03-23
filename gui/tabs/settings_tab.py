@@ -1,15 +1,19 @@
+"""
+Settings tab — management of wallets and mandatory expenses (CRUD, import/export), backup, audit.
+"""
+
 from __future__ import annotations
 
 import os
 import tkinter as tk
 from collections.abc import Callable
-from tkinter import Listbox, filedialog, messagebox, scrolledtext, ttk
+from tkinter import Listbox, filedialog, messagebox, ttk
 from typing import Any, Protocol
 
-from domain.audit import AuditFinding, AuditReport
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
 from gui.helpers import open_in_file_manager
+from gui.tabs.settings_support import safe_destroy, show_audit_report_dialog
 
 
 class SettingsTabContext(Protocol):
@@ -23,6 +27,8 @@ class SettingsTabContext(Protocol):
 
     def _refresh_charts(self) -> None: ...
 
+    def _refresh_budgets(self) -> None: ...
+
     def _run_background(
         self,
         task: Callable[[], Any],
@@ -31,106 +37,6 @@ class SettingsTabContext(Protocol):
         on_error: Callable[[BaseException], None] | None = None,
         busy_message: str = "Processing...",
     ) -> None: ...
-
-
-def _format_audit_finding(finding: AuditFinding, *, passed: bool = False) -> str:
-    suffix = f" — {finding.detail}" if finding.detail else ""
-    prefix = "✔ " if passed else ""
-    return f"{prefix}[{finding.check}] {finding.message}{suffix}"
-
-
-def _populate_audit_section(
-    widget: scrolledtext.ScrolledText,
-    findings: tuple[AuditFinding, ...],
-    *,
-    passed: bool = False,
-    background: str | None = None,
-) -> None:
-    if background is not None:
-        widget.configure(background=background)
-    widget.configure(state="normal")
-    widget.delete("1.0", tk.END)
-    if findings:
-        lines = [_format_audit_finding(finding, passed=passed) for finding in findings]
-        widget.insert("1.0", "\n".join(lines))
-    else:
-        widget.insert("1.0", "(none)")
-    widget.configure(state="disabled")
-
-
-def show_audit_report_dialog(report: AuditReport, parent: tk.Misc) -> None:
-    dialog = tk.Toplevel(parent)
-    dialog.title("Data Audit Report")
-    dialog.minsize(560, 480)
-    dialog.transient(parent.winfo_toplevel())
-
-    frame = ttk.Frame(dialog, padding=12)
-    frame.pack(fill="both", expand=True)
-    frame.grid_columnconfigure(0, weight=1)
-    frame.grid_rowconfigure(3, weight=1)
-    frame.grid_rowconfigure(4, weight=1)
-    frame.grid_rowconfigure(5, weight=1)
-
-    ttk.Label(frame, text=f"Database: {os.path.basename(report.db_path)}").grid(
-        row=0, column=0, sticky="w"
-    )
-    ttk.Label(frame, text=report.summary()).grid(row=1, column=0, sticky="w", pady=(4, 10))
-
-    errors_frame = ttk.LabelFrame(frame, text=f"Errors ({len(report.errors)})")
-    errors_frame.grid(row=3, column=0, sticky="nsew", pady=(0, 8))
-    errors_frame.grid_columnconfigure(0, weight=1)
-    errors_frame.grid_rowconfigure(0, weight=1)
-
-    warnings_frame = ttk.LabelFrame(frame, text=f"Warnings ({len(report.warnings)})")
-    warnings_frame.grid(row=4, column=0, sticky="nsew", pady=(0, 8))
-    warnings_frame.grid_columnconfigure(0, weight=1)
-    warnings_frame.grid_rowconfigure(0, weight=1)
-
-    passed_frame = ttk.LabelFrame(frame, text=f"Passed ({len(report.passed)})")
-    passed_frame.grid(row=5, column=0, sticky="nsew", pady=(0, 10))
-    passed_frame.grid_columnconfigure(0, weight=1)
-    passed_frame.grid_rowconfigure(0, weight=1)
-
-    errors_text = scrolledtext.ScrolledText(errors_frame, height=7, wrap="word")
-    errors_text.grid(row=0, column=0, sticky="nsew")
-    warnings_text = scrolledtext.ScrolledText(warnings_frame, height=7, wrap="word")
-    warnings_text.grid(row=0, column=0, sticky="nsew")
-    passed_text = scrolledtext.ScrolledText(passed_frame, height=8, wrap="word")
-    passed_text.grid(row=0, column=0, sticky="nsew")
-
-    _populate_audit_section(
-        errors_text,
-        report.errors,
-        background="#ffe6e6" if report.errors else None,
-    )
-    _populate_audit_section(
-        warnings_text,
-        report.warnings,
-        background="#fff9e6" if report.warnings else None,
-    )
-    _populate_audit_section(
-        passed_text,
-        report.passed,
-        passed=True,
-        background="#e6f9e6" if report.is_clean else None,
-    )
-
-    close_button = ttk.Button(frame, text="Close", command=dialog.destroy)
-    close_button.grid(row=6, column=0, sticky="e")
-
-    dialog.update_idletasks()
-    root = parent.winfo_toplevel()
-    root_x = root.winfo_rootx()
-    root_y = root.winfo_rooty()
-    root_w = root.winfo_width()
-    root_h = root.winfo_height()
-    dialog_w = max(dialog.winfo_width(), 560)
-    dialog_h = max(dialog.winfo_height(), 480)
-    pos_x = root_x + max((root_w - dialog_w) // 2, 0)
-    pos_y = root_y + max((root_h - dialog_h) // 2, 0)
-    dialog.geometry(f"{dialog_w}x{dialog_h}+{pos_x}+{pos_y}")
-    dialog.grab_set()
-    close_button.focus_set()
 
 
 def build_settings_tab(
@@ -202,7 +108,7 @@ def build_settings_tab(
         for wallet in context.controller.load_wallets():
             try:
                 balance = context.controller.wallet_balance(wallet.id)
-            except Exception:
+            except ValueError:
                 balance = wallet.initial_balance
             wallet_listbox.insert(
                 tk.END,
@@ -214,13 +120,13 @@ def build_settings_tab(
         if context.refresh_transfer_wallet_menus is not None:
             try:
                 context.refresh_transfer_wallet_menus()
-            except Exception:
+            except tk.TclError:
                 pass
 
         if context.refresh_operation_wallet_menu is not None:
             try:
                 context.refresh_operation_wallet_menu()
-            except Exception:
+            except tk.TclError:
                 pass
 
     context.refresh_wallets = refresh_wallets
@@ -383,10 +289,7 @@ def build_settings_tab(
         for key in ("add", "report", "edit"):
             panel = current_panel[key]
             if panel is not None:
-                try:
-                    panel.destroy()
-                except Exception:
-                    pass
+                safe_destroy(panel)
                 current_panel[key] = None
 
     def add_mandatory_inline() -> None:
@@ -472,16 +375,17 @@ def build_settings_tab(
                     date=date_val,
                 )
                 messagebox.showinfo("Success", "Mandatory expense added.")
-                add_panel.destroy()
+                safe_destroy(add_panel)
                 current_panel["add"] = None
                 context._refresh_charts()
                 refresh_mandatory()
+                context._refresh_budgets()
             except Exception as error:
                 messagebox.showerror("Error", f"Failed to add expense: {str(error)}")
 
         def cancel() -> None:
             try:
-                add_panel.destroy()
+                safe_destroy(add_panel)
             finally:
                 current_panel["add"] = None
 
@@ -605,15 +509,16 @@ def build_settings_tab(
                     messagebox.showerror("Date error", str(error))
                     return
 
-            edit_panel.destroy()
+            safe_destroy(edit_panel)
             current_panel["edit"] = None
             refresh_mandatory()
             context._refresh_charts()
+            context._refresh_budgets()
             messagebox.showinfo("Success", "Mandatory expense updated.")
 
         def cancel_edit() -> None:
             try:
-                edit_panel.destroy()
+                safe_destroy(edit_panel)
             finally:
                 current_panel["edit"] = None
 
@@ -681,18 +586,19 @@ def build_settings_tab(
                 messagebox.showinfo(
                     "Success", f"Mandatory expense added to report for {date_value}."
                 )
-                add_to_report_panel.destroy()
+                safe_destroy(add_to_report_panel)
                 current_panel["report"] = None
                 refresh_mandatory()
                 refresh_wallets()
                 context._refresh_list()
                 context._refresh_charts()
+                context._refresh_budgets()
             except ValueError as error:
                 messagebox.showerror("Error", f"Invalid date: {str(error)}. Use YYYY-MM-DD.")
 
         def cancel() -> None:
             try:
-                add_to_report_panel.destroy()
+                safe_destroy(add_to_report_panel)
             finally:
                 current_panel["report"] = None
 
@@ -713,6 +619,7 @@ def build_settings_tab(
             messagebox.showinfo("Success", "Mandatory expense deleted.")
             refresh_mandatory()
             context._refresh_charts()
+            context._refresh_budgets()
         else:
             messagebox.showerror("Error", "Failed to delete mandatory expense.")
 
@@ -726,6 +633,7 @@ def build_settings_tab(
         messagebox.showinfo("Success", "All mandatory expenses deleted.")
         refresh_mandatory()
         context._refresh_charts()
+        context._refresh_budgets()
 
     actions = ttk.Frame(mand_frame)
     actions.grid(row=1, column=0, columnspan=2, sticky="ew", padx=pad_x, pady=(0, pad_y))
@@ -784,6 +692,7 @@ def build_settings_tab(
             )
             refresh_mandatory()
             context._refresh_charts()
+            context._refresh_budgets()
 
         def on_error(exc: BaseException) -> None:
             if isinstance(exc, FileNotFoundError):
@@ -869,6 +778,7 @@ def build_settings_tab(
             refresh_wallets()
             context._refresh_list()
             context._refresh_charts()
+            context._refresh_budgets()
 
         def run_import(force: bool) -> None:
             def current_task() -> ImportResult:
@@ -879,7 +789,7 @@ def build_settings_tab(
                     from utils.backup_utils import BackupReadonlyError
 
                     is_readonly = isinstance(exc, BackupReadonlyError)
-                except Exception:
+                except ImportError:
                     is_readonly = False
 
                 if is_readonly and not force:

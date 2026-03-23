@@ -1,3 +1,5 @@
+"""Infographics tab — expense and income data aggregation and visualization"""
+
 from __future__ import annotations
 
 import tkinter as tk

@@ -18,9 +18,6 @@ _BACKUP_RE = re.compile(r"^(?P<stem>.+)_backup_(?P<stamp>\d{8}_\d{6})$")
 def _prune_backups(
     backup_dir: Path, *, source_stem: str, source_suffix: str, keep_last: int
 ) -> None:
-    if keep_last <= 0:
-        return
-
     candidates: list[tuple[str, Path]] = []
     for path in backup_dir.glob(f"{source_stem}_backup_*{source_suffix}"):
         match = _BACKUP_RE.match(path.stem)
@@ -31,7 +28,8 @@ def _prune_backups(
         candidates.append((match.group("stamp"), path))
 
     candidates.sort(key=lambda item: item[0], reverse=True)
-    for _stamp, old_path in candidates[keep_last:]:
+    retained = max(int(keep_last), 0)
+    for _stamp, old_path in candidates[retained:]:
         try:
             old_path.unlink()
             logger.info("Pruned old JSON backup: %s", old_path)
@@ -42,6 +40,9 @@ def _prune_backups(
 def create_backup(json_path: str, *, keep_last: int | None = None) -> str | None:
     source = Path(json_path)
     if not source.exists():
+        return None
+    if keep_last is not None and int(keep_last) <= 0:
+        logger.info("JSON backup skipped because keep_last=%s", keep_last)
         return None
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_dir = source.parent / "backups"

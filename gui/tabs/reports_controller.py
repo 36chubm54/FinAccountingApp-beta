@@ -33,9 +33,16 @@ class ReportsController:
         summary_year, summary_up_to_month = _infer_summary_year_month(filters.period_start)
         monthly = build_monthly_rows(report, year=summary_year, up_to_month=summary_up_to_month)
 
+        if filters.wallet_id is None:
+            net_worth_fixed = float(self._controller.net_worth_fixed())
+            net_worth_current = float(self._controller.net_worth_current())
+        else:
+            net_worth_fixed = float(report.total_fixed())
+            net_worth_current = float(report.total_current(self._currency))
+
         summary = ReportSummary(
-            net_worth_fixed=float(self._controller.net_worth_fixed()),
-            net_worth_current=float(self._controller.net_worth_current()),
+            net_worth_fixed=net_worth_fixed,
+            net_worth_current=net_worth_current,
             initial_balance=float(report.initial_balance),
             records_total_fixed=float(report.net_profit_fixed()),
             final_balance_fixed=float(report.total_fixed()),

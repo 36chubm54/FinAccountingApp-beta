@@ -24,8 +24,16 @@ def is_commission_for_transfer(record: Record, transfer_id: int) -> bool:
     return marker in str(getattr(record, "description", "") or "")
 
 
-def wallet_balance_kzt(wallet: Wallet, records: list[Record]) -> float:
-    total = quantize_money(wallet.initial_balance)
+def wallet_initial_balance_kzt(wallet: Wallet, currency_service=None) -> float:
+    if currency_service is None:
+        return float(quantize_money(wallet.initial_balance))
+    return float(
+        quantize_money(currency_service.convert(float(wallet.initial_balance), str(wallet.currency)))
+    )
+
+
+def wallet_balance_kzt(wallet: Wallet, records: list[Record], currency_service=None) -> float:
+    total = quantize_money(wallet_initial_balance_kzt(wallet, currency_service))
     for record in records:
         if record.wallet_id == wallet.id:
             total += quantize_money(record.signed_amount_kzt())

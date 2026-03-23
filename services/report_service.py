@@ -40,6 +40,13 @@ class ReportOperationRow:
 
 
 @dataclass(frozen=True, slots=True)
+class CategoryGroupRow:
+    category: str
+    operations_count: int
+    total_kzt: float
+
+
+@dataclass(frozen=True, slots=True)
 class MonthlySummaryRow:
     month: str
     income: float
@@ -91,6 +98,23 @@ def build_operations_rows(report: Report) -> list[ReportOperationRow]:
             )
         )
     return rows
+
+
+def build_category_group_rows(rows: Iterable[ReportOperationRow]) -> list[CategoryGroupRow]:
+    totals_by_category: dict[str, float] = {}
+    counts_by_category: dict[str, int] = {}
+    for row in rows:
+        key = str(row.category or "").strip() or "<Empty>"
+        totals_by_category[key] = float(totals_by_category.get(key, 0.0)) + float(row.amount_kzt)
+        counts_by_category[key] = int(counts_by_category.get(key, 0)) + 1
+    return [
+        CategoryGroupRow(
+            category=category,
+            operations_count=int(counts_by_category.get(category, 0)),
+            total_kzt=float(totals_by_category[category]),
+        )
+        for category in sorted(totals_by_category, key=lambda value: value.casefold())
+    ]
 
 
 def build_monthly_rows(

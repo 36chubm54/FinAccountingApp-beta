@@ -92,6 +92,24 @@ def test_soft_delete_allowed_for_zero_balance_and_hidden_from_active():
     assert stored.is_active is False
 
 
+def test_multi_currency_wallet_balance_uses_currency_conversion():
+    repo, wallet_id, _ = _repo_with_wallet(initial=0.0)
+    wallet = next(wallet for wallet in repo.load_wallets() if wallet.id == wallet_id)
+    repo.save_wallet(
+        wallet.__class__(
+            id=wallet.id,
+            name=wallet.name,
+            currency="USD",
+            initial_balance=10.0,
+            system=wallet.system,
+            allow_negative=wallet.allow_negative,
+            is_active=wallet.is_active,
+        )
+    )
+
+    assert CalculateWalletBalance(repo, CurrencyService()).execute(wallet_id) == 5000.0
+
+
 def test_migration_assigns_wallet_id_one_and_is_idempotent():
     payload = {
         "initial_balance": 0.0,

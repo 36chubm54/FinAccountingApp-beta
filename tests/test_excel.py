@@ -16,8 +16,8 @@ from utils.csv_utils import (
     import_mandatory_expenses_from_csv,
 )
 from utils.excel_utils import (
-    export_records_to_xlsx,
     export_mandatory_expenses_to_xlsx,
+    export_records_to_xlsx,
     import_mandatory_expenses_from_xlsx,
     import_records_from_xlsx,
     report_from_xlsx,
@@ -207,6 +207,7 @@ def test_xlsx_export_grouped_drill_down():
                     final_found = True
                     break
             assert final_found
+            assert "By Category" not in wb.sheetnames
         finally:
             wb.close()
     finally:

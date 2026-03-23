@@ -109,7 +109,7 @@ class TestCreateExpense:
         )
 
         # Assert
-        mock_currency.convert.assert_called_once_with(50.0, "USD")
+        assert mock_currency.convert.call_args_list[0].args == (50.0, "USD")
         expected_record = ExpenseRecord(
             date="2025-01-02",
             wallet_id=1,
@@ -173,6 +173,21 @@ class TestGenerateReport:
         # Assert
         mock_repo.load_all.assert_called_once()
         assert report.records() == records
+
+    def test_execute_converts_multi_currency_initial_balances_to_kzt(self):
+        mock_repo = Mock(spec=RecordRepository)
+        mock_currency = Mock()
+        mock_repo.load_all.return_value = []
+        mock_repo.load_wallets.return_value = [
+            Wallet(id=1, name="Cash", currency="KZT", initial_balance=1000.0, system=True),
+            Wallet(id=2, name="USD", currency="USD", initial_balance=10.0, system=False),
+        ]
+        mock_currency.convert.side_effect = lambda amount, code: amount if code == "KZT" else 5000.0
+
+        report = GenerateReport(repository=mock_repo, currency=mock_currency).execute()
+
+        assert report.initial_balance == 6000.0
+        mock_currency.convert.assert_any_call(10.0, "USD")
 
     def test_delete_record_success(self):
         # Arrange

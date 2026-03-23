@@ -101,7 +101,7 @@ The Dashboard now includes an `ⓘ` tooltip that explains the metric formulas.
 Planning and tracking category budgets across arbitrary date ranges.
 
 - `New Budget` form: `Category`, `From`, `To`, `Limit (KZT)`, and `Include mandatory expenses`.
-- Budget Treeview columns: `Category`, `Period`, `Limit`, `Spent`, `Remaining`, `Usage %`, `Pace`, `Status`.
+- Budget Treeview columns: `Category`, `Period`, `Limit`, `Spent`, `Remaining`, `Usage %`, `Pace`, `Status`, `Include mandatory`.
 - Pace states: `on_track`, `overpace`, `overspent`.
 - Period states: `future`, `active`, `expired`.
 - The progress canvas is displayed below the table:
@@ -177,9 +177,10 @@ Export report:
 - Report title includes the selected range:
   `Transaction statement (<start_date> - <end_date>)`.
 - If `Period end` is not provided, current date is used as the period end.
-- In addition to the main records, a `Yearly Report` sheet with a monthly summary is added to `XLSX`. A second, intermediate sheet `By Category` is also created with records grouped by categories and subtotals.
+- In addition to the main records, a `Yearly Report` sheet with a monthly summary is added to `XLSX`. The `By Category` sheet is created only when grouping adds a distinct summary rather than duplicating an already filtered report.
 - `XLSX` now ships as a more readable export: styled header/total rows, `freeze panes`, `auto filter`, auto-sized columns, and numeric amount cells instead of stringified totals.
-- In `PDF` the monthly summary remains, and after the main statement, tables are added broken down by category (each category is a separate table with a subtotal).
+- In `PDF` the monthly summary remains, and after the main statement, category tables are added; if the report is already filtered to a single category, the duplicate grouped section is skipped.
+- When `Group by category` is enabled, exporting the summary view uses grouped report export in `CSV` / `XLSX` / `PDF`.
 
 ### Opening Balance in Filtered Reports
 
@@ -734,12 +735,12 @@ Below are the key classes and functions synchronized with the actual code.
 - `OperationsTabContext` — the context of the operations tab.
 - `OperationsTabBindings` — class for binding events to interface elements of the `Operations` tab.
 - `show_import_preview_dialog(parent, filepath, policy_label, preview, force=False)` — modal dry-run preview dialog for imports.
-- `build_operations_tab(parent, context, import_formats)` — builds the `Operations` tab. The tab supports adding/deleting records, editing currency values, creating transfers, category `Combobox` suggestions, and the two-step import flow `dry-run -> preview -> commit`.
+- `build_operations_tab(parent, context, import_formats)` — builds the `Operations` tab. The tab supports adding/deleting records, editing currency values, creating transfers, category `Combobox` suggestions, shared list/charts/wallets/budgets refresh, and the two-step import flow `dry-run -> preview -> commit`.
 
 `gui/tabs/budget_tab.py`
 
 - `BudgetTabBindings` — widget bindings for the `Budget` tab.
-- `build_budget_tab(parent, context)` — builds the `Budget` tab with creation form, budget table, and progress canvas.
+- `build_budget_tab(parent, context)` — builds the `Budget` tab with the creation form, budget table, progress canvas, and a `refresh` callback.
 
 `gui/tabs/reports_tab.py`
 
@@ -753,6 +754,7 @@ Below are the key classes and functions synchronized with the actual code.
 `gui/tabs/reports_controller.py`
 
 - `ReportsController` — adapter between `FinancialController` and the reports UI (filter validation and result assembly).
+- For wallet-filtered views, the summary uses the selected wallet balance instead of global net worth.
 
 `gui/record_colors.py`
 
@@ -761,6 +763,18 @@ Below are the key classes and functions synchronized with the actual code.
 `gui/tooltip.py`
 
 - `Tooltip(widget, text)` — simple tooltip for `tkinter`/`ttk` widgets.
+
+`gui/controller_import_support.py`
+
+- Helpers for GUI controller import transactions: `run_import_transaction(...)`, `normalize_operation_ids_for_import(...)`.
+
+`gui/tabs/operations_support.py`
+
+- Shared `Operations` tab helpers: import preview dialog, safe destroy, and unified operations/charts/wallets/budgets refresh.
+
+`gui/tabs/settings_support.py`
+
+- Shared `Settings` tab helpers: audit dialog and safe teardown of transient windows.
 
 `gui/tabs/analytics_tab.py`
 
@@ -773,6 +787,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `SettingsTabContext` — context of the settings tab.
 - `build_settings_tab(parent, context, import_formats)` — method for building the interface of the `Settings` tab. This tab allows you to manage wallets, mandatory expenses, backups, and launch the audit.
 - `show_audit_report_dialog(report, parent)` — modal audit dialog with `Errors`, `Warnings`, and `Passed` sections.
+- Wallet and mandatory-expense changes also refresh the Budget tab in sync.
 
 `gui/controllers.py`
 
@@ -801,6 +816,7 @@ Below are the key classes and functions synchronized with the actual code.
 `gui/exporters.py`
 
 - `export_report(report, filepath, fmt)`.
+- `export_grouped_report(statement_title, grouped_rows, filepath, fmt)` — exports grouped report summaries.
 - `export_mandatory_expenses(expenses, filepath, fmt)`.
 - `export_records(records, filepath, fmt, initial_balance=0.0, transfers=None)`.
 - `export_full_backup(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0)`.
@@ -846,7 +862,8 @@ Below are the key classes and functions synchronized with the actual code.
 
 - `WalletBalance(wallet_id, name, currency, balance)` — immutable wallet balance snapshot.
 - `CashflowResult(income, expenses, cashflow)` — immutable period aggregate.
-- `BalanceService(repository)` — read-only analytics over `wallets` + `records`.
+- `BalanceService(repository, currency_service=None)` — read-only analytics over `wallets` + `records`.
+- When `currency_service` is provided, wallet initial balances are normalized to KZT before aggregation.
 - SQL aggregates use `*_minor` when available to avoid accumulated float drift.
 - `get_wallet_balance(wallet_id, date=None)` — wallet balance at a date or over full history.
 - `get_wallet_balances(date=None)` — balances of all active wallets.
@@ -860,7 +877,8 @@ Below are the key classes and functions synchronized with the actual code.
 - `MonthlyNetWorth(month, balance)` — immutable net worth snapshot at month end.
 - `MonthlyCashflow(month, income, expenses, cashflow)` — immutable monthly cashflow aggregate.
 - `MonthlyCumulative(month, cumulative_income, cumulative_expenses)` — immutable running totals by month.
-- `TimelineService(repository)` — read-only timeline analytics from `wallets` + `records`.
+- `TimelineService(repository, currency_service=None)` — read-only timeline analytics from `wallets` + `records`.
+- When `currency_service` is provided, the timeline correctly includes multi-currency `wallet.initial_balance`.
 - Uses SQL helper expressions over `*_minor` for money totals.
 - `get_net_worth_timeline()` — net worth (KZT) at the end of each month (includes transfer pairs, they net to zero).
 - `get_monthly_cashflow(start_date=None, end_date=None)` — monthly income/expense/cashflow (excludes `transfer_id IS NOT NULL`).
@@ -890,7 +908,11 @@ Below are the key classes and functions synchronized with the actual code.
 - `delete_budget(budget_id)` — deleting a budget.
 - `update_budget_limit(budget_id, new_limit_kzt)` — updating the budget limit.
 - `get_budget_result(budget, today)` — budget results for the specified date.
-- `get_all_results(today)` — all results for budgets for the specified date.
+- `get_all_results(today)` — batch calculation of all budget results for the specified date.
+
+`services/currency_support.py`
+
+- `convert_money_to_kzt(amount, currency, currency_service=None)` — helper for normalizing amounts to KZT inside read-only services and use cases.
 
 `services/sqlite_money_sql.py`
 
@@ -1022,6 +1044,7 @@ project/
 │   ├── audit_service.py        # Audit service
 │   ├── balance_service.py      # Read-only balance and cashflow service
 │   ├── budget_service.py       # Budget CRUD and live spend tracking
+│   ├── currency_support.py     # Converting money amounts to KZT for services
 │   ├── import_parser.py        # CSV/XLSX/JSON parser -> DTO
 │   ├── import_service.py       # Import orchestration via FinanceService
 │   ├── metrics_service.py      # Read-only financial metrics service
@@ -1044,16 +1067,19 @@ project/
 │   ├── tabs/
 │   │   ├── infographics_tab.py # Tab with infographics
 │   │   ├── operations_tab.py   # Tab with operations and transfers
+│   │   ├── operations_support.py # Shared helpers for the Operations tab
 │   │   ├── reports_tab.py      # Tab with reports
 │   │   ├── reports_controller.py # Reports tab controller (UI adapter)
 │   │   ├── analytics_tab.py    # Analytics tab (dashboard, categories, report)
 │   │   ├── budget_tab.py       # Budget tab and progress canvas
+│   │   ├── settings_support.py # Shared helpers for the Settings tab
 │   │   └── settings_tab.py     # Tab with wallets and mandatory expenses
 │   │
 │   ├── __init__.py
 │   ├── tkinter_gui.py          # Main GUI application
 │   ├── record_colors.py        # Row colors by record kind
 │   ├── tooltip.py              # Tooltip for tkinter/ttk
+│   ├── controller_import_support.py # Import-flow helpers for the GUI controller
 │   ├── controller_support.py   # GUI support helpers
 │   ├── helpers.py              # Helpers for GUI
 │   ├── controllers.py          # GUI controllers

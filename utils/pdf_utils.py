@@ -17,6 +17,15 @@ def _safe_str(value):
     return "" if value is None else str(value)
 
 
+def _should_add_by_category_section(report: Report, groups: dict[str, Report]) -> bool:
+    if len(groups) > 1:
+        return True
+    if len(groups) != 1:
+        return False
+    only_subreport = next(iter(groups.values()))
+    return len(list(only_subreport.records())) < len(list(report.records()))
+
+
 def _register_cyrillic_font() -> str:
     """Try to register a TTF font that supports Cyrillic and return its name.
 
@@ -196,74 +205,77 @@ def report_to_pdf(report: Report, filepath: str) -> None:
 
     summary_year, monthly_rows = report.monthly_income_expense_rows()
 
-    # Insert category tables after the main table
-    elems.append(Spacer(1, 8))  # type: ignore
-    # Add a header before the group report tables
-    group_title = Table([["Group report on category"]], colWidths=[available_width])
-    group_title_style = TableStyle(
-        [
-            ("FONT", (0, 0), (-1, -1), font_name),
-            ("FONTSIZE", (0, 0), (-1, -1), 12),
-            ("BACKGROUND", (0, 0), (-1, -1), colors.lightgrey),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 6),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        ]
-    )
-    group_title.setStyle(group_title_style)
-    elems.append(group_title)
-    for category, subreport in sorted(groups.items(), key=lambda x: x[0] or ""):
-        # Title row for category
-        title_table = Table([[f"Category: {category}"]], colWidths=[available_width])
-        title_style = TableStyle(
-            [
-                ("FONT", (0, 0), (-1, -1), font_name),
-                ("FONTSIZE", (0, 0), (-1, -1), 10),
-                ("BACKGROUND", (0, 0), (-1, -1), colors.lightgrey),
-                ("LEFTPADDING", (0, 0), (-1, -1), 6),
-            ]
-        )
-        title_table.setStyle(title_style)
+    if _should_add_by_category_section(report, groups):
+        # Insert category tables after the main table
         elems.append(Spacer(1, 8))  # type: ignore
-        elems.append(title_table)
-
-        # Category data table: Date, Type, Amount
-        cat_data = [["Date", "Type", "Amount (KZT)"]]
-        cat_total = 0.0
-        for r in sorted(subreport.records(), key=lambda rr: rr.date):
-            if isinstance(r, IncomeRecord):
-                r_type = "Income"
-            elif isinstance(r, MandatoryExpenseRecord):
-                r_type = "Mandatory Expense"
-            else:
-                r_type = "Expense"
-            amt = getattr(r, "amount_kzt", 0.0)
-            cat_total += (
-                getattr(r, "amount_kzt", 0.0) if getattr(r, "amount_kzt", None) is not None else 0.0
-            )
-            cat_data.append([_safe_str(r.date), r_type, f"{abs(amt):.2f}"])
-        cat_data.append(["SUBTOTAL", "", f"{abs(cat_total):.2f}"])
-
-        cat_col_widths = [
-            available_width * 0.50,
-            available_width * 0.30,
-            available_width * 0.20,
-        ]
-        cat_table = Table(cat_data, colWidths=cat_col_widths, repeatRows=1)
-        cat_style = TableStyle(
+        # Add a header before the group report tables
+        group_title = Table([["Group report on category"]], colWidths=[available_width])
+        group_title_style = TableStyle(
             [
                 ("FONT", (0, 0), (-1, -1), font_name),
-                ("FONTSIZE", (0, 0), (-1, -1), 10),
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
-                ("ALIGN", (2, 0), (2, -1), "RIGHT"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("FONTSIZE", (0, 0), (-1, -1), 12),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.lightgrey),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("LEFTPADDING", (0, 0), (-1, -1), 6),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 6),
             ]
         )
-        cat_table.setStyle(cat_style)
-        elems.append(cat_table)
+        group_title.setStyle(group_title_style)
+        elems.append(group_title)
+        for category, subreport in sorted(groups.items(), key=lambda x: x[0] or ""):
+            # Title row for category
+            title_table = Table([[f"Category: {category}"]], colWidths=[available_width])
+            title_style = TableStyle(
+                [
+                    ("FONT", (0, 0), (-1, -1), font_name),
+                    ("FONTSIZE", (0, 0), (-1, -1), 10),
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.lightgrey),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+            title_table.setStyle(title_style)
+            elems.append(Spacer(1, 8))  # type: ignore
+            elems.append(title_table)
+
+            # Category data table: Date, Type, Amount
+            cat_data = [["Date", "Type", "Amount (KZT)"]]
+            cat_total = 0.0
+            for r in sorted(subreport.records(), key=lambda rr: rr.date):
+                if isinstance(r, IncomeRecord):
+                    r_type = "Income"
+                elif isinstance(r, MandatoryExpenseRecord):
+                    r_type = "Mandatory Expense"
+                else:
+                    r_type = "Expense"
+                amt = getattr(r, "amount_kzt", 0.0)
+                cat_total += (
+                    getattr(r, "amount_kzt", 0.0)
+                    if getattr(r, "amount_kzt", None) is not None
+                    else 0.0
+                )
+                cat_data.append([_safe_str(r.date), r_type, f"{abs(amt):.2f}"])
+            cat_data.append(["SUBTOTAL", "", f"{abs(cat_total):.2f}"])
+
+            cat_col_widths = [
+                available_width * 0.50,
+                available_width * 0.30,
+                available_width * 0.20,
+            ]
+            cat_table = Table(cat_data, colWidths=cat_col_widths, repeatRows=1)
+            cat_style = TableStyle(
+                [
+                    ("FONT", (0, 0), (-1, -1), font_name),
+                    ("FONTSIZE", (0, 0), (-1, -1), 10),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
+                    ("ALIGN", (2, 0), (2, -1), "RIGHT"),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+            cat_table.setStyle(cat_style)
+            elems.append(cat_table)
 
     summary_header = [f"Month ({summary_year})", "Income (KZT)", "Expense (KZT)"]
     summary_data = [summary_header]
@@ -314,3 +326,65 @@ def report_to_pdf(report: Report, filepath: str) -> None:
     elems.append(summary_table)
 
     doc.build(elems)  # type: ignore
+
+
+def grouped_report_to_pdf(
+    statement_title: str,
+    grouped_rows: list[tuple[str, int, float]],
+    filepath: str,
+) -> None:
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
+
+    doc = SimpleDocTemplate(
+        filepath,
+        pagesize=A4,
+        leftMargin=30,
+        rightMargin=30,
+        topMargin=30,
+        bottomMargin=30,
+    )
+    available_width = A4[0] - 60
+    font_name = _register_cyrillic_font()
+
+    title_table = Table([[statement_title]], colWidths=[available_width])
+    title_table.setStyle(
+        TableStyle(
+            [
+                ("FONT", (0, 0), (-1, -1), font_name),
+                ("FONTSIZE", (0, 0), (-1, -1), 12),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.lightgrey),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+
+    data = [["Category", "Operations", "Total (KZT)"], ["", "", "Grouped category totals"]]
+    total_kzt = 0.0
+    for category, operations_count, amount_kzt in grouped_rows:
+        total_kzt += float(amount_kzt)
+        data.append([_safe_str(category), str(int(operations_count)), f"{float(amount_kzt):.2f}"])
+    data.append(["TOTAL", "", f"{total_kzt:.2f}"])
+
+    table = Table(
+        data,
+        colWidths=[available_width * 0.52, available_width * 0.18, available_width * 0.30],
+        repeatRows=1,
+    )
+    table.setStyle(
+        TableStyle(
+            [
+                ("FONT", (0, 0), (-1, -1), font_name),
+                ("FONTSIZE", (0, 0), (-1, -1), 10),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+
+    doc.build([title_table, Spacer(1, 8), table])  # type: ignore

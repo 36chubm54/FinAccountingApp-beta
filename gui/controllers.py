@@ -46,6 +46,10 @@ from gui.controller_support import (
     build_list_items,
     wallets_with_system_initial_balance,
 )
+from gui.controller_import_support import (
+    normalize_operation_ids_for_import as normalize_import_ids,
+    run_import_transaction as run_import_op,
+)
 from infrastructure.repositories import RecordRepository
 from infrastructure.sqlite_repository import SQLiteRecordRepository
 from services.audit_service import AuditService
@@ -77,6 +81,9 @@ class FinancialController:
         DeleteTransfer(self._repository).execute(transfer_id)
 
     def transfer_id_by_repository_index(self, repository_index: int) -> int | None:
+        transfer_lookup = getattr(self._repository, "get_transfer_id_by_record_index", None)
+        if callable(transfer_lookup):
+            return transfer_lookup(repository_index)
         records = self._repository.load_all()
         if 0 <= repository_index < len(records):
             return records[repository_index].transfer_id
@@ -199,10 +206,10 @@ class FinancialController:
         )
 
     def generate_report(self) -> Report:
-        return GenerateReport(self._repository).execute()
+        return GenerateReport(self._repository, self._currency).execute()
 
     def generate_report_for_wallet(self, wallet_id: int | None):
-        return GenerateReport(self._repository).execute(wallet_id=wallet_id)
+        return GenerateReport(self._repository, self._currency).execute(wallet_id=wallet_id)
 
     def create_mandatory_expense(
         self,
@@ -313,10 +320,10 @@ class FinancialController:
         return GetActiveWallets(self._repository).execute()
 
     def soft_delete_wallet(self, wallet_id: int) -> None:
-        SoftDeleteWallet(self._repository).execute(wallet_id)
+        SoftDeleteWallet(self._repository, self._currency).execute(wallet_id)
 
     def wallet_balance(self, wallet_id: int) -> float:
-        return CalculateWalletBalance(self._repository).execute(wallet_id)
+        return CalculateWalletBalance(self._repository, self._currency).execute(wallet_id)
 
     def net_worth_fixed(self) -> float:
         return CalculateNetWorth(self._repository, self._currency).execute_fixed()
@@ -422,46 +429,10 @@ class FinancialController:
         )
 
     def run_import_transaction(self, operation):
-        wallets_snapshot = self._repository.load_wallets()
-        records_snapshot = self._repository.load_all()
-        mandatory_snapshot = self._repository.load_mandatory_expenses()
-        transfers_snapshot = self._repository.load_transfers()
-        try:
-            return operation()
-        except Exception as import_error:
-            logger.exception("Import failed, rolling back repository state")
-            try:
-                self._repository.replace_all_data(
-                    wallets=wallets_snapshot,
-                    records=records_snapshot,
-                    mandatory_expenses=mandatory_snapshot,
-                    transfers=transfers_snapshot,
-                )
-            except Exception:
-                logger.exception("Rollback failed after import error")
-            raise import_error
+        return run_import_op(self._repository, operation, logger)
 
     def normalize_operation_ids_for_import(self) -> None:
-        def record_sort_key(record: Record) -> tuple[str, int]:
-            # Keep operations grouped by date while preserving stable intra-day order
-            # as they were written by the import pipeline / transfer creation.
-            return (str(record.date), int(record.id))
-
-        records = sorted(self._repository.load_all(), key=record_sort_key)
-        transfers = sorted(
-            self._repository.load_transfers(), key=lambda item: (str(item.date), int(item.id))
-        )
-        transfer_id_map = {int(item.id): index for index, item in enumerate(transfers, start=1)}
-        normalized_transfers = [
-            replace(transfer, id=transfer_id_map[int(transfer.id)]) for transfer in transfers
-        ]
-        normalized_records: list[Record] = []
-        for index, record in enumerate(records, start=1):
-            mapped_transfer_id = None
-            if record.transfer_id is not None:
-                mapped_transfer_id = transfer_id_map.get(int(record.transfer_id))
-            normalized_records.append(replace(record, id=index, transfer_id=mapped_transfer_id))
-        self._repository.replace_records_and_transfers(normalized_records, normalized_transfers)
+        normalize_import_ids(self._repository)
 
     def import_records(
         self,
@@ -525,7 +496,7 @@ class FinancialController:
     def _balance_service(self) -> BalanceService:
         if not isinstance(self._repository, SQLiteRecordRepository):
             raise TypeError("Balance Engine is supported only for SQLite repository")
-        return BalanceService(self._repository)
+        return BalanceService(self._repository, self._currency)
 
     def get_wallet_balance(self, wallet_id: int, date: str | None = None) -> float:
         return self._balance_service().get_wallet_balance(wallet_id, date=date)
@@ -548,7 +519,7 @@ class FinancialController:
     def _timeline_service(self) -> TimelineService:
         if not isinstance(self._repository, SQLiteRecordRepository):
             raise TypeError("Timeline Engine is supported only for SQLite repository")
-        return TimelineService(self._repository)
+        return TimelineService(self._repository, self._currency)
 
     def get_net_worth_timeline(self) -> list:
         """Net worth (KZT) at end of each month. Returns list[MonthlyNetWorth]."""
@@ -652,7 +623,7 @@ class FinancialController:
         """Convert a KZT amount to USD using the configured USD rate (KZT per 1 USD)."""
         try:
             rate = float(self._currency.get_rate("USD"))
-        except Exception:
+        except ValueError:
             return 0.0
         if rate <= 0:
             return 0.0

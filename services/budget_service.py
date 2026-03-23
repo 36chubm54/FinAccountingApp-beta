@@ -134,7 +134,52 @@ class BudgetService:
 
     def get_all_results(self, today: dt_date | None = None) -> list[BudgetResult]:
         today = today or dt_date.today()
-        return [self.get_budget_result(budget, today=today) for budget in self.get_budgets()]
+        budgets = self.get_budgets()
+        if not budgets:
+            return []
+
+        spent_minor_by_budget: dict[int, int] = {budget.id: 0 for budget in budgets}
+        rows = self._repo.query_all(
+            f"""
+            SELECT
+                b.id,
+                COALESCE(SUM({minor_amount_expr("r.amount_kzt")}), 0)
+            FROM budgets AS b
+            LEFT JOIN records AS r
+              ON r.category = b.category
+             AND r.transfer_id IS NULL
+             AND r.date >= b.start_date
+             AND r.date <= b.end_date
+             AND (
+                    (b.include_mandatory = 1 AND r.type IN ('expense', 'mandatory_expense'))
+                 OR (b.include_mandatory = 0 AND r.type = 'expense')
+             )
+            GROUP BY b.id
+            """
+        )
+        for budget_id, spent_minor in rows:
+            spent_minor_by_budget[int(budget_id)] = int(spent_minor or 0)
+
+        results: list[BudgetResult] = []
+        for budget in budgets:
+            spent_minor = int(spent_minor_by_budget.get(budget.id, 0))
+            spent_kzt = minor_to_money(spent_minor)
+            limit_minor = budget.limit_kzt_minor
+            usage_pct = round(spent_minor / limit_minor * 100.0, 1) if limit_minor > 0 else 0.0
+            time_pct = budget.time_pct(today)
+            results.append(
+                BudgetResult(
+                    budget=budget,
+                    spent_kzt=spent_kzt,
+                    spent_minor=spent_minor,
+                    status=budget.status(today),
+                    pace_status=compute_pace_status(spent_minor, limit_minor, usage_pct, time_pct),
+                    usage_pct=usage_pct,
+                    time_pct=time_pct,
+                    remaining_kzt=to_money_float(budget.limit_kzt - spent_kzt),
+                )
+            )
+        return results
 
     def _check_overlap(
         self,

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from infrastructure.sqlite_repository import SQLiteRecordRepository
+from services.currency_support import convert_money_to_kzt
 from services.sqlite_money_sql import minor_amount_expr, money_expr, signed_minor_amount_expr
 
 
@@ -32,8 +33,9 @@ class BalanceService:
     Never writes to the database.
     """
 
-    def __init__(self, repository: SQLiteRecordRepository) -> None:
+    def __init__(self, repository: SQLiteRecordRepository, currency_service=None) -> None:
         self._repo = repository
+        self._currency = currency_service
 
     def get_wallet_balance(self, wallet_id: int, date: str | None = None) -> float:
         """
@@ -61,7 +63,14 @@ class BalanceService:
         for row in wallets:
             wallet_id = int(row[0])
             delta = self._sum_signed_records(wallet_id=wallet_id, up_to_date=date)
-            balance = float(row[3]) + delta
+            balance = (
+                convert_money_to_kzt(
+                    float(row[3]),
+                    str(row[2]),
+                    self._currency,
+                )
+                + delta
+            )
             result.append(
                 WalletBalance(
                     wallet_id=wallet_id,
@@ -98,10 +107,13 @@ class BalanceService:
 
     def _get_initial_balance(self, wallet_id: int) -> float:
         row = self._repo.query_one(
-            f"SELECT {money_expr('initial_balance')} FROM wallets WHERE id = ? AND is_active = 1",
+            f"SELECT {money_expr('initial_balance')}, currency "
+            "FROM wallets WHERE id = ? AND is_active = 1",
             (int(wallet_id),),
         )
-        return float(row[0]) if row else 0.0
+        if not row:
+            return 0.0
+        return convert_money_to_kzt(float(row[0]), str(row[1]), self._currency)
 
     def _sum_signed_records(
         self,

@@ -101,7 +101,7 @@ python main.py
 Планирование и контроль бюджетов по категориям за произвольный период.
 
 - Форма `New Budget`: `Category`, `From`, `To`, `Limit (KZT)`, флаг `Include mandatory expenses`.
-- Таблица бюджетов показывает `Category`, `Period`, `Limit`, `Spent`, `Remaining`, `Usage %`, `Pace`, `Status`.
+- Таблица бюджетов показывает `Category`, `Period`, `Limit`, `Spent`, `Remaining`, `Usage %`, `Pace`, `Status`, `Include mandatory`.
 - Статусы pace: `on_track`, `overpace`, `overspent`.
 - Статусы периода: `future`, `active`, `expired`.
 - Ниже таблицы отображается progress canvas:
@@ -177,9 +177,10 @@ python main.py
 - В заголовке отчёта указывается диапазон периода:
   `Transaction statement (<start_date> - <end_date>)`.
 - Если `Period end` не указан, в качестве конца периода используется текущая дата.
-- Кроме основных записей, в `XLSX` добавляется лист `Yearly Report` с помесячной сводкой. Также создаётся второй, промежуточный лист `By Category` с группировкой записей по категориям и подсуммами.
+- Кроме основных записей, в `XLSX` добавляется лист `Yearly Report` с помесячной сводкой. Лист `By Category` создаётся только когда группировка действительно добавляет отдельную сводку, а не дублирует уже отфильтрованный отчёт.
 - `XLSX` теперь оформляется как readable export: стилизованные header/total rows, `freeze panes`, `auto filter`, auto-width колонок и числовые ячейки вместо строковых сумм.
-- В `PDF` помесячная сводка остаётся, а после основной выписки добавляются таблицы с разбивкой по категориям (каждая категория — отдельная таблица с подсуммой).
+- В `PDF` помесячная сводка остаётся, а после основной выписки добавляются таблицы с разбивкой по категориям; если отчёт уже отфильтрован до одной категории, дублирующий grouped-блок не выводится.
+- При включённом `Group by category` экспорт summary-вида выполняется как grouped report в `CSV` / `XLSX` / `PDF`.
 
 ### Начальный баланс в фильтрованных отчётах
 
@@ -734,12 +735,12 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `OperationsTabContext` — контекст вкладки операций.
 - `OperationsTabBindings` — класс для привязки событий к элементам интерфейса вкладки `Operations`.
 - `show_import_preview_dialog(parent, filepath, policy_label, preview, force=False)` — модальный preview-диалог dry-run импорта.
-- `build_operations_tab(parent, context, import_formats)` — метод для построения интерфейса вкладки `Operations`. Эта вкладка поддерживает добавление и удаление записей, редактирование валютных значений, создание переводов, category `Combobox` с подсказками и двухшаговый import flow `dry-run -> preview -> commit`.
+- `build_operations_tab(parent, context, import_formats)` — метод для построения интерфейса вкладки `Operations`. Эта вкладка поддерживает добавление и удаление записей, редактирование валютных значений, создание переводов, category `Combobox` с подсказками, общий refresh list/charts/wallets/budgets и двухшаговый import flow `dry-run -> preview -> commit`.
 
 `gui/tabs/budget_tab.py`
 
 - `BudgetTabBindings` — привязки виджетов вкладки `Budget`.
-- `build_budget_tab(parent, context)` — построение вкладки `Budget` с формой создания, таблицей бюджетов и progress canvas.
+- `build_budget_tab(parent, context)` — построение вкладки `Budget` с формой создания, таблицей бюджетов, progress canvas и callback `refresh`.
 
 `gui/tabs/reports_tab.py`
 
@@ -753,6 +754,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 `gui/tabs/reports_controller.py`
 
 - `ReportsController` — адаптер между `FinancialController` и UI отчётов (валидация фильтров, сбор summary/операций/месячных строк).
+- Для wallet-filter summary использует баланс выбранного кошелька, а не глобальный net worth.
 
 `gui/record_colors.py`
 
@@ -761,6 +763,18 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 `gui/tooltip.py`
 
 - `Tooltip(widget, text)` — простой tooltip для `tkinter`/`ttk` виджетов.
+
+`gui/controller_import_support.py`
+
+- Helper'ы для импорт-транзакций GUI-контроллера: `run_import_transaction(...)`, `normalize_operation_ids_for_import(...)`.
+
+`gui/tabs/operations_support.py`
+
+- Общие helper'ы вкладки `Operations`: preview-диалог импорта, безопасное destroy и единый refresh операций/графиков/кошельков/бюджетов.
+
+`gui/tabs/settings_support.py`
+
+- Общие helper'ы вкладки `Settings`: audit dialog и безопасное закрытие временных окон.
 
 `gui/tabs/analytics_tab.py`
 
@@ -773,6 +787,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `SettingsTabContext` — контекст вкладки настроек.
 - `build_settings_tab(parent, context, import_formats)` — метод для построения интерфейса вкладки `Settings`. Эта вкладка позволяет управлять кошельками, обязательными расходами, backup и запуском аудита.
 - `show_audit_report_dialog(report, parent)` — модальный диалог результата аудита с секциями `Errors`, `Warnings`, `Passed`.
+- Изменения кошельков и обязательных расходов синхронно обновляют и вкладку бюджетов.
 
 `gui/controllers.py`
 
@@ -801,6 +816,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 `gui/exporters.py`
 
 - `export_report(report, filepath, fmt)`.
+- `export_grouped_report(statement_title, grouped_rows, filepath, fmt)` — экспорт grouped summary отчёта.
 - `export_mandatory_expenses(expenses, filepath, fmt)`.
 - `export_records(records, filepath, fmt, initial_balance=0.0, transfers=None)`.
 - `export_full_backup(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0)`.
@@ -846,7 +862,8 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 
 - `WalletBalance(wallet_id, name, currency, balance)` — immutable snapshot баланса кошелька.
 - `CashflowResult(income, expenses, cashflow)` — immutable агрегат по периоду.
-- `BalanceService(repository)` — read-only аналитика по `wallets` + `records`.
+- `BalanceService(repository, currency_service=None)` — read-only аналитика по `wallets` + `records`.
+- При передаче `currency_service` начальные балансы кошельков нормализуются в KZT до агрегации.
 - SQL-агрегации опираются на `*_minor`, когда они доступны, чтобы избежать накопления float-ошибок.
 - `get_wallet_balance(wallet_id, date=None)` — баланс кошелька на дату или по полной истории.
 - `get_wallet_balances(date=None)` — список балансов всех активных кошельков.
@@ -860,7 +877,8 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `MonthlyNetWorth(month, balance)` — immutable snapshot net worth на конец месяца.
 - `MonthlyCashflow(month, income, expenses, cashflow)` — immutable агрегат cashflow по месяцу.
 - `MonthlyCumulative(month, cumulative_income, cumulative_expenses)` — immutable накопительные суммы по месяцам.
-- `TimelineService(repository)` — read-only аналитика по timeline из `wallets` + `records`.
+- `TimelineService(repository, currency_service=None)` — read-only аналитика по timeline из `wallets` + `records`.
+- При передаче `currency_service` timeline корректно учитывает multi-currency `wallet.initial_balance`.
 - Для денежных сумм использует SQL helper-выражения над `*_minor`.
 - `get_net_worth_timeline()` — net worth (KZT) на конец каждого месяца (включая transfer-пары, они нейтральны).
 - `get_monthly_cashflow(start_date=None, end_date=None)` — доходы/расходы/cashflow по месяцам (исключая `transfer_id IS NOT NULL`).
@@ -890,7 +908,11 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `delete_budget(budget_id)` — удаление бюджета.
 - `update_budget_limit(budget_id, new_limit_kzt)` — обновление лимита бюджета.
 - `get_budget_result(budget, today)` — результаты по бюджету на указанную дату.
-- `get_all_results(today)` — все результаты по бюджетам на указанную дату.
+- `get_all_results(today)` — batch-расчёт всех результатов по бюджетам на указанную дату.
+
+`services/currency_support.py`
+
+- `convert_money_to_kzt(amount, currency, currency_service=None)` — helper нормализации сумм в KZT для read-only сервисов и use cases.
 
 `services/sqlite_money_sql.py`
 
@@ -1022,6 +1044,7 @@ project/
 │   ├── audit_service.py        # Сервис аудита
 │   ├── balance_service.py      # Read-only сервис балансов и cashflow
 │   ├── budget_service.py       # CRUD бюджетов и live spend-tracking
+│   ├── currency_support.py     # Конвертация денежных сумм в KZT для сервисов
 │   ├── import_parser.py        # Парсер CSV/XLSX/JSON -> DTO
 │   ├── import_service.py       # Оркестрация импорта через FinanceService
 │   ├── metrics_service.py      # Read-only сервис финансовых метрик
@@ -1044,16 +1067,19 @@ project/
 │   ├── tabs/
 │   │   ├── infographics_tab.py # Вкладка с информационными графиками
 │   │   ├── operations_tab.py   # Вкладка с операциями и переводами
+│   │   ├── operations_support.py # Общие helper'ы вкладки операций
 │   │   ├── reports_tab.py      # Вкладка с отчётами
 │   │   ├── reports_controller.py # Контроллер вкладки отчётов (UI adapter)
 │   │   ├── analytics_tab.py    # Вкладка аналитики (dashboard, категории, отчёт)
 │   │   ├── budget_tab.py       # Вкладка бюджетов и progress canvas
+│   │   ├── settings_support.py # Общие helper'ы вкладки настроек
 │   │   └── settings_tab.py     # Вкладка с кошельками и обязательными расходами
 │   │
 │   ├── __init__.py
 │   ├── tkinter_gui.py          # Основное GUI-приложение
 │   ├── record_colors.py        # Цвета строк по типу записи
 │   ├── tooltip.py              # Tooltip для tkinter/ttk
+│   ├── controller_import_support.py # Helper'ы import flow для GUI-контроллера
 │   ├── controller_support.py   # Вспомогательные GUI helper'ы
 │   ├── helpers.py              # Помощники для GUI
 │   ├── controllers.py          # Контроллеры GUI

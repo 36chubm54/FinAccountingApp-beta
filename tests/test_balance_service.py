@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from app.services import CurrencyService
 from infrastructure.sqlite_repository import SQLiteRecordRepository
 from services.balance_service import BalanceService, WalletBalance
 
@@ -188,6 +189,19 @@ def test_get_wallet_balance_returns_initial_balance_when_no_records(tmp_path: Pa
     try:
         svc = BalanceService(repo)
         assert svc.get_wallet_balance(1) == 1000.0
+    finally:
+        repo.close()
+
+
+def test_get_wallet_balance_converts_multi_currency_initial_balance_to_kzt(tmp_path: Path) -> None:
+    repo = _build_repo(
+        tmp_path,
+        wallets=[_wallet(1, currency="USD", initial_balance=10.0)],
+        name="balance_fx.db",
+    )
+    try:
+        svc = BalanceService(repo, CurrencyService())
+        assert svc.get_wallet_balance(1) == 5000.0
     finally:
         repo.close()
 

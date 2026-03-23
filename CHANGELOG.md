@@ -7,6 +7,37 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.7.4] - 2026-03-23
+
+### Added
+
+- Added shared GUI support modules for import flow, Operations refresh logic, and Settings audit dialogs
+- Added grouped report export for summary-by-category view in `CSV`, `XLSX`, and `PDF`
+- Added `services/currency_support.py` to normalize wallet balances and timeline initial balances to KZT
+
+### Changed
+
+- Reports summary now shows wallet-specific balances when a wallet filter is selected
+- `BalanceService`, `TimelineService`, `GenerateReport`, `CalculateWalletBalance`, and `SoftDeleteWallet` now support multi-currency wallet initial balances via `CurrencyService`
+- Budget tab now exposes `Include mandatory` directly in the table and refreshes after related operations/settings changes
+- SQLite repository now resolves records and mandatory expenses directly by row/id and supports indexed transfer lookup
+- JSON backup pruning now honors `keep_last=0` by skipping backup creation and removing matching retained files
+- Batch budget result calculation now uses a single SQL aggregation query for current spend
+- `PDF`/`XLSX` grouped category sections are skipped when they would only duplicate a single-category filtered report
+
+### Tests
+
+- Added coverage for multi-currency wallet initial balances in balance, timeline, report, and wallet use cases
+- Added coverage for batch budget calculations, mandatory-expense budget inclusion, grouped export behavior, and backup pruning with `keep_last=0`
+
+### Docs
+
+- Updated `README.md` and `README_EN.md` for grouped report export, budget refresh behavior, multi-currency balance analytics, and the new helper modules
+
+No breaking changes.
+
+---
+
 ## [1.7.3] - 2026-03-23
 
 ### Added

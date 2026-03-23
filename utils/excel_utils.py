@@ -95,21 +95,23 @@ def _style_data_row(ws, row_idx: int, *, amount_columns: tuple[int, ...] = ()) -
         cell.border = THIN_BORDER
         cell.alignment = Alignment(horizontal="left", vertical="center")
     for column_idx in amount_columns:
-        ws.cell(row=row_idx, column=column_idx).number_format = '#,##0.00'
+        ws.cell(row=row_idx, column=column_idx).number_format = "#,##0.00"
         ws.cell(row=row_idx, column=column_idx).alignment = Alignment(
             horizontal="right",
             vertical="center",
         )
 
 
-def _style_total_row(ws, row_idx: int, *, fill: PatternFill, amount_columns: tuple[int, ...]) -> None:
+def _style_total_row(
+    ws, row_idx: int, *, fill: PatternFill, amount_columns: tuple[int, ...]
+) -> None:
     for cell in ws[row_idx]:
         cell.font = Font(bold=True, color="1F1F1F")
         cell.fill = fill
         cell.border = THIN_BORDER
         cell.alignment = Alignment(horizontal="left", vertical="center")
     for column_idx in amount_columns:
-        ws.cell(row=row_idx, column=column_idx).number_format = '#,##0.00'
+        ws.cell(row=row_idx, column=column_idx).number_format = "#,##0.00"
         ws.cell(row=row_idx, column=column_idx).alignment = Alignment(
             horizontal="right",
             vertical="center",
@@ -128,6 +130,15 @@ def _set_auto_width(ws) -> None:
 
 def _safe_str(value):
     return "" if value is None else str(value)
+
+
+def _should_add_by_category_sheet(report: Report, groups: dict[str, Report]) -> bool:
+    if len(groups) > 1:
+        return True
+    if len(groups) != 1:
+        return False
+    only_subreport = next(iter(groups.values()))
+    return len(list(only_subreport.records())) < len(list(report.records()))
 
 
 def report_to_xlsx(report: Report, filepath: str) -> None:
@@ -200,40 +211,79 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
     except Exception:
         groups = {}
 
-    bycat_ws = wb.create_sheet(title="By Category", index=1)
-    for category, subreport in sorted(groups.items(), key=lambda x: x[0] or ""):
-        bycat_ws.append([f"Category: {category}"])
-        category_row = bycat_ws.max_row
-        bycat_ws.merge_cells(
-            start_row=category_row,
-            start_column=1,
-            end_row=category_row,
-            end_column=3,
-        )
-        bycat_ws.cell(row=category_row, column=1).font = Font(bold=True, color="1F1F1F")
-        bycat_ws.cell(row=category_row, column=1).fill = SECTION_FILL
-        bycat_ws.cell(row=category_row, column=1).border = THIN_BORDER
-        bycat_ws.append(["Date", "Type", "Amount (KZT)"])
-        _style_header_row(bycat_ws, bycat_ws.max_row)
-        records_total = 0.0
-        for r in sorted(
-            subreport.records(),
-            key=lambda rr: (0, rr.date) if isinstance(rr.date, dt_date) else (1, dt_date.max),
-        ):
-            amt = getattr(r, "amount", 0.0)
-            records_total += (
-                getattr(r, "amount", 0.0) if getattr(r, "amount", None) is not None else 0.0
+    if _should_add_by_category_sheet(report, groups):
+        bycat_ws = wb.create_sheet(title="By Category", index=1)
+        for category, subreport in sorted(groups.items(), key=lambda x: x[0] or ""):
+            bycat_ws.append([f"Category: {category}"])
+            category_row = bycat_ws.max_row
+            bycat_ws.merge_cells(
+                start_row=category_row,
+                start_column=1,
+                end_row=category_row,
+                end_column=3,
             )
-            display_date = getattr(r, "date", "")
-            if isinstance(display_date, dt_date):
-                display_date = display_date.isoformat()
-            bycat_ws.append([display_date, report_record_type_label(r), abs(amt)])
-            _style_data_row(bycat_ws, bycat_ws.max_row, amount_columns=(3,))
-        bycat_ws.append(["SUBTOTAL", "", abs(records_total)])
-        _style_total_row(bycat_ws, bycat_ws.max_row, fill=SUBTOTAL_FILL, amount_columns=(3,))
-        bycat_ws.append([""])
-    bycat_ws.freeze_panes = "A2"
-    _set_auto_width(bycat_ws)
+            bycat_ws.cell(row=category_row, column=1).font = Font(bold=True, color="1F1F1F")
+            bycat_ws.cell(row=category_row, column=1).fill = SECTION_FILL
+            bycat_ws.cell(row=category_row, column=1).border = THIN_BORDER
+            bycat_ws.append(["Date", "Type", "Amount (KZT)"])
+            _style_header_row(bycat_ws, bycat_ws.max_row)
+            records_total = 0.0
+            for r in sorted(
+                subreport.records(),
+                key=lambda rr: (0, rr.date) if isinstance(rr.date, dt_date) else (1, dt_date.max),
+            ):
+                amt = getattr(r, "amount", 0.0)
+                records_total += (
+                    getattr(r, "amount", 0.0) if getattr(r, "amount", None) is not None else 0.0
+                )
+                display_date = getattr(r, "date", "")
+                if isinstance(display_date, dt_date):
+                    display_date = display_date.isoformat()
+                bycat_ws.append([display_date, report_record_type_label(r), abs(amt)])
+                _style_data_row(bycat_ws, bycat_ws.max_row, amount_columns=(3,))
+            bycat_ws.append(["SUBTOTAL", "", abs(records_total)])
+            _style_total_row(bycat_ws, bycat_ws.max_row, fill=SUBTOTAL_FILL, amount_columns=(3,))
+            bycat_ws.append([""])
+        bycat_ws.freeze_panes = "A2"
+        _set_auto_width(bycat_ws)
+
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
+    wb.save(filepath)
+    try:
+        wb.close()
+    except Exception:
+        pass
+    gc.collect()
+
+
+def grouped_report_to_xlsx(
+    statement_title: str,
+    grouped_rows: list[tuple[str, int, float]],
+    filepath: str,
+) -> None:
+    wb = Workbook()
+    ws = wb.active
+    if ws is not None:
+        ws.title = "Grouped Report"
+        ws.append([statement_title, "", ""])
+        _style_title_row(ws, 1, columns=3)
+        ws.append(["Category", "Operations", "Total (KZT)"])
+        _style_header_row(ws, 2)
+        ws.append(["", "", "Grouped category totals"])
+        ws["C3"].alignment = Alignment(horizontal="right", vertical="center")
+        ws["C3"].font = Font(italic=True, color="666666")
+        ws.freeze_panes = "A3"
+
+        total_kzt = 0.0
+        for category, operations_count, amount_kzt in grouped_rows:
+            total_kzt += float(amount_kzt)
+            ws.append([category, int(operations_count), float(amount_kzt)])
+            _style_data_row(ws, ws.max_row, amount_columns=(3,))
+
+        ws.append(["TOTAL", "", total_kzt])
+        _style_total_row(ws, ws.max_row, fill=TOTAL_FILL, amount_columns=(3,))
+        ws.auto_filter.ref = f"A2:C{ws.max_row}"
+        _set_auto_width(ws)
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     wb.save(filepath)

@@ -37,6 +37,7 @@ MAX_IMPORT_ROWS = 200_000
 MAX_CSV_FIELD_SIZE = 1_000_000
 
 REPORT_HEADERS = ["Date", "Type", "Category", "Amount (KZT)"]
+GROUPED_REPORT_HEADERS = ["Category", "Operations", "Total (KZT)"]
 DATA_HEADERS = [
     "date",
     "type",
@@ -370,6 +371,25 @@ def report_to_csv(report: Report, filepath: str) -> None:
         records_total = sum(r.signed_amount_kzt() for r in report.records())
         writer.writerow(["SUBTOTAL", "", "", f"{records_total:.2f}"])
         writer.writerow(["FINAL BALANCE", "", "", f"{report.total_fixed():.2f}"])
+
+
+def grouped_report_to_csv(
+    statement_title: str,
+    grouped_rows: list[tuple[str, int, float]],
+    filepath: str,
+) -> None:
+    """Export grouped category summary as currently shown in grouped Reports view."""
+
+    total_kzt = 0.0
+    with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow([statement_title, "", ""])
+        writer.writerow(GROUPED_REPORT_HEADERS)
+        writer.writerow(["", "", "Grouped category totals"])
+        for category, operations_count, amount_kzt in grouped_rows:
+            total_kzt += float(amount_kzt)
+            writer.writerow([category, int(operations_count), f"{float(amount_kzt):.2f}"])
+        writer.writerow(["TOTAL", "", f"{total_kzt:.2f}"])
 
 
 def report_from_csv(filepath: str) -> Report:

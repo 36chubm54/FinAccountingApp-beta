@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import date as dt_date
 
-from domain.records import IncomeRecord, MandatoryExpenseRecord, Record
+from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 from domain.transfers import Transfer
 from domain.wallets import Wallet
 from infrastructure.repositories import RecordRepository
@@ -182,6 +182,47 @@ class SQLiteRecordRepository(RecordRepository):
             records=records,
             mandatory_expenses=mandatory_expenses,
             transfers=transfers,
+        )
+
+    def _record_from_row(self, row) -> Record:
+        payload = {
+            "id": int(row["id"]),
+            "date": str(row["date"]),
+            "wallet_id": int(row["wallet_id"]),
+            "transfer_id": int(row["transfer_id"]) if row["transfer_id"] is not None else None,
+            "amount_original": self._storage._money_from_row(
+                row, "amount_original", "amount_original_minor"
+            ),
+            "currency": str(row["currency"]).upper(),
+            "rate_at_operation": self._storage._rate_from_row(row),
+            "amount_kzt": self._storage._money_from_row(row, "amount_kzt", "amount_kzt_minor"),
+            "category": str(row["category"]),
+            "description": str(row["description"] or ""),
+        }
+        if str(row["type"]) == "income":
+            return IncomeRecord(**payload)
+        if str(row["type"]) == "mandatory_expense":
+            return MandatoryExpenseRecord(
+                **payload,
+                period=str(row["period"] or "monthly"),  # type: ignore[arg-type]
+            )
+        return ExpenseRecord(**payload)
+
+    def _mandatory_from_row(self, row) -> MandatoryExpenseRecord:
+        return MandatoryExpenseRecord(
+            id=int(row["id"]),
+            wallet_id=int(row["wallet_id"]),
+            amount_original=self._storage._money_from_row(
+                row, "amount_original", "amount_original_minor"
+            ),
+            currency=str(row["currency"]).upper(),
+            rate_at_operation=self._storage._rate_from_row(row),
+            amount_kzt=self._storage._money_from_row(row, "amount_kzt", "amount_kzt_minor"),
+            category=str(row["category"]),
+            description=str(row["description"] or ""),
+            period=str(row["period"] or "monthly"),  # type: ignore[arg-type]
+            date=str(row["date"]) if row["date"] else "",
+            auto_pay=bool(row["auto_pay"]),
         )
 
     def _insert_wallet_row(self, wallet: Wallet) -> int:
@@ -561,7 +602,36 @@ class SQLiteRecordRepository(RecordRepository):
         self._insert_wallet_row(wallet)
 
     def load_active_wallets(self) -> list[Wallet]:
-        return [wallet for wallet in self.load_wallets() if wallet.is_active]
+        rows = self._conn.execute(
+            """
+            SELECT
+                id,
+                name,
+                currency,
+                initial_balance,
+                initial_balance_minor,
+                system,
+                allow_negative,
+                is_active
+            FROM wallets
+            WHERE is_active = 1
+            ORDER BY id
+            """
+        ).fetchall()
+        return [
+            Wallet(
+                id=int(row["id"]),
+                name=str(row["name"]),
+                currency=str(row["currency"]),
+                initial_balance=self._storage._money_from_row(
+                    row, "initial_balance", "initial_balance_minor"
+                ),
+                system=bool(row["system"]),
+                allow_negative=bool(row["allow_negative"]),
+                is_active=bool(row["is_active"]),
+            )
+            for row in rows
+        ]
 
     def create_wallet(
         self,
@@ -689,10 +759,48 @@ class SQLiteRecordRepository(RecordRepository):
 
     def get_by_id(self, record_id: int) -> Record:
         record_id = int(record_id)
-        for record in self.load_all():
-            if int(getattr(record, "id", 0)) == record_id:
-                return record
+        row = self._conn.execute(
+            """
+            SELECT
+                id,
+                type,
+                date,
+                wallet_id,
+                transfer_id,
+                amount_original,
+                amount_original_minor,
+                currency,
+                rate_at_operation,
+                rate_at_operation_text,
+                amount_kzt,
+                amount_kzt_minor,
+                category,
+                description,
+                period
+            FROM records
+            WHERE id = ?
+            """,
+            (record_id,),
+        ).fetchone()
+        if row is not None:
+            return self._record_from_row(row)
         raise ValueError(f"Record not found: {record_id}")
+
+    def get_transfer_id_by_record_index(self, index: int) -> int | None:
+        if int(index) < 0:
+            return None
+        row = self._conn.execute(
+            """
+            SELECT transfer_id
+            FROM records
+            ORDER BY id
+            LIMIT 1 OFFSET ?
+            """,
+            (int(index),),
+        ).fetchone()
+        if row is None or row["transfer_id"] is None:
+            return None
+        return int(row["transfer_id"])
 
     def replace(self, record: Record) -> None:
         record_id = int(getattr(record, "id", 0) or 0)
@@ -705,12 +813,21 @@ class SQLiteRecordRepository(RecordRepository):
             self._update_record_row(record_id, record, transfer_id=transfer_id)
 
     def delete_by_index(self, index: int) -> bool:
-        records = self.load_all()
-        if not (0 <= int(index) < len(records)):
+        if int(index) < 0:
             return False
-        target = records[int(index)]
+        row = self._conn.execute(
+            """
+            SELECT id
+            FROM records
+            ORDER BY id
+            LIMIT 1 OFFSET ?
+            """,
+            (int(index),),
+        ).fetchone()
+        if row is None:
+            return False
         with self._conn:
-            self._conn.execute("DELETE FROM records WHERE id = ?", (int(target.id),))
+            self._conn.execute("DELETE FROM records WHERE id = ?", (int(row["id"]),))
         return True
 
     def delete_all(self) -> None:
@@ -742,13 +859,31 @@ class SQLiteRecordRepository(RecordRepository):
         return self._storage.get_mandatory_expenses()
 
     def get_mandatory_expense_by_id(self, expense_id: int) -> MandatoryExpenseRecord:
-        expense = next(
-            (item for item in self.load_mandatory_expenses() if int(item.id) == int(expense_id)),
-            None,
-        )
-        if expense is None:
+        row = self._conn.execute(
+            """
+            SELECT
+                id,
+                wallet_id,
+                amount_original,
+                amount_original_minor,
+                currency,
+                rate_at_operation,
+                rate_at_operation_text,
+                amount_kzt,
+                amount_kzt_minor,
+                category,
+                description,
+                period,
+                date,
+                auto_pay
+            FROM mandatory_expenses
+            WHERE id = ?
+            """,
+            (int(expense_id),),
+        ).fetchone()
+        if row is None:
             raise ValueError(f"Mandatory expense не найден: {expense_id}")
-        return expense
+        return self._mandatory_from_row(row)
 
     def update_mandatory_expense(self, expense: MandatoryExpenseRecord) -> None:
         expense_id = int(getattr(expense, "id", 0) or 0)
@@ -804,12 +939,21 @@ class SQLiteRecordRepository(RecordRepository):
             )
 
     def delete_mandatory_expense_by_index(self, index: int) -> bool:
-        expenses = self.load_mandatory_expenses()
-        if not (0 <= int(index) < len(expenses)):
+        if int(index) < 0:
             return False
-        target = expenses[int(index)]
+        row = self._conn.execute(
+            """
+            SELECT id
+            FROM mandatory_expenses
+            ORDER BY id
+            LIMIT 1 OFFSET ?
+            """,
+            (int(index),),
+        ).fetchone()
+        if row is None:
+            return False
         with self._conn:
-            self._conn.execute("DELETE FROM mandatory_expenses WHERE id = ?", (int(target.id),))
+            self._conn.execute("DELETE FROM mandatory_expenses WHERE id = ?", (int(row["id"]),))
         return True
 
     def delete_all_mandatory_expenses(self) -> None:

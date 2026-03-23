@@ -122,3 +122,26 @@ def test_prune_backups(tmp_path):
     assert "data_backup_20250104_120000.json" in remaining_names
     # Stray file should remain untouched
     assert stray.exists()
+
+
+def test_prune_backups_keep_zero_removes_all_matching(tmp_path):
+    from backup import _prune_backups
+
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    for ts in ("20250101_120000", "20250102_120000"):
+        (backup_dir / f"data_backup_{ts}.json").write_text("{}", encoding="utf-8")
+
+    _prune_backups(backup_dir, source_stem="data", source_suffix=".json", keep_last=0)
+
+    assert list(backup_dir.glob("data_backup_*.json")) == []
+
+
+def test_create_backup_skips_creation_when_keep_zero(tmp_path):
+    src = tmp_path / "data.json"
+    src.write_text('{"records": []}', encoding="utf-8")
+
+    backup_path = create_backup(str(src), keep_last=0)
+
+    assert backup_path is None
+    assert not (tmp_path / "backups").exists()

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import logging
 import tkinter as tk
+from collections.abc import Callable
 from dataclasses import dataclass
 from tkinter import messagebox, simpledialog, ttk
 from typing import Any, Protocol
 
 from domain.budget import Budget, BudgetResult, BudgetStatus, PaceStatus
+from gui.tooltip import Tooltip
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,7 @@ class BudgetTabBindings:
     budget_tree: ttk.Treeview
     progress_canvas: tk.Canvas
     status_label: ttk.Label
+    refresh: Callable[[], None]
 
 
 def _draw_progress_bars(canvas: tk.Canvas, results: list[BudgetResult]) -> None:
@@ -135,22 +138,40 @@ def build_budget_tab(
     limit_entry.grid(row=1, column=1, sticky="ew", padx=6, pady=4)
 
     include_mandatory_var = tk.BooleanVar(value=False)
-    ttk.Checkbutton(
+    include_mandatory_check = ttk.Checkbutton(
         form_frame,
         text="Include mandatory expenses",
         variable=include_mandatory_var,
-    ).grid(row=1, column=2, columnspan=2, sticky="w", padx=6, pady=4)
+    )
+    include_mandatory_check.grid(row=1, column=2, columnspan=2, sticky="w", padx=6, pady=4)
+    Tooltip(
+        include_mandatory_check,
+        "Counts records with type 'mandatory_expense' only when they were added to Records,\n"
+        "their category matches the budget category, "
+        "and their date falls inside the budget period.",
+    )
 
     list_frame = ttk.Frame(parent)
     list_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 8))
     list_frame.grid_columnconfigure(0, weight=1)
     list_frame.grid_rowconfigure(0, weight=1)
 
-    columns = ("category", "period", "limit", "spent", "remaining", "usage", "pace", "status")
+    columns = (
+        "category",
+        "period",
+        "include",
+        "limit",
+        "spent",
+        "remaining",
+        "usage",
+        "pace",
+        "status",
+    )
     budget_tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=10)
 
     budget_tree.heading("category", text="Category")
     budget_tree.heading("period", text="Period")
+    budget_tree.heading("include", text="Include mandatory")
     budget_tree.heading("limit", text="Limit KZT")
     budget_tree.heading("spent", text="Spent KZT")
     budget_tree.heading("remaining", text="Remaining")
@@ -159,6 +180,7 @@ def build_budget_tab(
     budget_tree.heading("status", text="Status")
     budget_tree.column("category", width=110, anchor="w")
     budget_tree.column("period", width=185, anchor="w")
+    budget_tree.column("include", width=120, anchor="center", stretch=False)
     budget_tree.column("limit", width=100, anchor="e")
     budget_tree.column("spent", width=100, anchor="e")
     budget_tree.column("remaining", width=100, anchor="e")
@@ -201,7 +223,9 @@ def build_budget_tab(
 
     def _refresh() -> None:
         try:
-            category_combo["values"] = context.controller.get_expense_categories()
+            categories = set(context.controller.get_expense_categories())
+            categories.update(context.controller.get_mandatory_expense_categories())
+            category_combo["values"] = sorted(categories, key=lambda value: value.casefold())
         except Exception:
             logger.debug("Failed to refresh budget category suggestions", exc_info=True)
 
@@ -221,6 +245,7 @@ def build_budget_tab(
                 values=(
                     budget.category,
                     f"{budget.start_date}  ->  {budget.end_date}",
+                    "Yes" if budget.include_mandatory else "No",
                     f"{budget.limit_kzt:,.0f}",
                     f"{result.spent_kzt:,.0f}",
                     f"{result.remaining_kzt:,.0f}",
@@ -339,4 +364,5 @@ def build_budget_tab(
         budget_tree=budget_tree,
         progress_canvas=progress_canvas,
         status_label=status_label,
+        refresh=_refresh,
     )

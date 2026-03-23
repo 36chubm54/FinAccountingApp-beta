@@ -1,3 +1,5 @@
+"""Operations tab — CRUD operations for financial records and transfers, import and export"""
+
 from __future__ import annotations
 
 import os
@@ -5,13 +7,17 @@ import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
-from pathlib import Path
 from tkinter import VERTICAL, filedialog, messagebox, ttk
 from typing import Any, Protocol
 
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
 from gui.helpers import open_in_file_manager
+from gui.tabs.operations_support import (
+    refresh_operation_views,
+    safe_destroy,
+    show_import_preview_dialog,
+)
 
 
 class OperationsTabContext(Protocol):
@@ -25,6 +31,8 @@ class OperationsTabContext(Protocol):
     def _refresh_charts(self) -> None: ...
 
     def _refresh_wallets(self) -> None: ...
+
+    def _refresh_budgets(self) -> None: ...
 
     def _run_background(
         self,
@@ -43,102 +51,6 @@ class OperationsTabBindings:
     records_tree: ttk.Treeview
     refresh_operation_wallet_menu: Callable[[], None]
     refresh_transfer_wallet_menus: Callable[[], None]
-
-
-def show_import_preview_dialog(
-    parent: tk.Misc,
-    *,
-    filepath: str,
-    policy_label: str,
-    preview: ImportResult,
-    force: bool = False,
-) -> bool:
-    dialog = tk.Toplevel(parent)
-    dialog.title("Import Preview (Dry-Run)")
-    dialog.transient(parent.winfo_toplevel())
-    dialog.resizable(False, False)
-
-    result = {"confirmed": False}
-    content = ttk.Frame(dialog, padding=12)
-    content.grid(row=0, column=0, sticky="nsew")
-    content.grid_columnconfigure(0, weight=1)
-
-    ttk.Label(content, text="Import Preview (Dry-Run)", font=("Segoe UI", 11, "bold")).grid(
-        row=0, column=0, sticky="w"
-    )
-    ttk.Label(content, text=f"File: {Path(filepath).name}").grid(
-        row=1, column=0, sticky="w", pady=(8, 0)
-    )
-    ttk.Label(content, text=f"Policy: {policy_label}").grid(row=2, column=0, sticky="w")
-
-    if force:
-        ttk.Label(
-            content,
-            text="Readonly snapshot: force override is active.",
-            foreground="#b45309",
-        ).grid(row=3, column=0, sticky="w", pady=(8, 0))
-        stats_row = 4
-    else:
-        stats_row = 3
-
-    stats = ttk.Frame(content)
-    stats.grid(row=stats_row, column=0, sticky="ew", pady=(10, 0))
-    stats.grid_columnconfigure(1, weight=1)
-    ttk.Label(stats, text="Records to import:").grid(row=0, column=0, sticky="w")
-    ttk.Label(stats, text=str(preview.imported)).grid(row=0, column=1, sticky="e")
-    ttk.Label(stats, text="Skipped rows:").grid(row=1, column=0, sticky="w")
-    ttk.Label(stats, text=str(preview.skipped)).grid(row=1, column=1, sticky="e")
-    ttk.Label(stats, text="Errors:").grid(row=2, column=0, sticky="w")
-    ttk.Label(stats, text=str(len(preview.errors))).grid(row=2, column=1, sticky="e")
-
-    ttk.Label(content, text="Errors:").grid(row=stats_row + 1, column=0, sticky="w", pady=(10, 4))
-    errors_frame = ttk.Frame(content)
-    errors_frame.grid(row=stats_row + 2, column=0, sticky="ew")
-    errors_frame.grid_columnconfigure(0, weight=1)
-    errors_tree = ttk.Treeview(
-        errors_frame,
-        show="tree",
-        selectmode="none",
-        height=min(max(len(preview.errors), 1), 5),
-    )
-    errors_tree.grid(row=0, column=0, sticky="nsew")
-    errors_scroll = ttk.Scrollbar(errors_frame, orient=VERTICAL, command=errors_tree.yview)
-    errors_scroll.grid(row=0, column=1, sticky="ns")
-    errors_tree.config(yscrollcommand=errors_scroll.set)
-    for error in preview.errors or ["No validation errors."]:
-        errors_tree.insert("", "end", text=error)
-
-    buttons = ttk.Frame(content)
-    buttons.grid(row=stats_row + 3, column=0, sticky="e", pady=(12, 0))
-
-    def close() -> None:
-        dialog.destroy()
-
-    def proceed() -> None:
-        result["confirmed"] = True
-        dialog.destroy()
-
-    ttk.Button(buttons, text="Cancel", command=close).pack(side=tk.LEFT, padx=(0, 8))
-    if preview.imported > 0:
-        ttk.Button(buttons, text="Proceed with Import", command=proceed).pack(side=tk.LEFT)
-
-    dialog.protocol("WM_DELETE_WINDOW", close)
-    dialog.update_idletasks()
-
-    parent_window = parent.winfo_toplevel()
-    parent_x = parent_window.winfo_rootx()
-    parent_y = parent_window.winfo_rooty()
-    parent_w = parent_window.winfo_width()
-    parent_h = parent_window.winfo_height()
-    width = dialog.winfo_width()
-    height = dialog.winfo_height()
-    pos_x = parent_x + max((parent_w - width) // 2, 0)
-    pos_y = parent_y + max((parent_h - height) // 2, 0)
-    dialog.geometry(f"+{pos_x}+{pos_y}")
-
-    dialog.grab_set()
-    parent.wait_window(dialog)
-    return bool(result["confirmed"])
 
 
 def build_operations_tab(
@@ -327,9 +239,7 @@ def build_operations_tab(
             category_combo.delete(0, tk.END)
             description_entry.delete(0, tk.END)
             _refresh_category_combo()
-            context._refresh_list()
-            context._refresh_charts()
-            context._refresh_wallets()
+            refresh_operation_views(context)
         except Exception as error:
             messagebox.showerror("Error", f"Failed to add record: {str(error)}")
 
@@ -358,9 +268,7 @@ def build_operations_tab(
             else:
                 messagebox.showerror("Error", "Failed to delete record.")
                 return
-            context._refresh_list()
-            context._refresh_charts()
-            context._refresh_wallets()
+            refresh_operation_views(context)
         except Exception as error:
             messagebox.showerror("Error", f"Failed to delete: {str(error)}")
 
@@ -492,19 +400,14 @@ def build_operations_tab(
                     "Record updated. date, wallet, amount_kzt, category, "
                     "and description were saved.",
                 )
-                context._refresh_list()
-                context._refresh_charts()
-                context._refresh_wallets()
+                refresh_operation_views(context)
                 cancel_edit()
             except Exception as error:
                 messagebox.showerror("Error", f"Failed to update record: {str(error)}")
 
         def cancel_edit() -> None:
             if edit_panel_state["panel"] is not None:
-                try:
-                    edit_panel_state["panel"].destroy()
-                except Exception:
-                    pass
+                safe_destroy(edit_panel_state["panel"])
                 edit_panel_state["panel"] = None
 
         ttk.Button(edit_panel, text="Save", command=save_edit).grid(row=5, column=2, padx=4)
@@ -520,6 +423,7 @@ def build_operations_tab(
             messagebox.showinfo("Success", "All records have been deleted.")
             context._refresh_list()
             context._refresh_charts()
+            context._refresh_budgets()
 
     wallet_id_map: dict[str, int] = {}
 
@@ -637,9 +541,7 @@ def build_operations_tab(
             transfer_description_entry.delete(0, tk.END)
             transfer_commission_entry.delete(0, tk.END)
             transfer_commission_entry.insert(0, "0")
-            context._refresh_list()
-            context._refresh_charts()
-            context._refresh_wallets()
+            refresh_operation_views(context)
         except Exception as error:
             messagebox.showerror("Error", f"Failed to create transfer: {str(error)}")
 
@@ -690,9 +592,7 @@ def build_operations_tab(
                 f"Successfully imported {result.imported} records from {cfg['desc']} file."
                 "\nAll existing records have been replaced." + details,
             )
-            context._refresh_list()
-            context._refresh_charts()
-            context._refresh_wallets()
+            refresh_operation_views(context)
 
         def on_error(exc: BaseException) -> None:
             if isinstance(exc, FileNotFoundError):

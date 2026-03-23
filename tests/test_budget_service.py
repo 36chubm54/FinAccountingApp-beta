@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from app.use_cases import AddMandatoryExpenseToReport
 from domain.budget import BudgetStatus, PaceStatus
+from domain.records import MandatoryExpenseRecord
 from infrastructure.sqlite_repository import SQLiteRecordRepository
 from services.budget_service import BudgetService
 from services.metrics_service import MetricsService
@@ -322,5 +324,73 @@ def test_get_distinct_expense_categories_returns_sorted_unique_values(tmp_path: 
             _insert_expense(conn, date="2026-03-06", category="food", amount_kzt=50.0)
         categories = MetricsService(repo).get_distinct_expense_categories()
         assert categories == ["Food", "food"]
+    finally:
+        repo.close()
+
+
+def test_get_all_results_returns_batch_results_with_correct_spend(tmp_path: Path) -> None:
+    repo = _build_repo(tmp_path)
+    try:
+        with sqlite3.connect(repo.db_path) as conn:
+            _insert_expense(conn, date="2026-03-05", category="Food", amount_kzt=100.0)
+            _insert_expense(
+                conn,
+                date="2026-03-06",
+                category="Food",
+                amount_kzt=25.0,
+                record_type="mandatory_expense",
+            )
+            _insert_expense(conn, date="2026-03-07", category="Travel", amount_kzt=300.0)
+
+        service = BudgetService(repo)
+        food = service.create_budget("Food", "2026-03-01", "2026-03-31", 500.0)
+        travel = service.create_budget("Travel", "2026-03-01", "2026-03-31", 800.0)
+        food_with_mandatory = service.create_budget(
+            "Food",
+            "2026-04-01",
+            "2026-04-30",
+            500.0,
+            include_mandatory=True,
+        )
+
+        results = service.get_all_results(today=dt_date(2026, 3, 20))
+        by_id = {result.budget.id: result for result in results}
+
+        assert by_id[food.id].spent_kzt == 100.0
+        assert by_id[travel.id].spent_kzt == 300.0
+        assert by_id[food_with_mandatory.id].spent_kzt == 0.0
+    finally:
+        repo.close()
+
+
+def test_budget_includes_added_mandatory_record_within_period(tmp_path: Path) -> None:
+    repo = _build_repo(tmp_path)
+    try:
+        repo.save_mandatory_expense(
+            MandatoryExpenseRecord(
+                wallet_id=1,
+                date="",
+                amount_original=250.0,
+                currency="KZT",
+                rate_at_operation=1.0,
+                amount_kzt=250.0,
+                category="Food",
+                description="Meal plan",
+                period="monthly",
+            )
+        )
+        service = BudgetService(repo)
+        budget = service.create_budget(
+            "Food",
+            "2026-03-01",
+            "2026-03-31",
+            1000.0,
+            include_mandatory=True,
+        )
+
+        assert AddMandatoryExpenseToReport(repo).execute(0, "2026-03-15", 1) is True
+
+        result = service.get_budget_result(budget, today=dt_date(2026, 3, 20))
+        assert result.spent_kzt == 250.0
     finally:
         repo.close()

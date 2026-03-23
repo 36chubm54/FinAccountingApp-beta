@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from infrastructure.sqlite_repository import SQLiteRecordRepository
-from services.sqlite_money_sql import minor_amount_expr, signed_minor_amount_expr
+from services.currency_support import convert_money_to_kzt
+from services.sqlite_money_sql import minor_amount_expr, money_expr, signed_minor_amount_expr
 
 
 @dataclass(frozen=True)
@@ -43,8 +44,9 @@ class TimelineService:
     records + wallets.initial_balance. Never writes to the database.
     """
 
-    def __init__(self, repository: SQLiteRecordRepository) -> None:
+    def __init__(self, repository: SQLiteRecordRepository, currency_service=None) -> None:
         self._repo = repository
+        self._currency = currency_service
 
     def get_net_worth_timeline(self) -> list[MonthlyNetWorth]:
         """
@@ -186,8 +188,11 @@ class TimelineService:
 
     def _get_total_initial_balance(self) -> float:
         """SUM of initial_balance across all active wallets."""
-        row = self._repo.query_one(
-            f"SELECT COALESCE(SUM({minor_amount_expr('initial_balance')}), 0.0) "
+        rows = self._repo.query_all(
+            f"SELECT COALESCE({money_expr('initial_balance')}, 0.0), currency "
             "FROM wallets WHERE is_active = 1"
         )
-        return (float(row[0]) / 100.0) if row else 0.0
+        total = 0.0
+        for row in rows:
+            total += convert_money_to_kzt(float(row[0]), str(row[1]), self._currency)
+        return round(total, 2)

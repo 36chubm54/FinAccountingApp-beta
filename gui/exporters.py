@@ -28,6 +28,34 @@ def export_report(report, filepath: str, fmt: str) -> None:
         raise
 
 
+def export_grouped_report(
+    statement_title: str,
+    grouped_rows: list[tuple[str, int, float]],
+    filepath: str,
+    fmt: str,
+) -> None:
+    fmt = (fmt or "csv").lower()
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
+    try:
+        if fmt == "csv":
+            from utils.csv_utils import grouped_report_to_csv
+
+            grouped_report_to_csv(statement_title, grouped_rows, filepath)
+        elif fmt in ("xlsx", "xls"):
+            from utils.excel_utils import grouped_report_to_xlsx
+
+            grouped_report_to_xlsx(statement_title, grouped_rows, filepath)
+        elif fmt == "pdf":
+            from utils.pdf_utils import grouped_report_to_pdf
+
+            grouped_report_to_pdf(statement_title, grouped_rows, filepath)
+        else:
+            raise ValueError(f"Unsupported export format: {fmt}")
+    except Exception:
+        logger.exception("Failed to export grouped report to %s (%s)", filepath, fmt)
+        raise
+
+
 def export_mandatory_expenses(expenses: Iterable, filepath: str, fmt: str) -> None:
     fmt = (fmt or "csv").lower()
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None

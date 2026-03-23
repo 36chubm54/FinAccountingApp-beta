@@ -87,6 +87,7 @@ class FinancialApp(tk.Tk):
         self.refresh_operation_wallet_menu: Callable[[], None] | None = None
         self.refresh_transfer_wallet_menus: Callable[[], None] | None = None
         self.refresh_wallets: Callable[[], None] | None = None
+        self.refresh_budgets: Callable[[], None] | None = None
         self._status_refresh_job: str | None = None
         self._online_var: tk.BooleanVar | None = None
         self._currency_status_label: ttk.Label | None = None
@@ -154,6 +155,7 @@ class FinancialApp(tk.Tk):
         build_reports_tab(self.tab_reports, self)
         self._analytics_bindings = build_analytics_tab(self.tab_analytics, context=self)
         self._budget_bindings = build_budget_tab(self.tab_budget, context=self)
+        self.refresh_budgets = self._budget_bindings.refresh
         build_settings_tab(self.tab_settings, self, IMPORT_FORMATS)
 
         self.progress = ttk.Progressbar(self, mode="indeterminate")
@@ -412,6 +414,13 @@ class FinancialApp(tk.Tk):
         if self.refresh_transfer_wallet_menus is not None:
             try:
                 self.refresh_transfer_wallet_menus()
+            except Exception:
+                pass
+
+    def _refresh_budgets(self) -> None:
+        if self.refresh_budgets is not None:
+            try:
+                self.refresh_budgets()
             except Exception:
                 pass
 
