@@ -7,6 +7,33 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.7.3] - 2026-03-23
+
+### Added
+
+- Excel exports now apply readability styling: colored headers, highlighted totals, `freeze_panes`, `auto_filter`, auto-width columns, and numeric amount cells
+- Analytics Dashboard now includes an `ⓘ` tooltip explaining the displayed metrics
+
+### Changed
+
+- `Analytics` replaces annualized expenses with `Year expense` in the Dashboard
+- `Cost per day/hour/minute` is now derived from year-to-date expenses instead of annualized burn rate
+- `FinancialController` adds `get_year_expense(...)` and removes `get_average_annual_expenses(...)`
+- Wallets refresh after editing a selected record in `gui/tabs/operations_tab.py`
+
+### Tests
+
+- Updated `tests/test_analytics_tab.py` for year-to-date expense and time-cost calculations
+- Extended `tests/test_excel.py` to cover styled XLSX exports and numeric cell values
+
+### Docs
+
+- Updated `README.md` and `README_EN.md` to document the Analytics metric changes and improved XLSX export formatting
+
+No breaking changes.
+
+---
+
 ## [1.7.2] - 2026-03-22
 
 ### Added

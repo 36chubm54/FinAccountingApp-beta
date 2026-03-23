@@ -84,12 +84,14 @@ Income is displayed in green, expenses in red. For a pie chart, small categories
 
 Financial analytics for an arbitrary period.
 
-- **Dashboard** — key metrics: net worth, savings rate, burn rate.
+- **Dashboard** — key metrics: net worth, savings rate, burn rate, avg monthly income, avg monthly expenses, year income, year expense, and cost per day/hour/minute.
 - **Net Worth Timeline** — line chart of net worth by month.
 - **Category Breakdown** — expenses and income by category (tables + expenses pie chart).
 - **Monthly Report** — table with income, expenses, cashflow and savings rate by month.
 
 The period filter uses `YYYY-MM-DD` in the `From` / `To` fields. Transfers are excluded from calculations.
+The Dashboard now includes an `ⓘ` tooltip that explains the metric formulas.
+`Year expense` is calculated as calendar-year expenses up to the selected end date, and `Cost per day/hour/minute` now derives from that year-to-date expense instead of an annualized burn rate.
 
 > **Note:** After launching the application, mandatory payments are automatically applied with a detailed GUI message displayed.
 > If online mode was saved previously, the application restores it on startup and refreshes currency rates in the background.
@@ -176,6 +178,7 @@ Export report:
   `Transaction statement (<start_date> - <end_date>)`.
 - If `Period end` is not provided, current date is used as the period end.
 - In addition to the main records, a `Yearly Report` sheet with a monthly summary is added to `XLSX`. A second, intermediate sheet `By Category` is also created with records grouped by categories and subtotals.
+- `XLSX` now ships as a more readable export: styled header/total rows, `freeze panes`, `auto filter`, auto-sized columns, and numeric amount cells instead of stringified totals.
 - In `PDF` the monthly summary remains, and after the main statement, tables are added broken down by category (each category is a separate table with a subtotal).
 
 ### Opening Balance in Filtered Reports
@@ -763,6 +766,7 @@ Below are the key classes and functions synchronized with the actual code.
 
 - `AnalyticsTabBindings` — widget bindings for the `Analytics` tab.
 - `build_analytics_tab(parent, context)` — builds the `Analytics` tab (Dashboard, Category Breakdown, Monthly Report, Net Worth Timeline).
+- The Dashboard includes a metrics tooltip and shows `Year expense` instead of annualized expense.
 
 `gui/tabs/settings_tab.py`
 
@@ -784,10 +788,14 @@ Below are the key classes and functions synchronized with the actual code.
 - `get_cumulative_income_expense()` — cumulative income/expense by month (excluding transfers).
 - `get_savings_rate(start_date, end_date)` — savings rate (%) for a period (Metrics Engine, SQLite-only).
 - `get_burn_rate(start_date, end_date)` — average daily expense (KZT) (Metrics Engine, SQLite-only).
+- `get_year_income(year, up_to_date=None)` — calendar-year income, optionally year-to-date.
+- `get_year_expense(year, up_to_date=None)` — calendar-year expenses, optionally year-to-date.
 - `get_spending_by_category(start_date, end_date, limit=None)` — expenses by category (Metrics Engine, SQLite-only).
 - `get_income_by_category(start_date, end_date, limit=None)` — income by category (Metrics Engine, SQLite-only).
 - `get_top_expense_categories(start_date, end_date, top_n=5)` — top expense categories (Metrics Engine, SQLite-only).
 - `get_monthly_summary(start_date=None, end_date=None)` — monthly aggregates (Metrics Engine, SQLite-only).
+- `get_average_monthly_income(start_date, end_date)` — average monthly income over a range.
+- `get_average_monthly_expenses(start_date, end_date)` — average monthly expenses over a range.
 - `create_budget(...)`, `get_budgets()`, `get_budget_results()`, `delete_budget(...)`, `update_budget_limit(...)` — Budget System API surface.
 
 `gui/exporters.py`
@@ -920,6 +928,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `export_mandatory_expenses_to_xlsx(expenses, filepath)`.
 - `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)`.
 - `existing_initial_balance` is quantized to money scale during import.
+- XLSX export adds styled headers/sections/totals, `freeze_panes`, `auto_filter`, auto-width columns, and keeps money amounts as numeric cells.
 
 `utils/tabular_utils.py`
 

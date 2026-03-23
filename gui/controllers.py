@@ -616,6 +616,16 @@ class FinancialController:
             return 0.0
         return self.get_income(start, end)
 
+    def get_year_expense(self, year: int, *, up_to_date: str | None = None) -> float:
+        """Total expenses (KZT) for the given calendar year, optionally up to a date."""
+        start = f"{int(year):04d}-01-01"
+        end = f"{int(year):04d}-12-31"
+        if up_to_date is not None:
+            end = self._min_date_iso(end, str(up_to_date))
+        if parse_ymd(end) < parse_ymd(start):
+            return 0.0
+        return self.get_expenses(start, end)
+
     def get_average_monthly_income(self, year: int, *, up_to_date: str | None = None) -> float:
         """
         Average monthly income (KZT) for the given calendar year (year-to-date if up_to_date set).
@@ -638,12 +648,6 @@ class FinancialController:
             return 0.0
         return round(self.get_expenses(start_date, end_date) / months, 2)
 
-    def get_average_annual_expenses(self, start_date: str, end_date: str) -> float:
-        """
-        Annualized expenses (KZT/year) based on average monthly expenses for [start_date, end_date].
-        """
-        return round(self.get_average_monthly_expenses(start_date, end_date) * 12, 2)
-
     def convert_kzt_to_usd(self, amount_kzt: float) -> float:
         """Convert a KZT amount to USD using the configured USD rate (KZT per 1 USD)."""
         try:
@@ -656,9 +660,11 @@ class FinancialController:
 
     def get_time_costs(self, start_date: str, end_date: str) -> tuple[float, float, float]:
         """
-        Cost of day/hour/minute (KZT) based on annualized expenses for [start_date, end_date].
+        Cost of day/hour/minute (KZT) based on year expenses up to end_date.
         """
-        annual = float(self.get_average_annual_expenses(start_date, end_date))
+        del start_date
+        end = parse_ymd(end_date)
+        annual = float(self.get_year_expense(end.year, up_to_date=end.isoformat()))
         per_day = annual / 365 if annual > 0 else 0.0
         per_hour = per_day / 24
         per_minute = per_hour / 60

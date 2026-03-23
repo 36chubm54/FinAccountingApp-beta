@@ -494,6 +494,7 @@ def build_operations_tab(
                 )
                 context._refresh_list()
                 context._refresh_charts()
+                context._refresh_wallets()
                 cancel_edit()
             except Exception as error:
                 messagebox.showerror("Error", f"Failed to update record: {str(error)}")

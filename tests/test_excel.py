@@ -16,6 +16,7 @@ from utils.csv_utils import (
     import_mandatory_expenses_from_csv,
 )
 from utils.excel_utils import (
+    export_records_to_xlsx,
     export_mandatory_expenses_to_xlsx,
     import_mandatory_expenses_from_xlsx,
     import_records_from_xlsx,
@@ -40,9 +41,19 @@ def test_report_xlsx_roundtrip():
             report_ws = wb["Report"]
             assert report_ws.cell(1, 1).value == "Transaction statement"
             assert report_ws.cell(4, 2).value == "Initial balance"
+            assert report_ws.cell(4, 4).value == 50.0
+            assert report_ws.freeze_panes == "A3"
+            assert report_ws.auto_filter.ref == "A2:D8"
             assert "Yearly Report" in wb.sheetnames
+            assert "By Category" in wb.sheetnames
             summary_ws = wb["Yearly Report"]
             assert summary_ws.cell(1, 1).value == "Month (2025)"
+            assert summary_ws.freeze_panes == "A2"
+            assert summary_ws.cell(2, 2).value == 100.0
+            bycat_ws = wb["By Category"]
+            labels = [row[0] for row in bycat_ws.iter_rows(max_col=1, values_only=True) if row[0]]
+            assert "Category: Food" in labels
+            assert "Category: Salary" in labels
         finally:
             wb.close()
         imported = report_from_xlsx(tmp_path)
@@ -70,7 +81,7 @@ def test_report_xlsx_uses_opening_balance_label_for_filtered_report():
             ws = wb["Report"]
             assert ws.cell(1, 1).value == "Transaction statement (2025-01-01 - 2025-12-31)"
             assert ws.cell(4, 2).value == "Opening balance"
-            assert ws.cell(4, 4).value == "70.00"
+            assert ws.cell(4, 4).value == 70.0
         finally:
             wb.close()
     finally:
@@ -177,14 +188,14 @@ def test_xlsx_export_grouped_drill_down():
                     data_rows.append(row)
             assert len(data_rows) == 2
             assert data_rows[0][2] == "Salary"
-            assert data_rows[0][3] == "100.00"
+            assert data_rows[0][3] == 100.0
             assert data_rows[1][2] == "Salary"
-            assert data_rows[1][3] == "50.00"
+            assert data_rows[1][3] == 50.0
             # Find SUBTOTAL row
             subtotal_found = False
             for row in ws.iter_rows(min_row=1, max_col=4, values_only=True):
                 if row[0] == "SUBTOTAL":
-                    assert row[3] == "150.00"
+                    assert row[3] == 150.0
                     subtotal_found = True
                     break
             assert subtotal_found
@@ -192,10 +203,40 @@ def test_xlsx_export_grouped_drill_down():
             final_found = False
             for row in ws.iter_rows(min_row=1, max_col=4, values_only=True):
                 if row[0] == "FINAL BALANCE":
-                    assert row[3] == "150.00"
+                    assert row[3] == 150.0
                     final_found = True
                     break
             assert final_found
+        finally:
+            wb.close()
+    finally:
+        for _ in range(5):
+            try:
+                os.unlink(tmp_path)
+                break
+            except PermissionError:
+                time.sleep(0.1)
+
+
+def test_records_xlsx_export_applies_readability_styles():
+    records = [
+        IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+        ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food"),
+    ]
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        tmp_path = tmp.name
+    try:
+        export_records_to_xlsx(records, tmp_path)
+        wb = load_workbook(tmp_path, data_only=True)
+        try:
+            ws = wb["Data"]
+            assert ws.freeze_panes == "A2"
+            assert ws.auto_filter.ref == "A1:M3"
+            assert ws.cell(1, 1).value == "date"
+            assert ws.cell(2, 5).value == 100.0
+            assert ws.cell(2, 8).value == 100.0
+            assert ws.column_dimensions["A"].width >= 12
         finally:
             wb.close()
     finally:

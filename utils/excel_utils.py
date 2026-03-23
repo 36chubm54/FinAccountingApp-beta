@@ -4,6 +4,8 @@ import os
 from datetime import date as dt_date
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 
 from domain.import_policy import ImportPolicy
 from domain.records import MandatoryExpenseRecord, Record
@@ -58,6 +60,71 @@ MANDATORY_HEADERS = [
     "period",
 ]
 
+HEADER_FILL = PatternFill(fill_type="solid", fgColor="1F4E78")
+SECTION_FILL = PatternFill(fill_type="solid", fgColor="D9EAF7")
+SUBTOTAL_FILL = PatternFill(fill_type="solid", fgColor="E2F0D9")
+TOTAL_FILL = PatternFill(fill_type="solid", fgColor="FFF2CC")
+THIN_BORDER = Border(
+    left=Side(style="thin", color="D9D9D9"),
+    right=Side(style="thin", color="D9D9D9"),
+    top=Side(style="thin", color="D9D9D9"),
+    bottom=Side(style="thin", color="D9D9D9"),
+)
+
+
+def _style_title_row(ws, row_idx: int, *, columns: int) -> None:
+    ws.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=columns)
+    cell = ws.cell(row=row_idx, column=1)
+    cell.font = Font(bold=True, size=14, color="1F1F1F")
+    cell.alignment = Alignment(horizontal="left", vertical="center")
+
+
+def _style_header_row(ws, row_idx: int, *, center: bool = False) -> None:
+    for cell in ws[row_idx]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = HEADER_FILL
+        cell.border = THIN_BORDER
+        cell.alignment = Alignment(
+            horizontal="center" if center else "left",
+            vertical="center",
+        )
+
+
+def _style_data_row(ws, row_idx: int, *, amount_columns: tuple[int, ...] = ()) -> None:
+    for cell in ws[row_idx]:
+        cell.border = THIN_BORDER
+        cell.alignment = Alignment(horizontal="left", vertical="center")
+    for column_idx in amount_columns:
+        ws.cell(row=row_idx, column=column_idx).number_format = '#,##0.00'
+        ws.cell(row=row_idx, column=column_idx).alignment = Alignment(
+            horizontal="right",
+            vertical="center",
+        )
+
+
+def _style_total_row(ws, row_idx: int, *, fill: PatternFill, amount_columns: tuple[int, ...]) -> None:
+    for cell in ws[row_idx]:
+        cell.font = Font(bold=True, color="1F1F1F")
+        cell.fill = fill
+        cell.border = THIN_BORDER
+        cell.alignment = Alignment(horizontal="left", vertical="center")
+    for column_idx in amount_columns:
+        ws.cell(row=row_idx, column=column_idx).number_format = '#,##0.00'
+        ws.cell(row=row_idx, column=column_idx).alignment = Alignment(
+            horizontal="right",
+            vertical="center",
+        )
+
+
+def _set_auto_width(ws) -> None:
+    widths: dict[int, int] = {}
+    for row in ws.iter_rows():
+        for cell in row:
+            value = "" if cell.value is None else str(cell.value)
+            widths[cell.column] = max(widths.get(cell.column, 0), len(value))
+    for column_idx, width in widths.items():
+        ws.column_dimensions[get_column_letter(column_idx)].width = min(max(width + 2, 12), 32)
+
 
 def _safe_str(value):
     return "" if value is None else str(value)
@@ -70,11 +137,17 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
     if ws is not None:
         ws.title = "Report"
         ws.append([report.statement_title, "", "", ""])
+        _style_title_row(ws, 1, columns=4)
         ws.append(["Date", "Type", "Category", "Amount (KZT)"])
+        _style_header_row(ws, 2)
         ws.append(["", "", "", "Fixed amounts by operation-time FX rates"])
+        ws["D3"].alignment = Alignment(horizontal="right", vertical="center")
+        ws["D3"].font = Font(italic=True, color="666666")
+        ws.freeze_panes = "A3"
 
     if (getattr(report, "initial_balance", 0) != 0 or report.is_opening_balance) and ws is not None:
-        ws.append(["", report.balance_label, "", f"{report.initial_balance:.2f}"])
+        ws.append(["", report.balance_label, "", report.initial_balance])
+        _style_total_row(ws, ws.max_row, fill=SECTION_FILL, amount_columns=(4,))
 
     for record in sorted(
         report.records(),
@@ -89,27 +162,38 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
                     record_date,
                     report_record_type_label(record),
                     record.category,
-                    f"{record.amount_kzt:.2f}",
+                    record.amount_kzt,
                 ]
             )
+            _style_data_row(ws, ws.max_row, amount_columns=(4,))
 
     total = report.total_fixed()
     records_total = sum(r.signed_amount_kzt() for r in report.records())
     if ws is not None:
-        ws.append(["SUBTOTAL", "", "", f"{records_total:.2f}"])
-        ws.append(["FINAL BALANCE", "", "", f"{total:.2f}"])
+        ws.append(["SUBTOTAL", "", "", records_total])
+        _style_total_row(ws, ws.max_row, fill=SUBTOTAL_FILL, amount_columns=(4,))
+        ws.append(["FINAL BALANCE", "", "", total])
+        _style_total_row(ws, ws.max_row, fill=TOTAL_FILL, amount_columns=(4,))
+        ws.auto_filter.ref = f"A2:D{ws.max_row}"
+        _set_auto_width(ws)
 
     summary_year, monthly_rows = report.monthly_income_expense_rows()
     summary_ws = wb.create_sheet("Yearly Report")
     if summary_ws is not None:
         summary_ws.append([f"Month ({summary_year})", "Income (KZT)", "Expense (KZT)"])
+        _style_header_row(summary_ws, 1, center=True)
+        summary_ws.freeze_panes = "A2"
         total_income = 0.0
         total_expense = 0.0
         for month_label, income, expense in monthly_rows:
             total_income += income
             total_expense += expense
-            summary_ws.append([month_label, f"{income:.2f}", f"{expense:.2f}"])
-        summary_ws.append(["TOTAL", f"{total_income:.2f}", f"{total_expense:.2f}"])
+            summary_ws.append([month_label, income, expense])
+            _style_data_row(summary_ws, summary_ws.max_row, amount_columns=(2, 3))
+        summary_ws.append(["TOTAL", total_income, total_expense])
+        _style_total_row(summary_ws, summary_ws.max_row, fill=TOTAL_FILL, amount_columns=(2, 3))
+        summary_ws.auto_filter.ref = f"A1:C{summary_ws.max_row}"
+        _set_auto_width(summary_ws)
 
     try:
         groups = report.grouped_by_category()
@@ -119,7 +203,18 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
     bycat_ws = wb.create_sheet(title="By Category", index=1)
     for category, subreport in sorted(groups.items(), key=lambda x: x[0] or ""):
         bycat_ws.append([f"Category: {category}"])
+        category_row = bycat_ws.max_row
+        bycat_ws.merge_cells(
+            start_row=category_row,
+            start_column=1,
+            end_row=category_row,
+            end_column=3,
+        )
+        bycat_ws.cell(row=category_row, column=1).font = Font(bold=True, color="1F1F1F")
+        bycat_ws.cell(row=category_row, column=1).fill = SECTION_FILL
+        bycat_ws.cell(row=category_row, column=1).border = THIN_BORDER
         bycat_ws.append(["Date", "Type", "Amount (KZT)"])
+        _style_header_row(bycat_ws, bycat_ws.max_row)
         records_total = 0.0
         for r in sorted(
             subreport.records(),
@@ -132,9 +227,13 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
             display_date = getattr(r, "date", "")
             if isinstance(display_date, dt_date):
                 display_date = display_date.isoformat()
-            bycat_ws.append([display_date, report_record_type_label(r), f"{abs(amt):.2f}"])
-        bycat_ws.append(["SUBTOTAL", "", f"{abs(records_total):.2f}"])
+            bycat_ws.append([display_date, report_record_type_label(r), abs(amt)])
+            _style_data_row(bycat_ws, bycat_ws.max_row, amount_columns=(3,))
+        bycat_ws.append(["SUBTOTAL", "", abs(records_total)])
+        _style_total_row(bycat_ws, bycat_ws.max_row, fill=SUBTOTAL_FILL, amount_columns=(3,))
         bycat_ws.append([""])
+    bycat_ws.freeze_panes = "A2"
+    _set_auto_width(bycat_ws)
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     wb.save(filepath)
@@ -164,10 +263,17 @@ def export_records_to_xlsx(
     if ws is not None:
         ws.title = "Data"
         ws.append(DATA_HEADERS)
+        _style_header_row(ws, 1)
+        ws.freeze_panes = "A2"
 
     for row in record_export_rows(records, transfers=list(transfers or [])):
         if ws is not None:
             ws.append([row.get(header, "") for header in DATA_HEADERS])
+            _style_data_row(ws, ws.max_row, amount_columns=(5, 7, 8))
+
+    if ws is not None and ws.max_row >= 1:
+        ws.auto_filter.ref = f"A1:M{ws.max_row}"
+        _set_auto_width(ws)
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     wb.save(filepath)
@@ -335,10 +441,17 @@ def export_mandatory_expenses_to_xlsx(
     if ws is not None:
         ws.title = "Mandatory"
         ws.append(MANDATORY_HEADERS)
+        _style_header_row(ws, 1)
+        ws.freeze_panes = "A2"
 
     for row in mandatory_expense_export_rows(expenses):
         if ws is not None:
             ws.append([row.get(header, "") for header in MANDATORY_HEADERS])
+            _style_data_row(ws, ws.max_row, amount_columns=(4, 6, 7))
+
+    if ws is not None and ws.max_row >= 1:
+        ws.auto_filter.ref = f"A1:I{ws.max_row}"
+        _set_auto_width(ws)
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     wb.save(filepath)

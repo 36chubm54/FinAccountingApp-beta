@@ -318,7 +318,7 @@ def test_convert_kzt_to_usd_uses_configured_rate(tmp_path: Path) -> None:
         repo.close()
 
 
-def test_time_costs_are_annualized_not_burn_rate(tmp_path: Path) -> None:
+def test_get_year_expense_and_time_costs_use_year_to_date_expenses(tmp_path: Path) -> None:
     db_path = tmp_path / "analytics.db"
     _init_db(db_path)
     conn = sqlite3.connect(db_path)
@@ -330,6 +330,9 @@ def test_time_costs_are_annualized_not_burn_rate(tmp_path: Path) -> None:
         _insert_record(
             conn, record_type="expense", date="2026-02-10", wallet_id=1, amount_kzt=3100.0
         )
+        _insert_record(
+            conn, record_type="expense", date="2026-03-10", wallet_id=1, amount_kzt=900.0
+        )
     finally:
         conn.close()
 
@@ -338,8 +341,10 @@ def test_time_costs_are_annualized_not_burn_rate(tmp_path: Path) -> None:
         burn = controller.get_burn_rate("2026-01-01", "2026-02-28")
         per_day, per_hour, per_minute = controller.get_time_costs("2026-01-01", "2026-02-28")
         assert burn == 105.08  # 6200 / 59 days
-        assert per_day == 101.92  # (6200/2 months * 12) / 365
-        assert per_hour == 4.25
-        assert per_minute == 0.07
+        assert controller.get_year_expense(2026, up_to_date="2026-02-28") == 6200.0
+        assert controller.get_year_expense(2026) == 7100.0
+        assert per_day == 16.99  # 6200 / 365
+        assert per_hour == 0.71
+        assert per_minute == 0.01
     finally:
         repo.close()

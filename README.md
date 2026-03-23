@@ -84,12 +84,14 @@ python main.py
 
 Финансовая аналитика за произвольный период.
 
-- **Dashboard** — ключевые метрики: net worth, savings rate, burn rate.
+- **Dashboard** — ключевые метрики: net worth, savings rate, burn rate, avg monthly income, avg monthly expenses, year income, year expense, cost per day/hour/minute.
 - **Net Worth Timeline** — линейный график накопленного капитала по месяцам.
 - **Category Breakdown** — расходы и доходы по категориям (таблица + pie chart расходов).
 - **Monthly Report** — таблица доходов, расходов, сальдо и нормы сбережений по месяцам.
 
 Фильтр периода задаётся в формате `YYYY-MM-DD` в полях `From` / `To`. Переводы исключаются из расчётов.
+В Dashboard появился tooltip `ⓘ` с кратким объяснением формул метрик.
+`Year expense` считается как сумма расходов за календарный год до выбранной конечной даты, а `Cost per day/hour/minute` строится именно от этого year-to-date расхода, а не от annualized burn rate.
 
 > **Примечание:** После запуска приложения автоматически применяются обязательные платежи с выводом детального GUI-сообщения.
 > Если ранее был сохранён online-режим, приложение восстановит его при старте и попытается обновить курсы в фоне.
@@ -176,6 +178,7 @@ python main.py
   `Transaction statement (<start_date> - <end_date>)`.
 - Если `Period end` не указан, в качестве конца периода используется текущая дата.
 - Кроме основных записей, в `XLSX` добавляется лист `Yearly Report` с помесячной сводкой. Также создаётся второй, промежуточный лист `By Category` с группировкой записей по категориям и подсуммами.
+- `XLSX` теперь оформляется как readable export: стилизованные header/total rows, `freeze panes`, `auto filter`, auto-width колонок и числовые ячейки вместо строковых сумм.
 - В `PDF` помесячная сводка остаётся, а после основной выписки добавляются таблицы с разбивкой по категориям (каждая категория — отдельная таблица с подсуммой).
 
 ### Начальный баланс в фильтрованных отчётах
@@ -763,6 +766,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 
 - `AnalyticsTabBindings` — привязки виджетов для вкладки `Analytics`.
 - `build_analytics_tab(parent, context)` — построение вкладки `Analytics` (Dashboard, Category Breakdown, Monthly Report, Net Worth Timeline).
+- Dashboard включает tooltip с пояснениями метрик и отображает `Year expense` вместо annualized expense.
 
 `gui/tabs/settings_tab.py`
 
@@ -784,10 +788,14 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `get_cumulative_income_expense()` — накопительные суммы доходов и расходов по месяцам (исключая переводы).
 - `get_savings_rate(start_date, end_date)` — норма сбережений (%) за период (Metrics Engine, только SQLite).
 - `get_burn_rate(start_date, end_date)` — средний дневной расход (KZT) (Metrics Engine, только SQLite).
+- `get_year_income(year, up_to_date=None)` — доходы за календарный год, опционально year-to-date.
+- `get_year_expense(year, up_to_date=None)` — расходы за календарный год, опционально year-to-date.
 - `get_spending_by_category(start_date, end_date, limit=None)` — расходы по категориям (Metrics Engine, только SQLite).
 - `get_income_by_category(start_date, end_date, limit=None)` — доходы по категориям (Metrics Engine, только SQLite).
 - `get_top_expense_categories(start_date, end_date, top_n=5)` — топ категорий расходов (Metrics Engine, только SQLite).
 - `get_monthly_summary(start_date=None, end_date=None)` — месячные агрегаты (Metrics Engine, только SQLite).
+- `get_average_monthly_income(start_date, end_date)` — средний месячный доход по диапазону.
+- `get_average_monthly_expenses(start_date, end_date)` — среднемесячные расходы по диапазону.
 - `create_budget(...)`, `get_budgets()`, `get_budget_results()`, `delete_budget(...)`, `update_budget_limit(...)` — API Budget System.
 
 `gui/exporters.py`
@@ -920,6 +928,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `export_mandatory_expenses_to_xlsx(expenses, filepath)`.
 - `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)`.
 - `existing_initial_balance` при импорте quantize'ится до money scale.
+- XLSX export добавляет стили заголовков/секций/итогов, `freeze_panes`, `auto_filter`, auto-width и сохраняет числовые суммы как numeric cells.
 
 `utils/tabular_utils.py`
 

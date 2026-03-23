@@ -10,6 +10,8 @@ from datetime import datetime
 from tkinter import messagebox, ttk
 from typing import Any, Protocol
 
+from gui.tooltip import Tooltip
+
 logger = logging.getLogger(__name__)
 
 PALETTE = [
@@ -206,59 +208,66 @@ def build_analytics_tab(
     dashboard_row.grid_columnconfigure(2, weight=1)
 
     dashboard_left = ttk.Frame(dashboard_row)
-    dashboard_left.grid(row=0, column=0, sticky="nw")
+    dashboard_left.grid(row=0, column=0, sticky="nsew")
+    for i in range(4):
+        dashboard_left.grid_rowconfigure(i, weight=0)
+    dashboard_left.grid_rowconfigure(3, weight=1)
+    dashboard_left.grid_columnconfigure(3, weight=1)
     dashboard_right = ttk.Frame(dashboard_row)
     dashboard_right.grid(row=0, column=1, sticky="nw", padx=(24, 0))
 
-    net_worth_label = ttk.Label(dashboard_left, text="Net worth: —", font=("Segoe UI", 12, "bold"))
+    font = ("Segoe UI", 12, "bold")
+    net_worth_label = ttk.Label(dashboard_left, text="Net worth: —", font=font)
     net_worth_label.grid(row=0, column=0, sticky="w")
 
-    savings_rate_label = ttk.Label(
-        dashboard_left, text="Savings rate: —", font=("Segoe UI", 12, "bold")
-    )
+    savings_rate_label = ttk.Label(dashboard_left, text="Savings rate: —", font=font)
     savings_rate_label.grid(row=1, column=0, sticky="w")
 
-    burn_rate_label = ttk.Label(dashboard_left, text="Burn rate: —", font=("Segoe UI", 12, "bold"))
+    burn_rate_label = ttk.Label(dashboard_left, text="Burn rate: —", font=font)
     burn_rate_label.grid(row=2, column=0, sticky="w")
 
-    avg_monthly_income_label = ttk.Label(
-        dashboard_right, text="Avg monthly income: —", font=("Segoe UI", 12, "bold")
+    tooltip_label = ttk.Label(dashboard_left, text="ⓘ", font=("Segoe UI", 10))
+    tooltip_label.config(foreground="gray")
+    tooltip_label.grid(row=3, column=0, sticky="sw")
+
+    Tooltip(
+        tooltip_label,
+        "Savings rate = cashflow / income * 100%."
+        "\nBurn rate = total expenses / number of days in range."
+        "\nAvg monthly income is the average of all monthly incomes."
+        "\nYear income is the sum of all incomes in a year."
+        "\nYear income (USD) is the year income in USD."
+        "\nAvg monthly expenses is the average of all monthly expenses."
+        "\nYear expense is the sum of all expenses in a year."
+        "\nCost per day is the cost of a day."
+        "\nCost per hour is the cost of an hour."
+        "\nCost per minute is the cost of a minute.",
     )
+
+    avg_monthly_income_label = ttk.Label(dashboard_right, text="Avg monthly income: —", font=font)
     avg_monthly_income_label.grid(row=0, column=0, sticky="w")
 
-    year_income_label = ttk.Label(
-        dashboard_right, text="Year income: —", font=("Segoe UI", 12, "bold")
-    )
-    year_income_label.grid(row=1, column=0, sticky="w")
-
-    year_income_usd_label = ttk.Label(
-        dashboard_right, text="Year income (USD): —", font=("Segoe UI", 12, "bold")
-    )
-    year_income_usd_label.grid(row=2, column=0, sticky="w")
-
     avg_monthly_expenses_label = ttk.Label(
-        dashboard_right, text="Avg monthly expenses: —", font=("Segoe UI", 12, "bold")
+        dashboard_right, text="Avg monthly expenses: —", font=font
     )
-    avg_monthly_expenses_label.grid(row=3, column=0, sticky="w", pady=(10, 0))
+    avg_monthly_expenses_label.grid(row=1, column=0, sticky="w")
 
-    avg_annual_expenses_label = ttk.Label(
-        dashboard_right, text="Avg annual expenses: —", font=("Segoe UI", 12, "bold")
-    )
-    avg_annual_expenses_label.grid(row=4, column=0, sticky="w")
+    year_income_label = ttk.Label(dashboard_right, text="Year income: —", font=font)
+    year_income_label.grid(row=2, column=0, sticky="w", pady=(10, 0))
 
-    day_cost_label = ttk.Label(
-        dashboard_right, text="Cost per day: —", font=("Segoe UI", 12, "bold")
-    )
+    year_income_usd_label = ttk.Label(dashboard_right, text="Year income (USD): —", font=font)
+    year_income_usd_label.grid(row=3, column=0, sticky="w")
+
+    year_expense_label = ttk.Label(dashboard_right, text="Year expense: —", font=font)
+    year_expense_label.grid(row=4, column=0, sticky="w")
+
+    day_cost_label = ttk.Label(dashboard_right, text="Cost per day: —", font=font)
     day_cost_label.grid(row=5, column=0, sticky="w", pady=(10, 0))
 
-    hour_cost_label = ttk.Label(
-        dashboard_right, text="Cost per hour: —", font=("Segoe UI", 12, "bold")
-    )
+    hour_cost_label = ttk.Label(dashboard_right, text="Cost per hour: —", font=font)
     hour_cost_label.grid(row=6, column=0, sticky="w")
 
-    minute_cost_label = ttk.Label(
-        dashboard_right, text="Cost per minute: —", font=("Segoe UI", 12, "bold")
-    )
+    minute_cost_label = ttk.Label(dashboard_right, text="Cost per minute: —", font=font)
     minute_cost_label.grid(row=7, column=0, sticky="w")
 
     timeline_frame = ttk.LabelFrame(parent, text="Net Worth Timeline")
@@ -404,10 +413,10 @@ def build_analytics_tab(
             )
             year_income = float(context.controller.get_year_income(year, up_to_date=end))
             year_income_usd = float(context.controller.convert_kzt_to_usd(year_income))
+            year_expense = float(context.controller.get_year_expense(year, up_to_date=end))
             avg_monthly_expenses = float(
                 context.controller.get_average_monthly_expenses(start, end)
             )
-            avg_annual_expenses = float(context.controller.get_average_annual_expenses(start, end))
             day_cost, hour_cost, minute_cost = context.controller.get_time_costs(start, end)
 
             net_worth_label.config(text=f"Net worth:  {net_worth:,.0f} KZT")
@@ -420,13 +429,11 @@ def build_analytics_tab(
                 text=f"Avg monthly income ({year}):  {avg_monthly_income:,.0f} KZT"
             )
             year_income_label.config(text=f"Year income ({year}):  {year_income:,.0f} KZT")
-            year_income_usd_label.config(text=f"Year income ({year}) USD:  {year_income_usd:,.2f}")
+            year_income_usd_label.config(text=f"Year income (USD):  {year_income_usd:,.2f}")
             avg_monthly_expenses_label.config(
                 text=f"Avg monthly expenses:  {avg_monthly_expenses:,.0f} KZT"
             )
-            avg_annual_expenses_label.config(
-                text=f"Avg annual expenses:  {avg_annual_expenses:,.0f} KZT"
-            )
+            year_expense_label.config(text=f"Year expense ({year}):  {year_expense:,.0f} KZT")
             day_cost_label.config(text=f"Cost per day:  {float(day_cost):,.0f} KZT")
             hour_cost_label.config(text=f"Cost per hour:  {float(hour_cost):,.2f} KZT")
             minute_cost_label.config(text=f"Cost per minute:  {float(minute_cost):,.2f} KZT")
