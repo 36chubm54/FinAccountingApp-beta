@@ -9,9 +9,9 @@ from app.use_case_support import (
     build_rate,
     commission_marker,
     is_commission_for_transfer,
-    wallet_initial_balance_kzt,
     wallet_balance_kzt,
     wallet_by_id,
+    wallet_initial_balance_kzt,
 )
 from domain.audit import AuditReport
 from domain.errors import DomainError
@@ -28,7 +28,9 @@ from .services import CurrencyService
 
 if TYPE_CHECKING:
     from domain.budget import Budget
+    from domain.distribution import DistributionItem, DistributionSubitem
     from services.budget_service import BudgetService
+    from services.distribution_service import DistributionService
     from services.metrics_service import MetricsService
     from services.timeline_service import TimelineService
 
@@ -923,3 +925,91 @@ class GetBudgetResults:
 
     def execute(self) -> list:
         return self._service.get_all_results()
+
+
+class CreateDistributionItem:
+    def __init__(self, distribution_service: "DistributionService") -> None:
+        self._service = distribution_service
+
+    def execute(
+        self,
+        name: str,
+        *,
+        group_name: str = "",
+        sort_order: int = 0,
+        pct: float = 0.0,
+    ) -> "DistributionItem":
+        return self._service.create_item(
+            name,
+            group_name=group_name,
+            sort_order=sort_order,
+            pct=pct,
+        )
+
+
+class UpdateDistributionItemPct:
+    def __init__(self, distribution_service: "DistributionService") -> None:
+        self._service = distribution_service
+
+    def execute(self, item_id: int, new_pct: float) -> "DistributionItem":
+        return self._service.update_item_pct(item_id, new_pct)
+
+
+class DeleteDistributionItem:
+    def __init__(self, distribution_service: "DistributionService") -> None:
+        self._service = distribution_service
+
+    def execute(self, item_id: int) -> None:
+        self._service.delete_item(item_id)
+
+
+class GetDistributionItems:
+    def __init__(self, distribution_service: "DistributionService") -> None:
+        self._service = distribution_service
+
+    def execute(self) -> list["DistributionItem"]:
+        return self._service.get_items()
+
+
+class CreateDistributionSubitem:
+    def __init__(self, distribution_service: "DistributionService") -> None:
+        self._service = distribution_service
+
+    def execute(
+        self,
+        item_id: int,
+        name: str,
+        *,
+        sort_order: int = 0,
+        pct: float = 0.0,
+    ) -> "DistributionSubitem":
+        return self._service.create_subitem(
+            item_id,
+            name,
+            sort_order=sort_order,
+            pct=pct,
+        )
+
+
+class UpdateDistributionSubitemPct:
+    def __init__(self, distribution_service: "DistributionService") -> None:
+        self._service = distribution_service
+
+    def execute(self, subitem_id: int, new_pct: float) -> "DistributionSubitem":
+        return self._service.update_subitem_pct(subitem_id, new_pct)
+
+
+class DeleteDistributionSubitem:
+    def __init__(self, distribution_service: "DistributionService") -> None:
+        self._service = distribution_service
+
+    def execute(self, subitem_id: int) -> None:
+        self._service.delete_subitem(subitem_id)
+
+
+class GetMonthlyDistribution:
+    def __init__(self, distribution_service: "DistributionService") -> None:
+        self._service = distribution_service
+
+    def execute(self, start_month: str, end_month: str) -> list:
+        return self._service.get_distribution_history(start_month, end_month)

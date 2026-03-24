@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from app.finance_service import FinanceService
+from domain.distribution import FrozenDistributionRow
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
@@ -38,6 +39,7 @@ class PreparedImportPayload:
     wallets: list[Wallet]
     parsed_records: list[Record]
     parsed_mandatory_templates: list[MandatoryExpenseRecord]
+    frozen_distribution_rows: list[FrozenDistributionRow]
     raw_transfer_ops: list[dict[str, Any]]
     imported: int
     skipped: int
@@ -100,6 +102,7 @@ class ImportService:
         raw_transfer_ops: list[dict[str, Any]] = []
         parsed_records: list[Record] = []
         parsed_mandatory_templates: list[MandatoryExpenseRecord] = []
+        frozen_distribution_rows = self._frozen_rows_from_payload(parsed.distribution_snapshots)
         errors: list[str] = []
         skipped = 0
         imported = 0
@@ -195,6 +198,7 @@ class ImportService:
             wallets=wallets,
             parsed_records=parsed_records,
             parsed_mandatory_templates=parsed_mandatory_templates,
+            frozen_distribution_rows=frozen_distribution_rows,
             raw_transfer_ops=raw_transfer_ops,
             imported=imported,
             skipped=skipped,
@@ -208,6 +212,7 @@ class ImportService:
         imported_wallets = len(wallets)
         parsed_records = list(prepared.parsed_records)
         parsed_mandatory_templates = list(prepared.parsed_mandatory_templates)
+        frozen_distribution_rows = list(prepared.frozen_distribution_rows)
         raw_transfer_ops = list(prepared.raw_transfer_ops)
         imported = prepared.imported
         skipped = prepared.skipped
@@ -251,6 +256,10 @@ class ImportService:
                 mandatory_templates=mandatory_templates,
                 preserve_existing_mandatory=not bool(target_wallets),
             )
+            self._replace_distribution_snapshots_if_supported(
+                parsed.file_type,
+                frozen_distribution_rows,
+            )
             self._finance_service.normalize_operation_ids_for_import()
             logger.info(
                 "Import completed (bulk) file=%s wallets=%s records=%s transfers=%s",
@@ -278,6 +287,10 @@ class ImportService:
             counters=counters,
         )
         self._apply_mandatory_templates(parsed_mandatory_templates)
+        self._replace_distribution_snapshots_if_supported(
+            parsed.file_type,
+            frozen_distribution_rows,
+        )
 
         logger.info(
             "Import completed file=%s wallets=%s records=%s transfers=%s",
@@ -288,6 +301,17 @@ class ImportService:
         )
         self._finance_service.normalize_operation_ids_for_import()
         return ImportResult(imported=imported, skipped=skipped, errors=errors)
+
+    def _replace_distribution_snapshots_if_supported(
+        self,
+        file_type: str,
+        rows: list[FrozenDistributionRow],
+    ) -> None:
+        if file_type != "json":
+            return
+        replace_snapshots = getattr(self._finance_service, "replace_distribution_snapshots", None)
+        if callable(replace_snapshots):
+            replace_snapshots(rows)
 
     def _build_import_operations(
         self,
@@ -456,6 +480,38 @@ class ImportService:
                 )
             )
         return normalized
+
+    def _frozen_rows_from_payload(
+        self, payloads: list[dict[str, Any]]
+    ) -> list[FrozenDistributionRow]:
+        frozen_rows: list[FrozenDistributionRow] = []
+        for index, item in enumerate(payloads):
+            if not isinstance(item, dict):
+                continue
+            month = str(item.get("month", "") or "").strip()
+            if not month:
+                logger.warning("Skipping distribution snapshot without month at index %s", index)
+                continue
+            column_order_raw = item.get("column_order", [])
+            headings_raw = item.get("headings_by_column", {})
+            values_raw = item.get("values_by_column", {})
+            if not isinstance(column_order_raw, list):
+                column_order_raw = []
+            if not isinstance(headings_raw, dict):
+                headings_raw = {}
+            if not isinstance(values_raw, dict):
+                values_raw = {}
+            frozen_rows.append(
+                FrozenDistributionRow(
+                    month=month,
+                    column_order=tuple(str(column) for column in column_order_raw),
+                    headings_by_column={str(k): str(v) for k, v in headings_raw.items()},
+                    values_by_column={str(k): str(v) for k, v in values_raw.items()},
+                    is_negative=bool(item.get("is_negative", False)),
+                    auto_fixed=bool(item.get("auto_fixed", False)),
+                )
+            )
+        return frozen_rows
 
     def _apply_operations_with_relaxed_wallet_limits(
         self,
@@ -813,6 +869,7 @@ class ImportService:
             file_type=parsed.file_type,
             rows=rows,
             mandatory_rows=mandatory_rows,
+            distribution_snapshots=list(parsed.distribution_snapshots),
             wallets=wallets,
             initial_balance=parsed.initial_balance,
         )

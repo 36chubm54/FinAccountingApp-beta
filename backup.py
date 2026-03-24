@@ -6,8 +6,9 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from storage.json_storage import JsonStorage
-from storage.sqlite_storage import SQLiteStorage
+from infrastructure.sqlite_repository import SQLiteRecordRepository
+from services.distribution_service import DistributionService
+from utils.backup_utils import export_full_backup_to_json
 
 logger = logging.getLogger(__name__)
 
@@ -60,22 +61,32 @@ def create_backup(json_path: str, *, keep_last: int | None = None) -> str | None
     return str(backup_path)
 
 
-def export_to_json(sqlite_path: str, json_path: str, schema_path: str | None = None) -> None:
-    sqlite_storage = SQLiteStorage(sqlite_path)
+def export_to_json(
+    sqlite_path: str,
+    json_path: str,
+    schema_path: str | None = None,
+    *,
+    autofreeze_closed_months: bool = True,
+) -> None:
+    sqlite_repo = SQLiteRecordRepository(sqlite_path, schema_path=schema_path)
     try:
-        sqlite_storage.initialize_schema(schema_path)
-        wallets = sqlite_storage.get_wallets()
-        records = sqlite_storage.get_records()
-        transfers = sqlite_storage.get_transfers()
-        mandatory_expenses = sqlite_storage.get_mandatory_expenses()
-
-        writer = JsonStorage(json_path)
-        writer.replace_all_data(
+        distribution_service = DistributionService(sqlite_repo)
+        if autofreeze_closed_months:
+            distribution_service.freeze_closed_months()
+        wallets = sqlite_repo.load_wallets()
+        records = sqlite_repo.load_all()
+        transfers = sqlite_repo.load_transfers()
+        mandatory_expenses = sqlite_repo.load_mandatory_expenses()
+        export_full_backup_to_json(
+            json_path,
             wallets=wallets,
             records=records,
             mandatory_expenses=mandatory_expenses,
+            distribution_snapshots=distribution_service.get_frozen_rows(),
             transfers=transfers,
+            readonly=False,
+            storage_mode="sqlite",
         )
         logger.info("SQLite exported to JSON: %s", json_path)
     finally:
-        sqlite_storage.close()
+        sqlite_repo.close()

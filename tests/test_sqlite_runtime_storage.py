@@ -94,11 +94,17 @@ def _export_fixture(source_repo: SQLiteRecordRepository, path: Path, fmt: str) -
     records = source_repo.load_all()
     transfers = source_repo.load_transfers()
     if fmt == "json":
+        source_snapshots = []
+        if hasattr(source_repo, "db_path"):
+            from services.distribution_service import DistributionService
+
+            source_snapshots = DistributionService(source_repo).get_frozen_rows()
         export_full_backup_to_json(
             str(path),
             wallets=source_repo.load_wallets(),
             records=records,
             mandatory_expenses=source_repo.load_mandatory_expenses(),
+            distribution_snapshots=source_snapshots,
             transfers=transfers,
         )
         return
@@ -154,6 +160,10 @@ def _runtime_record_types(repo: SQLiteRecordRepository) -> list[str]:
     return [str(row[0]) for row in repo.query_all("SELECT type FROM records ORDER BY id")]
 
 
+def _snapshot_months(controller: FinancialController) -> list[str]:
+    return [row.month for row in controller.get_frozen_distribution_rows()]
+
+
 @pytest.mark.parametrize(
     ("fmt", "extension"),
     [("JSON", ".json"), ("CSV", ".csv"), ("XLSX", ".xlsx")],
@@ -199,6 +209,73 @@ def test_sqlite_import_pipeline_supports_all_formats_and_preserves_net_worth(
         ]
         assert len(target_repo.load_transfers()) == 1
         assert target_controller.net_worth_fixed() == expected_net_worth
+    finally:
+        source_repo.close()
+        target_repo.close()
+
+
+def test_sqlite_json_full_backup_restores_distribution_snapshots(tmp_path: Path) -> None:
+    source_repo, source_controller = _make_controller(tmp_path / "source_snapshot.db")
+    target_repo = _make_repo(tmp_path / "target_snapshot.db")
+    target_controller = FinancialController(target_repo, CurrencyService())
+    export_path = tmp_path / "snapshot_import.json"
+
+    try:
+        source_controller.create_distribution_item("Investments", pct=100.0)
+        source_controller.toggle_distribution_month_fixed("2026-03")
+
+        _export_fixture(source_repo, export_path, "json")
+
+        result = target_controller.import_records(
+            "JSON",
+            str(export_path),
+            ImportPolicy.FULL_BACKUP,
+            force=True,
+        )
+
+        assert result.imported == 5
+        assert _snapshot_months(target_controller) == ["2026-03"]
+        restored_rows = target_controller.get_frozen_distribution_rows()
+        assert len(restored_rows) == 1
+        assert restored_rows[0].auto_fixed is False
+    finally:
+        source_repo.close()
+        target_repo.close()
+
+
+def test_sqlite_json_full_backup_restores_auto_fixed_snapshot_state(tmp_path: Path) -> None:
+    source_repo, source_controller = _make_controller(tmp_path / "source_auto_snapshot.db")
+    target_repo = _make_repo(tmp_path / "target_auto_snapshot.db")
+    target_controller = FinancialController(target_repo, CurrencyService())
+    export_path = tmp_path / "auto_snapshot_import.json"
+
+    try:
+        source_controller.create_distribution_item("Investments", pct=100.0)
+        source_controller.create_income(
+            date="2026-01-10",
+            wallet_id=2,
+            amount=50.0,
+            currency="KZT",
+            category="Bonus",
+            description="January bonus",
+        )
+        source_controller.autofreeze_distribution_closed_months()
+
+        _export_fixture(source_repo, export_path, "json")
+
+        result = target_controller.import_records(
+            "JSON",
+            str(export_path),
+            ImportPolicy.FULL_BACKUP,
+            force=True,
+        )
+
+        assert result.imported == 6
+        restored_rows = target_controller.get_frozen_distribution_rows()
+        restored_auto_row = next(row for row in restored_rows if row.month == "2026-01")
+        assert restored_auto_row.auto_fixed is True
+        with pytest.raises(ValueError, match="auto-fixed"):
+            target_controller.toggle_distribution_month_fixed("2026-01")
     finally:
         source_repo.close()
         target_repo.close()

@@ -822,6 +822,7 @@ def build_settings_tab(
         wallets = context.repository.load_wallets()
         records = context.repository.load_all()
         mandatory_expenses = context.repository.load_mandatory_expenses()
+        distribution_snapshots = context.controller.get_frozen_distribution_rows()
         transfers = context.repository.load_transfers()
 
         def task() -> None:
@@ -832,6 +833,7 @@ def build_settings_tab(
                 wallets=wallets,
                 records=records,
                 mandatory_expenses=mandatory_expenses,
+                distribution_snapshots=distribution_snapshots,
                 transfers=transfers,
             )
 

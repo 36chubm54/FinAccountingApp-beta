@@ -83,6 +83,46 @@ CREATE TABLE IF NOT EXISTS budgets (
     CHECK(start_date <= end_date)
 );
 
+CREATE TABLE IF NOT EXISTS distribution_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL CHECK(length(trim(name)) > 0),
+    group_name TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    pct REAL NOT NULL DEFAULT 0.0 CHECK(pct >= 0 AND pct <= 100),
+    pct_minor INTEGER NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
+    UNIQUE(name)
+);
+
+CREATE TABLE IF NOT EXISTS distribution_subitems (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER NOT NULL,
+    name TEXT NOT NULL CHECK(length(trim(name)) > 0),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    pct REAL NOT NULL DEFAULT 0.0 CHECK(pct >= 0 AND pct <= 100),
+    pct_minor INTEGER NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
+    FOREIGN KEY(item_id) REFERENCES distribution_items(id) ON DELETE CASCADE,
+    UNIQUE(item_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS distribution_snapshots (
+    month TEXT PRIMARY KEY CHECK(month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+    is_negative INTEGER NOT NULL DEFAULT 0 CHECK(is_negative IN (0, 1)),
+    auto_fixed INTEGER NOT NULL DEFAULT 0 CHECK(auto_fixed IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS distribution_snapshot_values (
+    snapshot_month TEXT NOT NULL,
+    column_key TEXT NOT NULL,
+    column_label TEXT NOT NULL,
+    column_order INTEGER NOT NULL,
+    value_text TEXT NOT NULL,
+    PRIMARY KEY(snapshot_month, column_key),
+    FOREIGN KEY(snapshot_month) REFERENCES distribution_snapshots(month) ON DELETE CASCADE
+);
+
 -- Migration for existing databases:
 -- ALTER TABLE wallets ADD COLUMN initial_balance_minor INTEGER DEFAULT NULL;
 -- ALTER TABLE transfers ADD COLUMN amount_original_minor INTEGER DEFAULT NULL;
@@ -96,6 +136,7 @@ CREATE TABLE IF NOT EXISTS budgets (
 -- ALTER TABLE mandatory_expenses ADD COLUMN amount_kzt_minor INTEGER DEFAULT NULL;
 -- ALTER TABLE mandatory_expenses ADD COLUMN date TEXT DEFAULT NULL;
 -- ALTER TABLE mandatory_expenses ADD COLUMN auto_pay INTEGER NOT NULL DEFAULT 0;
+-- ALTER TABLE distribution_snapshots ADD COLUMN auto_fixed INTEGER NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS idx_records_date ON records(date);
 CREATE INDEX IF NOT EXISTS idx_records_wallet_id ON records(wallet_id);
@@ -106,3 +147,7 @@ CREATE INDEX IF NOT EXISTS idx_transfers_wallet_to ON transfers(to_wallet_id);
 CREATE INDEX IF NOT EXISTS idx_mandatory_expenses_wallet_id ON mandatory_expenses(wallet_id);
 CREATE INDEX IF NOT EXISTS idx_budgets_category ON budgets(category);
 CREATE INDEX IF NOT EXISTS idx_budgets_dates ON budgets(start_date, end_date);
+CREATE INDEX IF NOT EXISTS idx_dist_items_order ON distribution_items(sort_order);
+CREATE INDEX IF NOT EXISTS idx_dist_subitems_item ON distribution_subitems(item_id);
+CREATE INDEX IF NOT EXISTS idx_dist_snapshot_values_month_order
+ON distribution_snapshot_values(snapshot_month, column_order);

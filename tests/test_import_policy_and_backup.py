@@ -4,9 +4,11 @@ import tempfile
 
 import pytest
 
+from domain.distribution import FrozenDistributionRow
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
 from domain.wallets import Wallet
+from utils import backup_utils as backup_utils_module
 from utils.backup_utils import (
     BackupFormatError,
     BackupIntegrityError,
@@ -327,6 +329,77 @@ def test_snapshot_export_writes_precise_metadata() -> None:
         assert payload["meta"]["storage"] == "json"
     finally:
         os.unlink(path)
+
+
+def test_full_backup_export_includes_distribution_snapshots() -> None:
+    snapshot = FrozenDistributionRow(
+        month="2026-03",
+        column_order=("month", "fixed", "net_income", "item_1"),
+        headings_by_column={
+            "month": "Month",
+            "fixed": "Fixed",
+            "net_income": "Net income",
+            "item_1": "Investments",
+        },
+        values_by_column={
+            "month": "2026-03",
+            "fixed": "Yes",
+            "net_income": "100,000",
+            "item_1": "100,000",
+        },
+        is_negative=False,
+    )
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
+        path = tmp.name
+    try:
+        export_full_backup_to_json(
+            path,
+            wallets=[
+                Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=0.0, system=True)
+            ],
+            records=[],
+            mandatory_expenses=[],
+            distribution_snapshots=[snapshot],
+            transfers=[],
+            readonly=False,
+        )
+        with open(path, encoding="utf-8") as fp:
+            payload = json.load(fp)
+        assert "distribution_snapshots" in payload
+        assert payload["distribution_snapshots"][0]["month"] == "2026-03"
+        assert payload["distribution_snapshots"][0]["auto_fixed"] is False
+        assert payload["distribution_snapshots"][0]["values_by_column"]["item_1"] == "100,000"
+    finally:
+        os.unlink(path)
+
+
+def test_full_backup_export_writes_json_atomically_on_failure(monkeypatch, tmp_path) -> None:
+    path = tmp_path / "data.json"
+    original_content = '{"safe": true}'
+    path.write_text(original_content, encoding="utf-8")
+
+    real_json_dump = backup_utils_module.json.dump
+
+    def _broken_dump(payload, fp, **kwargs):
+        real_json_dump(payload, fp, **kwargs)
+        fp.write("\nPARTIAL")
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(backup_utils_module.json, "dump", _broken_dump)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        export_full_backup_to_json(
+            str(path),
+            wallets=[
+                Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=0.0, system=True)
+            ],
+            records=[],
+            mandatory_expenses=[],
+            transfers=[],
+            readonly=False,
+        )
+
+    assert path.read_text(encoding="utf-8") == original_content
 
 
 def test_legacy_json_without_meta_imports_normally() -> None:

@@ -111,3 +111,38 @@ def test_parse_import_file_keeps_fractional_transfer_aggregate_id_verbatim(tmp_p
     parsed = import_parser.parse_import_file(str(json_path))
 
     assert parsed.rows[0]["transfer_id"] == "1.5"
+
+
+def test_parse_import_file_reads_distribution_snapshots_from_json(tmp_path: Path) -> None:
+    payload = {
+        "wallets": [],
+        "records": [],
+        "mandatory_expenses": [],
+        "distribution_snapshots": [
+            {
+                "month": "2026-03",
+                "is_negative": False,
+                "column_order": ["month", "fixed", "net_income", "item_1"],
+                "headings_by_column": {
+                    "month": "Month",
+                    "fixed": "Fixed",
+                    "net_income": "Net income",
+                    "item_1": "Investments",
+                },
+                "values_by_column": {
+                    "month": "2026-03",
+                    "fixed": "Yes",
+                    "net_income": "100,000",
+                    "item_1": "100,000",
+                },
+            }
+        ],
+        "transfers": [],
+    }
+    json_path = tmp_path / "payload.json"
+    json_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    parsed = import_parser.parse_import_file(str(json_path))
+
+    assert len(parsed.distribution_snapshots) == 1
+    assert parsed.distribution_snapshots[0]["month"] == "2026-03"

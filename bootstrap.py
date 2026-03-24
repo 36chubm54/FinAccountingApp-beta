@@ -8,6 +8,7 @@ from backup import create_backup, export_to_json
 from config import JSON_BACKUP_KEEP_LAST, JSON_PATH, LAZY_EXPORT_SIZE_THRESHOLD, SQLITE_PATH
 from infrastructure.repositories import RecordRepository
 from infrastructure.sqlite_repository import SQLiteRecordRepository
+from services.distribution_service import DistributionService
 
 
 def _resolve_schema_path(schema_path: str) -> str:
@@ -38,6 +39,10 @@ def _ensure_system_wallet(sqlite_repo: SQLiteRecordRepository) -> None:
     if sqlite_repo.has_system_wallet_row():
         return
     sqlite_repo.save_initial_balance(0.0)
+
+
+def _freeze_closed_distribution_months(sqlite_repo: SQLiteRecordRepository) -> None:
+    DistributionService(sqlite_repo).freeze_closed_months()
 
 
 def _validate_sqlite_integrity_only(sqlite_repo: SQLiteRecordRepository) -> None:
@@ -171,7 +176,9 @@ def _export_in_background() -> None:
                 SQLITE_PATH,
                 JSON_PATH,
                 schema_path=_resolve_schema_path("db/schema.sql"),
+                autofreeze_closed_months=False,
             )
+            create_backup(JSON_PATH, keep_last=JSON_BACKUP_KEEP_LAST)
             logging.info("[bootstrap] Background JSON export completed")
         except Exception as e:
             logging.error("[bootstrap] Background JSON export failed: %s", e)
@@ -184,7 +191,6 @@ def _export_in_background() -> None:
 def bootstrap_repository() -> RecordRepository:
     db_path = Path(SQLITE_PATH)
     db_existed = db_path.exists()
-    create_backup(JSON_PATH, keep_last=JSON_BACKUP_KEEP_LAST)
 
     repository = SQLiteRecordRepository(
         SQLITE_PATH,
@@ -200,6 +206,7 @@ def bootstrap_repository() -> RecordRepository:
     if not _is_migration_verified(repository):
         _mark_migration_verified(repository)
     _validate_sqlite_integrity_only(repository)
+    _freeze_closed_distribution_months(repository)
 
     # Lazy export: only if needed, and possibly in background for large DB
     if _should_export_json():
@@ -216,9 +223,12 @@ def bootstrap_repository() -> RecordRepository:
                 SQLITE_PATH,
                 JSON_PATH,
                 schema_path=_resolve_schema_path("db/schema.sql"),
+                autofreeze_closed_months=False,
             )
+            create_backup(JSON_PATH, keep_last=JSON_BACKUP_KEEP_LAST)
             logging.info("[bootstrap] JSON export completed synchronously")
     else:
+        create_backup(JSON_PATH, keep_last=JSON_BACKUP_KEEP_LAST)
         logging.info("[bootstrap] Skipping JSON export (already up‑to‑date)")
 
     return repository

@@ -14,6 +14,7 @@ from gui.record_colors import KIND_TO_FOREGROUND, foreground_for_kind
 from gui.tabs import (
     build_analytics_tab,
     build_budget_tab,
+    build_distribution_tab,
     build_infographics_tab,
     build_operations_tab,
     build_reports_tab,
@@ -117,6 +118,7 @@ class FinancialApp(tk.Tk):
         self.tab_reports = ttk.Frame(notebook)
         self.tab_analytics = ttk.Frame(notebook)
         self.tab_budget = ttk.Frame(notebook)
+        self.tab_distribution = ttk.Frame(notebook)
         self.tab_settings = ttk.Frame(notebook)
 
         notebook.add(self.tab_infographics, text="Infographics")
@@ -124,6 +126,7 @@ class FinancialApp(tk.Tk):
         notebook.add(self.tab_reports, text="Reports")
         notebook.add(self.tab_analytics, text="Analytics")
         notebook.add(self.tab_budget, text="Budget")
+        notebook.add(self.tab_distribution, text="Distribution")
         notebook.add(self.tab_settings, text="Settings")
 
         infographics = build_infographics_tab(
@@ -155,6 +158,7 @@ class FinancialApp(tk.Tk):
         build_reports_tab(self.tab_reports, self)
         self._analytics_bindings = build_analytics_tab(self.tab_analytics, context=self)
         self._budget_bindings = build_budget_tab(self.tab_budget, context=self)
+        self._distribution_bindings = build_distribution_tab(self.tab_distribution, context=self)
         self.refresh_budgets = self._budget_bindings.refresh
         build_settings_tab(self.tab_settings, self, IMPORT_FORMATS)
 

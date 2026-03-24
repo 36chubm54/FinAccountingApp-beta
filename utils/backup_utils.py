@@ -2,11 +2,13 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from datetime import date as dt_date
 from typing import Any
 
+from domain.distribution import FrozenDistributionRow
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 from domain.transfers import Transfer
@@ -73,6 +75,17 @@ def _transfer_to_payload(transfer: Transfer) -> dict:
         "rate_at_operation": to_rate_float(transfer.rate_at_operation),
         "amount_kzt": to_money_float(transfer.amount_kzt),
         "description": str(transfer.description or ""),
+    }
+
+
+def _distribution_snapshot_to_payload(snapshot: FrozenDistributionRow) -> dict[str, Any]:
+    return {
+        "month": str(snapshot.month),
+        "is_negative": bool(snapshot.is_negative),
+        "auto_fixed": bool(snapshot.auto_fixed),
+        "column_order": list(snapshot.column_order),
+        "headings_by_column": dict(snapshot.headings_by_column),
+        "values_by_column": dict(snapshot.values_by_column),
     }
 
 
@@ -235,6 +248,7 @@ def export_full_backup_to_json(
     wallets: Sequence[Wallet] | None = None,
     records: Sequence[Record],
     mandatory_expenses: Sequence[MandatoryExpenseRecord],
+    distribution_snapshots: Sequence[FrozenDistributionRow] = (),
     transfers: Sequence[Transfer] = (),
     initial_balance: float = 0.0,
     readonly: bool = True,
@@ -257,6 +271,9 @@ def export_full_backup_to_json(
         "wallets": [_wallet_to_payload(wallet) for wallet in normalized_wallets],
         "records": [_record_to_payload(record) for record in records],
         "mandatory_expenses": [_record_to_payload(expense) for expense in mandatory_expenses],
+        "distribution_snapshots": [
+            _distribution_snapshot_to_payload(snapshot) for snapshot in distribution_snapshots
+        ],
         "transfers": [_transfer_to_payload(transfer) for transfer in transfers],
     }
     payload: dict[str, Any]
@@ -277,8 +294,24 @@ def export_full_backup_to_json(
     directory = os.path.dirname(filepath)
     if directory:
         os.makedirs(directory, exist_ok=True)
-    with open(filepath, "w", encoding="utf-8") as fp:
-        json.dump(payload, fp, ensure_ascii=False, indent=2)
+    fd, temp_path = tempfile.mkstemp(
+        prefix="backup-",
+        suffix=".json",
+        dir=directory or None,
+        text=True,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fp:
+            json.dump(payload, fp, ensure_ascii=False, indent=2)
+            fp.flush()
+            os.fsync(fp.fileno())
+        os.replace(temp_path, filepath)
+    except Exception:
+        try:
+            os.unlink(temp_path)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def import_full_backup_from_json(

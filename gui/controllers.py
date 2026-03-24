@@ -11,6 +11,8 @@ from app.use_cases import (
     CalculateNetWorth,
     CalculateWalletBalance,
     CreateBudget,
+    CreateDistributionItem,
+    CreateDistributionSubitem,
     CreateExpense,
     CreateIncome,
     CreateMandatoryExpense,
@@ -20,6 +22,8 @@ from app.use_cases import (
     DeleteAllMandatoryExpenses,
     DeleteAllRecords,
     DeleteBudget,
+    DeleteDistributionItem,
+    DeleteDistributionSubitem,
     DeleteMandatoryExpense,
     DeleteRecord,
     DeleteTransfer,
@@ -27,11 +31,15 @@ from app.use_cases import (
     GetActiveWallets,
     GetBudgetResults,
     GetBudgets,
+    GetDistributionItems,
     GetMandatoryExpenses,
+    GetMonthlyDistribution,
     GetWallets,
     RunAudit,
     SoftDeleteWallet,
     UpdateBudgetLimit,
+    UpdateDistributionItemPct,
+    UpdateDistributionSubitemPct,
 )
 from domain.audit import AuditReport
 from domain.import_policy import ImportPolicy
@@ -41,20 +49,23 @@ from domain.reports import Report
 from domain.transfers import Transfer
 from domain.validation import parse_ymd
 from domain.wallets import Wallet
+from gui.controller_import_support import (
+    normalize_operation_ids_for_import as normalize_import_ids,
+)
+from gui.controller_import_support import (
+    run_import_transaction as run_import_op,
+)
 from gui.controller_support import (
     RecordListItem,
     build_list_items,
     wallets_with_system_initial_balance,
-)
-from gui.controller_import_support import (
-    normalize_operation_ids_for_import as normalize_import_ids,
-    run_import_transaction as run_import_op,
 )
 from infrastructure.repositories import RecordRepository
 from infrastructure.sqlite_repository import SQLiteRecordRepository
 from services.audit_service import AuditService
 from services.balance_service import BalanceService, CashflowResult, WalletBalance
 from services.budget_service import BudgetService
+from services.distribution_service import DistributionService
 from services.import_service import ImportService
 from services.metrics_service import MetricsService
 from services.timeline_service import TimelineService
@@ -68,6 +79,7 @@ class FinancialController:
         self._repository = repository
         self._currency = currency_service
         self._record_service = RecordService(repository)
+        self._distribution_service_instance: DistributionService | None = None
         self.supports_bulk_import_replace = True
 
     def build_record_list_items(self) -> list[RecordListItem]:
@@ -81,8 +93,12 @@ class FinancialController:
         DeleteTransfer(self._repository).execute(transfer_id)
 
     def transfer_id_by_repository_index(self, repository_index: int) -> int | None:
-        transfer_lookup = getattr(self._repository, "get_transfer_id_by_record_index", None)
-        if callable(transfer_lookup):
+        from collections.abc import Callable
+
+        transfer_lookup: Callable[[int], int | None] | None = getattr(
+            self._repository, "get_transfer_id_by_record_index", None
+        )
+        if transfer_lookup is not None:
             return transfer_lookup(repository_index)
         records = self._repository.load_all()
         if 0 <= repository_index < len(records):
@@ -492,6 +508,102 @@ class FinancialController:
 
     def update_budget_limit(self, budget_id: int, new_limit_kzt: float):
         return UpdateBudgetLimit(self._budget_service()).execute(budget_id, new_limit_kzt)
+
+    def _distribution_service(self) -> DistributionService:
+        if not isinstance(self._repository, SQLiteRecordRepository):
+            raise TypeError("Distribution System is supported only for SQLite repository")
+        if self._distribution_service_instance is None:
+            self._distribution_service_instance = DistributionService(self._repository)
+        return self._distribution_service_instance
+
+    def create_distribution_item(
+        self,
+        name: str,
+        *,
+        group_name: str = "",
+        sort_order: int = 0,
+        pct: float = 0.0,
+    ):
+        return CreateDistributionItem(self._distribution_service()).execute(
+            name,
+            group_name=group_name,
+            sort_order=sort_order,
+            pct=pct,
+        )
+
+    def update_distribution_item_pct(self, item_id: int, new_pct: float):
+        return UpdateDistributionItemPct(self._distribution_service()).execute(item_id, new_pct)
+
+    def update_distribution_item_name(self, item_id: int, new_name: str):
+        return self._distribution_service().update_item_name(item_id, new_name)
+
+    def delete_distribution_item(self, item_id: int) -> None:
+        DeleteDistributionItem(self._distribution_service()).execute(item_id)
+
+    def get_distribution_items(self) -> list:
+        return GetDistributionItems(self._distribution_service()).execute()
+
+    def create_distribution_subitem(
+        self,
+        item_id: int,
+        name: str,
+        *,
+        sort_order: int = 0,
+        pct: float = 0.0,
+    ):
+        return CreateDistributionSubitem(self._distribution_service()).execute(
+            item_id,
+            name,
+            sort_order=sort_order,
+            pct=pct,
+        )
+
+    def update_distribution_subitem_pct(self, subitem_id: int, new_pct: float):
+        return UpdateDistributionSubitemPct(self._distribution_service()).execute(
+            subitem_id,
+            new_pct,
+        )
+
+    def update_distribution_subitem_name(self, subitem_id: int, new_name: str):
+        return self._distribution_service().update_subitem_name(subitem_id, new_name)
+
+    def delete_distribution_subitem(self, subitem_id: int) -> None:
+        DeleteDistributionSubitem(self._distribution_service()).execute(subitem_id)
+
+    def get_distribution_subitems(self, item_id: int) -> list:
+        return self._distribution_service().get_subitems(item_id)
+
+    def validate_distribution(self) -> list:
+        return self._distribution_service().validate()
+
+    def get_distribution_history(self, start_month: str, end_month: str) -> list:
+        return GetMonthlyDistribution(self._distribution_service()).execute(start_month, end_month)
+
+    def get_distribution_available_months(self) -> list[str]:
+        return self._distribution_service().get_available_months()
+
+    def is_distribution_month_fixed(self, month: str) -> bool:
+        return self._distribution_service().is_month_fixed(month)
+
+    def is_distribution_month_auto_fixed(self, month: str) -> bool:
+        return self._distribution_service().is_month_auto_fixed(month)
+
+    def toggle_distribution_month_fixed(self, month: str) -> bool:
+        return self._distribution_service().toggle_month_fixed(month)
+
+    def autofreeze_distribution_closed_months(self) -> list[str]:
+        return self._distribution_service().freeze_closed_months()
+
+    def get_frozen_distribution_rows(
+        self,
+        start_month: str | None = None,
+        end_month: str | None = None,
+    ) -> list:
+        self.autofreeze_distribution_closed_months()
+        return self._distribution_service().get_frozen_rows(start_month, end_month)
+
+    def replace_distribution_snapshots(self, rows: list) -> None:
+        self._distribution_service().replace_frozen_rows(list(rows))
 
     def _balance_service(self) -> BalanceService:
         if not isinstance(self._repository, SQLiteRecordRepository):

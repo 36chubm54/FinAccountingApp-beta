@@ -70,6 +70,7 @@ python main.py
 - `Reports` — генерация отчётов, экспорт.
 - `Analytics` — финансовая аналитика за произвольный период (dashboard, категории, помесячный отчёт).
 - `Budget` — бюджеты по категориям с произвольным диапазоном дат, pace-tracking и live progress.
+- `Distribution` — структура распределения net income по месяцам с фиксацией строк и историей snapshot'ов.
 - `Settings` — управление обязательными расходами и кошельками.
 
 Инфографика:
@@ -107,6 +108,16 @@ python main.py
 - Ниже таблицы отображается progress canvas:
   цветная полоса = потраченная доля бюджета, синяя вертикаль = доля прошедшего времени.
 - Для одной категории можно создавать несколько бюджетов, но без пересечения диапазонов дат.
+
+### Distribution tab
+
+Структура распределения месячного net income и просмотр истории по месяцам.
+
+- Левая панель `Distribution Structure` управляет top-level item/subitem структурой с процентами и группами.
+- Правая таблица `Distribution Table` показывает `Month`, `Fixed`, `Net income` и рассчитанные суммы по item/subitem колонкам.
+- Кнопка `Fix Row` фиксирует или снимает фиксацию строки месяца; auto-fixed закрытые месяцы защищены от ручного unfix.
+- При запросе frozen rows сервис автоматически фиксирует закрытые прошедшие месяцы.
+- Валидация требует, чтобы top-level item'ы суммарно давали `100%`, а subitem'ы внутри item'а тоже давали `100%`, если они заданы.
 
 ### Добавление дохода/расхода
 
@@ -336,6 +347,7 @@ python main.py
 - Pipeline импорта: `parser -> dry-run validation -> user confirmation -> SQLite transaction`.
 - Для `CSV/XLSX` реальный импорт заменяет runtime-данные валидными строками из файла; ошибочные строки остаются только в отчёте импорта.
 - Для readonly `JSON` snapshot требуется `force=True`; проверка readonly/checksum выполняется ещё до этапа commit.
+- `JSON` full backup теперь может включать `distribution_snapshots`; при импорте они восстанавливаются в SQLite, если репозиторий поддерживает Distribution System.
 
 Формат данных:
 
@@ -399,7 +411,13 @@ Backup восстанавливает:
 - кошельки с полями `id/name/currency/balance`;
 - все записи с полями `type/date/wallet_id/transfer_id/category/amount_original/currency/rate_at_operation/amount_kzt/category/description`;
 - все обязательные расходы с `date/description/period`;
+- frozen `distribution_snapshots` с видимой раскладкой колонок и значениями;
 - все переводы между кошельками.
+
+Дополнительно:
+
+- export в JSON теперь записывается atomically через временный файл + `os.replace`, чтобы не оставлять частично записанные backup-файлы;
+- startup SQLite → JSON export использует уже замороженные distribution months и может пропускать auto-freeze внутри фонового export-потока.
 
 ### FX Revaluation
 
@@ -742,6 +760,11 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `BudgetTabBindings` — привязки виджетов вкладки `Budget`.
 - `build_budget_tab(parent, context)` — построение вкладки `Budget` с формой создания, таблицей бюджетов, progress canvas и callback `refresh`.
 
+`gui/tabs/distribution_tab.py`
+
+- `DistributionTabBindings` — привязки виджетов вкладки `Distribution`.
+- `build_distribution_tab(parent, context)` — построение вкладки `Distribution` со structure editor, period range и таблицей фиксированных/live распределений.
+
 `gui/tabs/reports_tab.py`
 
 - `ReportsTabContext` — контекст вкладки отчетов.
@@ -812,6 +835,8 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `get_average_monthly_income(start_date, end_date)` — средний месячный доход по диапазону.
 - `get_average_monthly_expenses(start_date, end_date)` — среднемесячные расходы по диапазону.
 - `create_budget(...)`, `get_budgets()`, `get_budget_results()`, `delete_budget(...)`, `update_budget_limit(...)` — API Budget System.
+- `create_distribution_item(...)`, `create_distribution_subitem(...)`, `update_distribution_item_pct(...)`, `update_distribution_subitem_pct(...)`, `delete_distribution_item(...)`, `delete_distribution_subitem(...)` — CRUD API Distribution System.
+- `validate_distribution()`, `get_distribution_history(start_month, end_month)`, `get_frozen_distribution_rows(...)`, `toggle_distribution_month_fixed(month)` — расчёт и управление frozen distribution rows.
 
 `gui/exporters.py`
 
@@ -839,6 +864,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 
 - `parse_import_file(path, force=False)` -> `ParsedImportData` (DTO/словарный слой, без записи в хранилище).
 - Валидация ограничений: размер файла, row-limit, размер CSV-поля.
+- Для `JSON` также читает `distribution_snapshots`.
 
 `services/import_service.py`
 
@@ -846,6 +872,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `ImportService.import_mandatory_file(path)` — импорт шаблонов обязательных расходов; возвращает `ImportResult`.
 - Dry-run использует тот же parse/validation pipeline, но не пишет в SQLite.
 - `Full Backup` сохраняет фиксированные `amount_kzt/rate_at_operation`; `Current Rate` пересчитывает значения.
+- Для `JSON` full backup может восстанавливать frozen distribution snapshots через `replace_distribution_snapshots(...)`.
 
 `services/audit_service.py`
 
@@ -910,6 +937,14 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - `get_budget_result(budget, today)` — результаты по бюджету на указанную дату.
 - `get_all_results(today)` — batch-расчёт всех результатов по бюджетам на указанную дату.
 
+`services/distribution_service.py`
+
+- `DistributionService(repository)` — CRUD структуры распределения и расчёт monthly distribution только для SQLite.
+- `create_item(...)`, `create_subitem(...)`, `update_*_pct(...)`, `update_*_name(...)`, `delete_*(...)` — управление item/subitem структурой.
+- `validate()` — проверка, что top-level и subitem percentages сходятся к `100%`.
+- `get_monthly_distribution(month)` / `get_distribution_history(start_month, end_month)` — расчёт распределения по net income без переводов.
+- `freeze_month(month, auto_fixed=False)`, `freeze_closed_months()`, `toggle_month_fixed(month)`, `get_frozen_rows(...)`, `replace_frozen_rows(rows)` — lifecycle frozen snapshot'ов.
+
 `services/currency_support.py`
 
 - `convert_money_to_kzt(amount, currency, currency_service=None)` — helper нормализации сумм в KZT для read-only сервисов и use cases.
@@ -923,9 +958,10 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 `utils/backup_utils.py`
 
 - `compute_checksum(data)` — SHA256 для `data`.
-- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0, readonly=True, storage_mode="unknown")`.
+- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, distribution_snapshots=(), transfers=(), initial_balance=0.0, readonly=True, storage_mode="unknown")`.
 - `import_full_backup_from_json(filepath, force=False)`.
 - Backup/import нормализует денежные значения и курсы через `utils.money`.
+- JSON export writes atomically via temporary file + `os.replace`.
 
 `utils/money.py`
 
@@ -987,108 +1023,111 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 ```text
 project/
 │
-├── main.py                     # Точка входа приложения
-├── config.py                   # Пути runtime SQLite и JSON import/export
-├── bootstrap.py                # Инициализация SQLite + стартовая валидация
-├── backup.py                   # Backup JSON и экспорт SQLite -> JSON
-├── migrate_json_to_sqlite.py   # Миграция данных из JSON в SQLite
-├── version.py                  # Версия приложения для snapshot metadata
-├── data.json                   # JSON import/export/backup файл (опционально)
-├── currency_rates.json         # Кэш курсов валют для online-режима
-├── requirements.txt            # Runtime-зависимости
-├── requirements-dev.txt        # Dev-зависимости (тесты, coverage)
-├── pytest.ini                  # Настройки pytest
-├── pyproject.toml              # Конфигурация проекта
-├── README.md                   # Эта документация
-├── README_EN.md                # Документация на английском
-├── CHANGELOG.md                # История изменений
-├── LICENSE                     # Лицензия
+├── main.py                           # Точка входа приложения
+├── config.py                         # Пути runtime SQLite и JSON import/export
+├── bootstrap.py                      # Инициализация SQLite + стартовая валидация
+├── backup.py                         # Backup JSON и экспорт SQLite -> JSON
+├── migrate_json_to_sqlite.py         # Миграция данных из JSON в SQLite
+├── version.py                        # Версия приложения для snapshot metadata
+├── data.json                         # JSON import/export/backup файл (опционально)
+├── currency_rates.json               # Кэш курсов валют для online-режима
+├── requirements.txt                  # Runtime-зависимости
+├── requirements-dev.txt              # Dev-зависимости (тесты, coverage)
+├── pytest.ini                        # Настройки pytest
+├── pyproject.toml                    # Конфигурация проекта
+├── README.md                         # Эта документация
+├── README_EN.md                      # Документация на английском
+├── CHANGELOG.md                      # История изменений
+├── LICENSE                           # Лицензия
 │
-├── app/                        # Application layer
+├── app/                              # Application layer
 │   ├── __init__.py
-│   ├── finance_service.py      # Протокол FinanceService для import-сервиса
-│   ├── record_service.py       # Сервис записей
-│   ├── services.py             # CurrencyService адаптер
-│   ├── use_case_support.py     # Общие helper'ы для use cases
-│   └── use_cases.py            # Сценарии использования
+│   ├── finance_service.py            # Протокол FinanceService для import-сервиса
+│   ├── record_service.py             # Сервис записей
+│   ├── services.py                   # CurrencyService адаптер
+│   ├── use_case_support.py           # Общие helper'ы для use cases
+│   └── use_cases.py                  # Сценарии использования
 │
-├── domain/                     # Domain layer
+├── domain/                           # Domain layer
 │   ├── __init__.py
-│   ├── audit.py                # Модели и логика аудита
-│   ├── budget.py               # Бюджеты, pace/status и live tracking DTO
-│   ├── records.py              # Записи
-│   ├── reports.py              # Отчёты
-│   ├── currency.py             # Доменный CurrencyService
-│   ├── wallets.py              # Кошельки
-│   ├── transfers.py            # Переводы
-│   ├── validation.py           # Валидация дат и периодов
-│   ├── errors.py               # Ошибки приложения
-│   ├── import_policy.py        # Политики импорта
-│   └── import_result.py        # Результаты импорта
+│   ├── audit.py                      # Модели и логика аудита
+│   ├── budget.py                     # Бюджеты, pace/status и live tracking DTO
+│   ├── distribution.py               # DTO и frozen snapshot-модели Distribution System
+│   ├── records.py                    # Записи
+│   ├── reports.py                    # Отчёты
+│   ├── currency.py                   # Доменный CurrencyService
+│   ├── wallets.py                    # Кошельки
+│   ├── transfers.py                  # Переводы
+│   ├── validation.py                 # Валидация дат и периодов
+│   ├── errors.py                     # Ошибки приложения
+│   ├── import_policy.py              # Политики импорта
+│   └── import_result.py              # Результаты импорта
 │
-├── infrastructure/             # Infrastructure layer
-│   ├── repositories.py         # JSON-репозиторий
-│   └── sqlite_repository.py    # SQLite-репозиторий
+├── infrastructure/                   # Infrastructure layer
+│   ├── repositories.py               # JSON-репозиторий
+│   └── sqlite_repository.py          # SQLite-репозиторий
 │
-├── storage/                    # Абстракция storage и адаптеры JSON/SQLite
+├── storage/                          # Абстракция storage и адаптеры JSON/SQLite
 │   ├── __init__.py
-│   ├── base.py                 # Базовый класс хранилища
-│   ├── json_storage.py         # Адаптер JSON-хранилища
-│   └── sqlite_storage.py       # Адаптер SQLite-хранилища
+│   ├── base.py                       # Базовый класс хранилища
+│   ├── json_storage.py               # Адаптер JSON-хранилища
+│   └── sqlite_storage.py             # Адаптер SQLite-хранилища
 │
-├── db/                         # SQL schema для SQLite
+├── db/                               # SQL schema для SQLite
 │   └── schema.sql
 │
-├── services/                   # Сервисный слой
+├── services/                         # Сервисный слой
 │   ├── __init__.py
-│   ├── audit_service.py        # Сервис аудита
-│   ├── balance_service.py      # Read-only сервис балансов и cashflow
-│   ├── budget_service.py       # CRUD бюджетов и live spend-tracking
-│   ├── currency_support.py     # Конвертация денежных сумм в KZT для сервисов
-│   ├── import_parser.py        # Парсер CSV/XLSX/JSON -> DTO
-│   ├── import_service.py       # Оркестрация импорта через FinanceService
-│   ├── metrics_service.py      # Read-only сервис финансовых метрик
-│   ├── report_service.py       # DTO и helper'ы для UI отчётов
-│   ├── sqlite_money_sql.py     # SQL helper-выражения для minor-unit сумм
-│   └── timeline_service.py     # Read-only сервис временных рядов
+│   ├── audit_service.py              # Сервис аудита
+│   ├── balance_service.py            # Read-only сервис балансов и cashflow
+│   ├── budget_service.py             # CRUD бюджетов и live spend-tracking
+│   ├── currency_support.py           # Конвертация денежных сумм в KZT для сервисов
+│   ├── distribution_service.py       # CRUD структуры распределения и frozen month snapshots
+│   ├── import_parser.py              # Парсер CSV/XLSX/JSON -> DTO
+│   ├── import_service.py             # Оркестрация импорта через FinanceService
+│   ├── metrics_service.py            # Read-only сервис финансовых метрик
+│   ├── report_service.py             # DTO и helper'ы для UI отчётов
+│   ├── sqlite_money_sql.py           # SQL helper-выражения для minor-unit сумм
+│   └── timeline_service.py           # Read-only сервис временных рядов
 │
-├── utils/                      # Импорт/экспорт и графики
+├── utils/                            # Импорт/экспорт и графики
 │   ├── __init__.py
-│   ├── backup_utils.py         # Резервное копирование данных
-│   ├── import_core.py          # Валидатор импорта
-│   ├── charting.py             # Графики и агрегации
+│   ├── backup_utils.py               # Резервное копирование данных
+│   ├── import_core.py                # Валидатор импорта
+│   ├── charting.py                   # Графики и агрегации
 │   ├── csv_utils.py
 │   ├── excel_utils.py
-│   ├── money.py                # Точная денежная арифметика и quantization helper'ы
+│   ├── money.py                      # Точная денежная арифметика и quantization helper'ы
 │   ├── pdf_utils.py
-│   └── tabular_utils.py        # Общие helper'ы CSV/XLSX
+│   └── tabular_utils.py              # Общие helper'ы CSV/XLSX
 │
-├── gui/                        # GUI слой (Tkinter)
+├── gui/                              # GUI слой (Tkinter)
 │   ├── tabs/
-│   │   ├── infographics_tab.py # Вкладка с информационными графиками
-│   │   ├── operations_tab.py   # Вкладка с операциями и переводами
-│   │   ├── operations_support.py # Общие helper'ы вкладки операций
-│   │   ├── reports_tab.py      # Вкладка с отчётами
-│   │   ├── reports_controller.py # Контроллер вкладки отчётов (UI adapter)
-│   │   ├── analytics_tab.py    # Вкладка аналитики (dashboard, категории, отчёт)
-│   │   ├── budget_tab.py       # Вкладка бюджетов и progress canvas
-│   │   ├── settings_support.py # Общие helper'ы вкладки настроек
-│   │   └── settings_tab.py     # Вкладка с кошельками и обязательными расходами
+│   │   ├── infographics_tab.py       # Вкладка с информационными графиками
+│   │   ├── operations_tab.py         # Вкладка с операциями и переводами
+│   │   ├── operations_support.py     # Общие helper'ы вкладки операций
+│   │   ├── reports_tab.py            # Вкладка с отчётами
+│   │   ├── reports_controller.py     # Контроллер вкладки отчётов (UI adapter)
+│   │   ├── analytics_tab.py          # Вкладка аналитики (dashboard, категории, отчёт)
+│   │   ├── budget_tab.py             # Вкладка бюджетов и progress canvas
+│   │   ├── distribution_tab.py       # Вкладка распределения net income по месяцам
+│   │   ├── settings_support.py       # Общие helper'ы вкладки настроек
+│   │   └── settings_tab.py           # Вкладка с кошельками и обязательными расходами
 │   │
 │   ├── __init__.py
-│   ├── tkinter_gui.py          # Основное GUI-приложение
-│   ├── record_colors.py        # Цвета строк по типу записи
-│   ├── tooltip.py              # Tooltip для tkinter/ttk
-│   ├── controller_import_support.py # Helper'ы import flow для GUI-контроллера
-│   ├── controller_support.py   # Вспомогательные GUI helper'ы
-│   ├── helpers.py              # Помощники для GUI
-│   ├── controllers.py          # Контроллеры GUI
-│   ├── importers.py            # Legacy-обёртки импортеров (совместимость/тесты)
-│   └── exporters.py            # Экспорт отчётов, записей, обязательных расходов и backup
+│   ├── tkinter_gui.py                # Основное GUI-приложение
+│   ├── record_colors.py              # Цвета строк по типу записи
+│   ├── tooltip.py                    # Tooltip для tkinter/ttk
+│   ├── controller_import_support.py  # Helper'ы import flow для GUI-контроллера
+│   ├── controller_support.py         # Вспомогательные GUI helper'ы
+│   ├── helpers.py                    # Помощники для GUI
+│   ├── controllers.py                # Контроллеры GUI
+│   ├── importers.py                  # Legacy-обёртки импортеров (совместимость/тесты)
+│   └── exporters.py                  # Экспорт отчётов, записей, обязательных расходов и backup
 │
-└── tests/                      # Тесты
+└── tests/                            # Тесты
     ├── __init__.py
-    ├── conftest.py             # Локальная tmp-fixture для стабильных тестов
+    ├── conftest.py                   # Локальная tmp-fixture для стабильных тестов
     ├── test_analytics_tab.py
     ├── test_audit_engine.py
     ├── test_balance_service.py

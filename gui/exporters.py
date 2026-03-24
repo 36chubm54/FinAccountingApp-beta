@@ -108,6 +108,7 @@ def export_full_backup(
     wallets=None,
     records,
     mandatory_expenses,
+    distribution_snapshots=(),
     transfers=None,
     initial_balance: float = 0.0,
     readonly: bool = True,
@@ -122,6 +123,7 @@ def export_full_backup(
             wallets=list(wallets or []),
             records=list(records),
             mandatory_expenses=list(mandatory_expenses),
+            distribution_snapshots=list(distribution_snapshots or []),
             transfers=list(transfers or []),
             readonly=readonly,
         )

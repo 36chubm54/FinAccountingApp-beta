@@ -70,6 +70,7 @@ Tabs and actions:
 - `Reports` — report generation, export.
 - `Analytics` — financial analytics for an arbitrary period (dashboard, categories, monthly report).
 - `Budget` — category budgets with arbitrary date ranges, pace tracking, and live progress.
+- `Distribution` — monthly net-income distribution structure with fixed rows and snapshot history.
 - `Settings` — management of mandatory expenses and wallets.
 
 Infographics:
@@ -107,6 +108,16 @@ Planning and tracking category budgets across arbitrary date ranges.
 - The progress canvas is displayed below the table:
   colored bar = share of budget spent, blue vertical = share of time elapsed.
 - Multiple budgets per category are allowed as long as their date ranges do not overlap.
+
+### Distribution tab
+
+Monthly net-income allocation structure and month-by-month history view.
+
+- The left `Distribution Structure` panel manages top-level items/subitems with percentages and optional groups.
+- The right `Distribution Table` shows `Month`, `Fixed`, `Net income`, and calculated item/subitem allocation columns.
+- `Fix Row` freezes or unfreezes a month row; auto-fixed closed months are protected from manual unfix.
+- When frozen rows are requested, the service auto-freezes closed past months.
+- Validation requires top-level items to total `100%`, and subitems within an item to total `100%` when present.
 
 ### Adding income/expense
 
@@ -336,6 +347,7 @@ Formats:
 - Import pipeline: `parser -> dry-run validation -> user confirmation -> SQLite transaction`.
 - For `CSV/XLSX`, the real import replaces runtime data with valid rows from the file; invalid rows remain only in the import report.
 - For readonly `JSON` snapshots, `force=True` is required; readonly/checksum validation happens before the commit stage.
+- `JSON` full backup can now include `distribution_snapshots`; on import they are restored into SQLite when the repository supports the Distribution System.
 
 Data format:
 
@@ -399,7 +411,13 @@ Backup restores:
 - wallets with fields `id/name/currency/balance`;
 - all records with fields `type/date/wallet_id/transfer_id/category/amount_original/currency/rate_at_operation/amount_kzt/category/description`;
 - all mandatory expenses with `date/description/period`;
+- frozen `distribution_snapshots` with visible column layout and values;
 - all transfers between wallets.
+
+Additionally:
+
+- JSON export now writes atomically via a temporary file + `os.replace`, preventing partially written backup files;
+- startup SQLite → JSON export uses already frozen distribution months and can skip auto-freeze inside the background export thread.
 
 ### FX Revaluation
 
@@ -742,6 +760,11 @@ Below are the key classes and functions synchronized with the actual code.
 - `BudgetTabBindings` — widget bindings for the `Budget` tab.
 - `build_budget_tab(parent, context)` — builds the `Budget` tab with the creation form, budget table, progress canvas, and a `refresh` callback.
 
+`gui/tabs/distribution_tab.py`
+
+- `DistributionTabBindings` — widget bindings for the `Distribution` tab.
+- `build_distribution_tab(parent, context)` — builds the `Distribution` tab with the structure editor, period range, and frozen/live distribution table.
+
 `gui/tabs/reports_tab.py`
 
 - `ReportsTabContext` — report tab context.
@@ -812,6 +835,8 @@ Below are the key classes and functions synchronized with the actual code.
 - `get_average_monthly_income(start_date, end_date)` — average monthly income over a range.
 - `get_average_monthly_expenses(start_date, end_date)` — average monthly expenses over a range.
 - `create_budget(...)`, `get_budgets()`, `get_budget_results()`, `delete_budget(...)`, `update_budget_limit(...)` — Budget System API surface.
+- `create_distribution_item(...)`, `create_distribution_subitem(...)`, `update_distribution_item_pct(...)`, `update_distribution_subitem_pct(...)`, `delete_distribution_item(...)`, `delete_distribution_subitem(...)` — Distribution System CRUD API.
+- `validate_distribution()`, `get_distribution_history(start_month, end_month)`, `get_frozen_distribution_rows(...)`, `toggle_distribution_month_fixed(month)` — frozen-row lifecycle and monthly distribution calculations.
 
 `gui/exporters.py`
 
@@ -839,6 +864,7 @@ Below are the key classes and functions synchronized with the actual code.
 
 - `parse_import_file(path, force=False)` -> `ParsedImportData` (DTO/dict parsing layer, no storage writes).
 - Enforces safety limits: file size, row count, CSV field size.
+- For `JSON`, it also reads `distribution_snapshots`.
 
 `services/import_service.py`
 
@@ -846,6 +872,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `ImportService.import_mandatory_file(path)` — imports mandatory templates and returns `ImportResult`.
 - Dry-run uses the same parse/validation pipeline but performs no SQLite writes.
 - `Full Backup` keeps fixed `amount_kzt/rate_at_operation`; `Current Rate` recalculates values.
+- For `JSON` full backup, it can also restore frozen distribution snapshots through `replace_distribution_snapshots(...)`.
 
 `services/audit_service.py`
 
@@ -910,6 +937,14 @@ Below are the key classes and functions synchronized with the actual code.
 - `get_budget_result(budget, today)` — budget results for the specified date.
 - `get_all_results(today)` — batch calculation of all budget results for the specified date.
 
+`services/distribution_service.py`
+
+- `DistributionService(repository)` — Distribution System CRUD and monthly allocation service for SQLite.
+- `create_item(...)`, `create_subitem(...)`, `update_*_pct(...)`, `update_*_name(...)`, `delete_*(...)` — item/subitem structure management.
+- `validate()` — verifies that top-level and subitem percentages total `100%`.
+- `get_monthly_distribution(month)` / `get_distribution_history(start_month, end_month)` — monthly allocation based on net income excluding transfers.
+- `freeze_month(month, auto_fixed=False)`, `freeze_closed_months()`, `toggle_month_fixed(month)`, `get_frozen_rows(...)`, `replace_frozen_rows(rows)` — frozen snapshot lifecycle.
+
 `services/currency_support.py`
 
 - `convert_money_to_kzt(amount, currency, currency_service=None)` — helper for normalizing amounts to KZT inside read-only services and use cases.
@@ -923,9 +958,10 @@ Below are the key classes and functions synchronized with the actual code.
 `utils/backup_utils.py`
 
 - `compute_checksum(data)` — SHA256 checksum for `data`.
-- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0, readonly=True, storage_mode="unknown")`.
+- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, distribution_snapshots=(), transfers=(), initial_balance=0.0, readonly=True, storage_mode="unknown")`.
 - `import_full_backup_from_json(filepath, force=False)`.
 - Backup/import normalizes money values and FX rates via `utils.money`.
+- JSON export writes atomically via a temporary file + `os.replace`.
 
 `utils/money.py`
 
@@ -987,108 +1023,111 @@ Below are the key classes and functions synchronized with the actual code.
 ```text
 project/
 │
-├── main.py                     # Application entry point
-├── config.py                   # Runtime SQLite and JSON import/export paths
-├── bootstrap.py                # SQLite initialization + startup validation
-├── backup.py                   # JSON backup and SQLite -> JSON export
-├── migrate_json_to_sqlite.py   # Data migration from JSON to SQLite
-├── version.py                  # Application version for snapshot metadata
-├── data.json                   # Optional JSON import/export/backup file
-├── currency_rates.json         # Currency rate cache for online mode
-├── requirements.txt            # Runtime dependencies
-├── requirements-dev.txt        # Dev dependencies (tests, coverage)
-├── pytest.ini                  # pytest settings
-├── pyproject.toml              # Project configuration
-├── README.md                   # This documentation
-├── README_EN.md                # Documentation in English
-├── CHANGELOG.md                # History of changes
-├── LICENSE                     # License
+├── main.py                           # Application entry point
+├── config.py                         # Runtime SQLite and JSON import/export paths
+├── bootstrap.py                      # SQLite initialization + startup validation
+├── backup.py                         # JSON backup and SQLite -> JSON export
+├── migrate_json_to_sqlite.py         # Data migration from JSON to SQLite
+├── version.py                        # Application version for snapshot metadata
+├── data.json                         # Optional JSON import/export/backup file
+├── currency_rates.json               # Currency rate cache for online mode
+├── requirements.txt                  # Runtime dependencies
+├── requirements-dev.txt              # Dev dependencies (tests, coverage)
+├── pytest.ini                        # pytest settings
+├── pyproject.toml                    # Project configuration
+├── README.md                         # This documentation
+├── README_EN.md                      # Documentation in English
+├── CHANGELOG.md                      # History of changes
+├── LICENSE                           # License
 │
-├── app/                        # Application layer
+├── app/                              # Application layer
 │   ├── __init__.py
-│   ├── finance_service.py      # FinanceService protocol for import orchestration
-│   ├── record_service.py       # Service for records
-│   ├── services.py             # CurrencyService adapter
-│   ├── use_case_support.py     # Shared helpers for use cases
-│   └── use_cases.py            # Use cases
+│   ├── finance_service.py            # FinanceService protocol for import orchestration
+│   ├── record_service.py             # Service for records
+│   ├── services.py                   # CurrencyService adapter
+│   ├── use_case_support.py           # Shared helpers for use cases
+│   └── use_cases.py                  # Use cases
 │
-├── domain/                     # Domain layer
+├── domain/                           # Domain layer
 │   ├── __init__.py
-│   ├── audit.py                # Audit models and logic
-│   ├── budget.py               # Budgets, pace/status, and live tracking DTOs
-│   ├── records.py              # Records
-│   ├── reports.py              # Reports
-│   ├── currency.py             # Domain CurrencyService
-│   ├── wallets.py              # Wallets
-│   ├── transfers.py            # Transfers
-│   ├── validation.py           # Validation of dates and periods
-│   ├── errors.py               # Application errors 
-│   ├── import_policy.py        # Import policies
-│   └── import_result.py        # Import results
+│   ├── audit.py                      # Audit models and logic
+│   ├── budget.py                     # Budgets, pace/status, and live tracking DTOs
+│   ├── distribution.py               # DTOs and frozen snapshot models for the Distribution System
+│   ├── records.py                    # Records
+│   ├── reports.py                    # Reports
+│   ├── currency.py                   # Domain CurrencyService
+│   ├── wallets.py                    # Wallets
+│   ├── transfers.py                  # Transfers
+│   ├── validation.py                 # Validation of dates and periods
+│   ├── errors.py                     # Application errors 
+│   ├── import_policy.py              # Import policies
+│   └── import_result.py              # Import results
 │
-├── infrastructure/             # Infrastructure layer
-│   ├── repositories.py         # JSON repository
-│   └── sqlite_repository.py    # SQLite repository
+├── infrastructure/                   # Infrastructure layer
+│   ├── repositories.py               # JSON repository
+│   └── sqlite_repository.py          # SQLite repository
 │
-├── storage/                    # Storage abstraction and JSON/SQLite adapters
+├── storage/                          # Storage abstraction and JSON/SQLite adapters
 │   ├── __init__.py
-│   ├── base.py                 # Base storage class
-│   ├── json_storage.py         # JSON storage adapter
-│   └── sqlite_storage.py       # SQLite storage adapter
+│   ├── base.py                       # Base storage class
+│   ├── json_storage.py               # JSON storage adapter
+│   └── sqlite_storage.py             # SQLite storage adapter
 │
-├── db/                         # SQL schema for SQLite
+├── db/                               # SQL schema for SQLite
 │   └── schema.sql
 │
-├── services/                   # Service layer
+├── services/                         # Service layer
 │   ├── __init__.py
-│   ├── audit_service.py        # Audit service
-│   ├── balance_service.py      # Read-only balance and cashflow service
-│   ├── budget_service.py       # Budget CRUD and live spend tracking
-│   ├── currency_support.py     # Converting money amounts to KZT for services
-│   ├── import_parser.py        # CSV/XLSX/JSON parser -> DTO
-│   ├── import_service.py       # Import orchestration via FinanceService
-│   ├── metrics_service.py      # Read-only financial metrics service
-│   ├── report_service.py       # DTOs and helpers for reports UI
-│   ├── sqlite_money_sql.py     # SQL helper expressions for minor-unit sums
-│   └── timeline_service.py     # Read-only timeline service
+│   ├── audit_service.py              # Audit service
+│   ├── balance_service.py            # Read-only balance and cashflow service
+│   ├── budget_service.py             # Budget CRUD and live spend tracking
+│   ├── currency_support.py           # Converting money amounts to KZT for services
+│   ├── distribution_service.py       # Distribution structure CRUD and frozen month snapshots
+│   ├── import_parser.py              # CSV/XLSX/JSON parser -> DTO
+│   ├── import_service.py             # Import orchestration via FinanceService
+│   ├── metrics_service.py            # Read-only financial metrics service
+│   ├── report_service.py             # DTOs and helpers for reports UI
+│   ├── sqlite_money_sql.py           # SQL helper expressions for minor-unit sums
+│   └── timeline_service.py           # Read-only timeline service
 │
-├── utils/                      # Import/export and graphs
+├── utils/                            # Import/export and graphs
 │   ├── __init__.py
-│   ├── backup_utils.py         # Backup of data
-│   ├── import_core.py          # Import validator
-│   ├── charting.py             # Graphs and Aggregations
+│   ├── backup_utils.py               # Backup of data
+│   ├── import_core.py                # Import validator
+│   ├── charting.py                   # Graphs and Aggregations
 │   ├── csv_utils.py
 │   ├── excel_utils.py
-│   ├── money.py                # Precise money arithmetic and quantization helpers
+│   ├── money.py                      # Precise money arithmetic and quantization helpers
 │   ├── pdf_utils.py
-│   └── tabular_utils.py        # Shared CSV/XLSX helpers
+│   └── tabular_utils.py              # Shared CSV/XLSX helpers
 │
-├── gui/                        # GUI layer (Tkinter)
+├── gui/                              # GUI layer (Tkinter)
 │   ├── tabs/
-│   │   ├── infographics_tab.py # Tab with infographics
-│   │   ├── operations_tab.py   # Tab with operations and transfers
-│   │   ├── operations_support.py # Shared helpers for the Operations tab
-│   │   ├── reports_tab.py      # Tab with reports
-│   │   ├── reports_controller.py # Reports tab controller (UI adapter)
-│   │   ├── analytics_tab.py    # Analytics tab (dashboard, categories, report)
-│   │   ├── budget_tab.py       # Budget tab and progress canvas
-│   │   ├── settings_support.py # Shared helpers for the Settings tab
-│   │   └── settings_tab.py     # Tab with wallets and mandatory expenses
+│   │   ├── infographics_tab.py       # Tab with infographics
+│   │   ├── operations_tab.py         # Tab with operations and transfers
+│   │   ├── operations_support.py     # Shared helpers for the Operations tab
+│   │   ├── reports_tab.py            # Tab with reports
+│   │   ├── reports_controller.py     # Reports tab controller (UI adapter)
+│   │   ├── analytics_tab.py          # Analytics tab (dashboard, categories, report)
+│   │   ├── budget_tab.py             # Budget tab and progress canvas
+│   │   ├── distribution_tab.py       # Net-income distribution tab by month
+│   │   ├── settings_support.py       # Shared helpers for the Settings tab
+│   │   └── settings_tab.py           # Tab with wallets and mandatory expenses
 │   │
 │   ├── __init__.py
-│   ├── tkinter_gui.py          # Main GUI application
-│   ├── record_colors.py        # Row colors by record kind
-│   ├── tooltip.py              # Tooltip for tkinter/ttk
-│   ├── controller_import_support.py # Import-flow helpers for the GUI controller
-│   ├── controller_support.py   # GUI support helpers
-│   ├── helpers.py              # Helpers for GUI
-│   ├── controllers.py          # GUI controllers
-│   ├── importers.py            # Legacy import wrappers (compatibility/tests)
-│   └── exporters.py            # Export reports, mandatory expenses and backup
+│   ├── tkinter_gui.py                # Main GUI application
+│   ├── record_colors.py              # Row colors by record kind
+│   ├── tooltip.py                    # Tooltip for tkinter/ttk
+│   ├── controller_import_support.py  # Import-flow helpers for the GUI controller
+│   ├── controller_support.py         # GUI support helpers
+│   ├── helpers.py                    # Helpers for GUI
+│   ├── controllers.py                # GUI controllers
+│   ├── importers.py                  # Legacy import wrappers (compatibility/tests)
+│   └── exporters.py                  # Export reports, mandatory expenses and backup
 │
-└── tests/                      # Tests
+└── tests/                            # Tests
     ├── __init__.py
-    ├── conftest.py             # Local tmp fixture for stable test execution
+    ├── conftest.py                   # Local tmp fixture for stable test execution
     ├── test_analytics_tab.py
     ├── test_audit_engine.py
     ├── test_balance_service.py

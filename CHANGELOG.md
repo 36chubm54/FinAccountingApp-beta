@@ -7,6 +7,35 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.8.0] - 2026-03-24
+
+### Added
+
+- Added the Distribution System with persisted `distribution_items` and `distribution_subitems`
+- Added `domain/distribution.py` models and `services/distribution_service.py` for CRUD, validation, and monthly cashflow allocation
+- Added a new `Distribution` tab between `Budget` and `Settings` for structure editing and period-based distribution review
+- Added frozen `distribution_snapshots` with `auto_fixed` support for fixed month rows in JSON backup/import
+- Added `tests/test_distribution_service.py` and schema/runtime coverage for the new tables and snapshot flows
+
+### Changed
+
+- Main notebook order is now `Infographics | Operations | Reports | Analytics | Budget | Distribution | Settings`
+- Distribution calculations reuse existing minor-unit SQL helpers so the new major feature stays compatible with `v1.7.2`-`v1.7.4` money precision fixes
+- Startup now auto-freezes closed distribution months before export, while background JSON export skips repeated auto-freeze
+- Full JSON backup export now writes atomically via temp file + replace and can restore distribution snapshots on import
+
+### Tests
+
+- Added service-level coverage for distribution CRUD, validation, monthly net-income calculation, history ranges, snapshot restore, and auto-fixed month protection
+
+### Docs
+
+- Updated `README.md` and `README_EN.md` for the Distribution tab, snapshot-aware backup/import, and atomic JSON export behavior
+
+No breaking changes.
+
+---
+
 ## [1.7.4] - 2026-03-23
 
 ### Added
