@@ -347,7 +347,8 @@ Formats:
 - Import pipeline: `parser -> dry-run validation -> user confirmation -> SQLite transaction`.
 - For `CSV/XLSX`, the real import replaces runtime data with valid rows from the file; invalid rows remain only in the import report.
 - For readonly `JSON` snapshots, `force=True` is required; readonly/checksum validation happens before the commit stage.
-- `JSON` full backup can now include `distribution_snapshots`; on import they are restored into SQLite when the repository supports the Distribution System.
+- `JSON` full backup can now include `distribution_items`, `distribution_subitems`, and `distribution_snapshots`; on import they are restored into SQLite when the repository supports the Distribution System.
+- For `JSON` full backup, distribution structure is validated strictly: malformed item/subitem payloads now fail the import instead of being skipped silently.
 
 Data format:
 
@@ -401,6 +402,7 @@ Full backup is implemented in `JSON` format in two modes:
 - Snapshot metadata:
   - `meta.app_version` is taken from `version.py`;
   - `meta.storage` is provided by the caller and is no longer hardcoded to `sqlite`.
+  - GUI full-backup export from `Settings` marks the source as `meta.storage="sqlite"`.
 - The `Settings` tab contains the following buttons:
   - `Export Full Backup`
   - `Import Full Backup`
@@ -411,6 +413,7 @@ Backup restores:
 - wallets with fields `id/name/currency/balance`;
 - all records with fields `type/date/wallet_id/transfer_id/category/amount_original/currency/rate_at_operation/amount_kzt/category/description`;
 - all mandatory expenses with `date/description/period`;
+- distribution structure: `distribution_items` and `distribution_subitems`;
 - frozen `distribution_snapshots` with visible column layout and values;
 - all transfers between wallets.
 
@@ -450,14 +453,14 @@ JSON (`data.json`) is no longer used as an application backend and remains only 
 - backups.
 
 During startup, after SQLite integrity validation, the current runtime state is exported to `data.json`.
-This export now preserves `mandatory_expenses.date`, so template dates survive the startup JSON snapshot.
+This export now preserves `mandatory_expenses.date`, the Distribution System structure, and frozen `distribution_snapshots`.
 
 A dedicated `storage/` layer is used for data access:
 
 - `storage/base.py` — `Storage` contract (data-access operations only).
 - `storage/json_storage.py` — JSON adapter for import/export/backup only.
 - `storage/sqlite_storage.py` — `SQLiteStorage` based on standard `sqlite3`.
-- `db/schema.sql` — SQL schema for `wallets`, `records`, `transfers`, `mandatory_expenses`, `budgets`.
+- `db/schema.sql` — SQL schema for `wallets`, `records`, `transfers`, `mandatory_expenses`, `budgets`, and `distribution_*`.
 
 ### JSON -> SQLite migration
 
@@ -477,9 +480,10 @@ What the script does:
 
 - loads source data via `JsonStorage`;
 - writes to SQLite in one explicit transaction with strict order:
-  `wallets -> transfers -> records -> mandatory_expenses`;
+  `wallets -> distribution_items -> distribution_subitems -> transfers -> records -> mandatory_expenses -> distribution_snapshots`;
 - preserves existing `id` values (or builds `old_id -> new_id` mapping when ids are auto-generated);
 - populates precision fields `*_minor` and `rate_at_operation_text` while writing;
+- for full backup, strictly validates `distribution_items` / `distribution_subitems` and aborts migration on malformed payloads;
 - validates integrity and compares balances/`net worth`;
 - performs `rollback` on any error or mismatch.
 - is safe to rerun: if SQLite already has an equivalent dataset, migration is skipped without failure.
@@ -786,6 +790,7 @@ Below are the key classes and functions synchronized with the actual code.
 `gui/tooltip.py`
 
 - `Tooltip(widget, text)` — simple tooltip for `tkinter`/`ttk` widgets.
+- Tooltip positioning respects application-window bounds and now behaves correctly on multi-monitor layouts.
 
 `gui/controller_import_support.py`
 
@@ -844,7 +849,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `export_grouped_report(statement_title, grouped_rows, filepath, fmt)` — exports grouped report summaries.
 - `export_mandatory_expenses(expenses, filepath, fmt)`.
 - `export_records(records, filepath, fmt, initial_balance=0.0, transfers=None)`.
-- `export_full_backup(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0)`.
+- `export_full_backup(filepath, wallets, records, mandatory_expenses, distribution_items=(), distribution_subitems=(), distribution_snapshots=(), transfers=None, initial_balance=0.0, readonly=True, storage_mode="unknown")`.
 
 `gui/importers.py`
 
@@ -864,7 +869,8 @@ Below are the key classes and functions synchronized with the actual code.
 
 - `parse_import_file(path, force=False)` -> `ParsedImportData` (DTO/dict parsing layer, no storage writes).
 - Enforces safety limits: file size, row count, CSV field size.
-- For `JSON`, it also reads `distribution_snapshots`.
+- For `JSON`, it also reads `distribution_items`, `distribution_subitems`, and `distribution_snapshots`.
+- `parse_transfer_row(...)` handles legacy transfer rows as well as current-rate/full-backup parsing.
 
 `services/import_service.py`
 
@@ -872,7 +878,8 @@ Below are the key classes and functions synchronized with the actual code.
 - `ImportService.import_mandatory_file(path)` — imports mandatory templates and returns `ImportResult`.
 - Dry-run uses the same parse/validation pipeline but performs no SQLite writes.
 - `Full Backup` keeps fixed `amount_kzt/rate_at_operation`; `Current Rate` recalculates values.
-- For `JSON` full backup, it can also restore frozen distribution snapshots through `replace_distribution_snapshots(...)`.
+- For `JSON` full backup, it can also restore distribution structure and frozen snapshots through `replace_distribution_structure(...)` / `replace_distribution_snapshots(...)`.
+- Malformed distribution structure in a `JSON` full backup is now treated as an import error instead of being skipped silently.
 
 `services/audit_service.py`
 
@@ -958,7 +965,7 @@ Below are the key classes and functions synchronized with the actual code.
 `utils/backup_utils.py`
 
 - `compute_checksum(data)` — SHA256 checksum for `data`.
-- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, distribution_snapshots=(), transfers=(), initial_balance=0.0, readonly=True, storage_mode="unknown")`.
+- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, distribution_items=(), distribution_subitems=(), distribution_snapshots=(), transfers=(), initial_balance=0.0, readonly=True, storage_mode="unknown")`.
 - `import_full_backup_from_json(filepath, force=False)`.
 - Backup/import normalizes money values and FX rates via `utils.money`.
 - JSON export writes atomically via a temporary file + `os.replace`.
@@ -1137,6 +1144,7 @@ project/
     ├── test_charting.py
     ├── test_csv.py
     ├── test_currency.py
+    ├── test_distribution_service.py
     ├── test_excel.py
     ├── test_gui_exporters_importers.py
     ├── test_import_balance_contract.py
@@ -1157,6 +1165,7 @@ project/
     ├── test_schema_contracts.py
     ├── test_services.py
     ├── test_sqlite_runtime_storage.py
+    ├── test_tooltip.py
     ├── test_timeline_service.py
     ├── test_transfer_integrity.py
     ├── test_transfer_order_sqlite.py

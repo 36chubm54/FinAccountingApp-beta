@@ -157,6 +157,104 @@ class DistributionService:
         )
         return [self._row_to_subitem(row) for row in rows]
 
+    def export_structure(
+        self,
+    ) -> tuple[list[DistributionItem], dict[int, list[DistributionSubitem]]]:
+        items = self.get_items(active_only=False)
+        subitems_by_item = {
+            int(item.id): self.get_subitems(item.id, active_only=False) for item in items
+        }
+        return items, subitems_by_item
+
+    def replace_structure(
+        self,
+        items: list[DistributionItem],
+        subitems_by_item: dict[int, list[DistributionSubitem]],
+    ) -> None:
+        with self._repo.transaction():
+            self._repo.execute("DELETE FROM distribution_subitems")
+            self._repo.execute("DELETE FROM distribution_items")
+            for item in sorted(
+                items,
+                key=lambda value: (
+                    int(value.sort_order),
+                    str(value.name).casefold(),
+                    int(value.id),
+                ),
+            ):
+                self._repo.execute(
+                    """
+                    INSERT INTO distribution_items (
+                        id, name, group_name, sort_order, pct, pct_minor, is_active
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        int(item.id),
+                        str(item.name),
+                        str(item.group_name or ""),
+                        int(item.sort_order),
+                        float(item.pct),
+                        int(item.pct_minor),
+                        int(bool(item.is_active)),
+                    ),
+                )
+            for item in sorted(
+                items,
+                key=lambda value: (
+                    int(value.sort_order),
+                    str(value.name).casefold(),
+                    int(value.id),
+                ),
+            ):
+                for subitem in sorted(
+                    subitems_by_item.get(int(item.id), []),
+                    key=lambda value: (
+                        int(value.sort_order),
+                        str(value.name).casefold(),
+                        int(value.id),
+                    ),
+                ):
+                    self._repo.execute(
+                        """
+                        INSERT INTO distribution_subitems (
+                            id, item_id, name, sort_order, pct, pct_minor, is_active
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            int(subitem.id),
+                            int(subitem.item_id),
+                            str(subitem.name),
+                            int(subitem.sort_order),
+                            float(subitem.pct),
+                            int(subitem.pct_minor),
+                            int(bool(subitem.is_active)),
+                        ),
+                    )
+            if items:
+                self._repo.execute(
+                    """
+                    INSERT OR REPLACE INTO sqlite_sequence(name, seq)
+                    VALUES('distribution_items', ?)
+                    """,
+                    (max(int(item.id) for item in items),),
+                )
+            if any(subitems_by_item.values()):
+                self._repo.execute(
+                    """
+                    INSERT OR REPLACE INTO sqlite_sequence(name, seq)
+                    VALUES('distribution_subitems', ?)
+                    """,
+                    (
+                        max(
+                            int(subitem.id)
+                            for subitems in subitems_by_item.values()
+                            for subitem in subitems
+                        ),
+                    ),
+                )
+
     def update_subitem_pct(self, subitem_id: int, new_pct: float) -> DistributionSubitem:
         self._assert_subitem_exists(subitem_id)
         pct_value, pct_minor = self._normalize_pct(new_pct)

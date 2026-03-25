@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import json
 from argparse import Namespace
 from pathlib import Path
 
+from domain.distribution import FrozenDistributionRow
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
 from domain.transfers import Transfer
 from domain.wallets import Wallet
 from infrastructure.repositories import JsonFileRecordRepository
 from migrate_json_to_sqlite import run_dry_run, run_migration
 from storage.sqlite_storage import SQLiteStorage
+from utils.backup_utils import export_full_backup_to_json
 
 
 def _build_json_fixture(json_path: str) -> None:
@@ -193,3 +196,121 @@ def test_migration_is_safe_to_rerun_on_equivalent_dataset(tmp_path) -> None:
     assert sqlite_storage.query_one("SELECT COUNT(*) FROM records")[0] == 2
     assert sqlite_storage.query_one("SELECT COUNT(*) FROM mandatory_expenses")[0] == 1
     sqlite_storage.close()
+
+
+def test_migration_moves_distribution_snapshots_from_full_backup_json(tmp_path) -> None:
+    json_path = tmp_path / "backup.json"
+    sqlite_path = tmp_path / "records.db"
+    schema_path = Path(__file__).resolve().parents[1] / "db" / "schema.sql"
+
+    snapshot = FrozenDistributionRow(
+        month="2026-02",
+        column_order=("month", "fixed", "net_income", "item_1"),
+        headings_by_column={
+            "month": "Month",
+            "fixed": "Fixed",
+            "net_income": "Net income",
+            "item_1": "Investments",
+        },
+        values_by_column={
+            "month": "2026-02",
+            "fixed": "Yes",
+            "net_income": "100",
+            "item_1": "100",
+        },
+        is_negative=False,
+        auto_fixed=True,
+    )
+
+    export_full_backup_to_json(
+        str(json_path),
+        wallets=[
+            Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=1000.0, system=True),
+            Wallet(id=2, name="Card", currency="KZT", initial_balance=500.0),
+        ],
+        records=[],
+        mandatory_expenses=[],
+        distribution_snapshots=[snapshot],
+        transfers=[],
+        readonly=False,
+    )
+
+    args = Namespace(
+        json_path=str(json_path),
+        sqlite_path=str(sqlite_path),
+        schema_path=str(schema_path),
+        dry_run=False,
+    )
+
+    code = run_migration(args)
+    assert code == 0
+
+    sqlite_storage = SQLiteStorage(str(sqlite_path))
+    sqlite_storage.initialize_schema(str(schema_path))
+    snapshot_row = sqlite_storage.query_one(
+        "SELECT month, auto_fixed FROM distribution_snapshots ORDER BY month LIMIT 1"
+    )
+    assert snapshot_row[0] == "2026-02"
+    assert snapshot_row[1] == 1
+    value_row = sqlite_storage.query_one(
+        """
+        SELECT column_key, value_text
+        FROM distribution_snapshot_values
+        WHERE snapshot_month = '2026-02' AND column_key = 'item_1'
+        """
+    )
+    assert value_row[0] == "item_1"
+    assert value_row[1] == "100"
+    sqlite_storage.close()
+
+
+def test_migration_rejects_invalid_distribution_structure_in_backup(tmp_path) -> None:
+    json_path = tmp_path / "backup_invalid_distribution.json"
+    sqlite_path = tmp_path / "records.db"
+    schema_path = Path(__file__).resolve().parents[1] / "db" / "schema.sql"
+
+    export_full_backup_to_json(
+        str(json_path),
+        wallets=[
+            Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=1000.0, system=True),
+        ],
+        records=[],
+        mandatory_expenses=[],
+        distribution_snapshots=[],
+        transfers=[],
+        readonly=False,
+    )
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    payload["distribution_items"] = [
+        {
+            "id": 1,
+            "name": "Investments",
+            "group_name": "Goals",
+            "sort_order": 0,
+            "pct": 100.0,
+            "pct_minor": 10000,
+            "is_active": True,
+        }
+    ]
+    payload["distribution_subitems"] = [
+        {
+            "id": 10,
+            "item_id": 999,
+            "name": "BTC",
+            "sort_order": 0,
+            "pct": 100.0,
+            "pct_minor": 10000,
+            "is_active": True,
+        }
+    ]
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    args = Namespace(
+        json_path=str(json_path),
+        sqlite_path=str(sqlite_path),
+        schema_path=str(schema_path),
+        dry_run=False,
+    )
+
+    code = run_migration(args)
+    assert code == 1

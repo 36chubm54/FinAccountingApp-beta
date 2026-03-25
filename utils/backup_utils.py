@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from datetime import date as dt_date
 from typing import Any
 
-from domain.distribution import FrozenDistributionRow
+from domain.distribution import DistributionItem, DistributionSubitem, FrozenDistributionRow
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 from domain.transfers import Transfer
@@ -86,6 +86,30 @@ def _distribution_snapshot_to_payload(snapshot: FrozenDistributionRow) -> dict[s
         "column_order": list(snapshot.column_order),
         "headings_by_column": dict(snapshot.headings_by_column),
         "values_by_column": dict(snapshot.values_by_column),
+    }
+
+
+def _distribution_item_to_payload(item: DistributionItem) -> dict[str, Any]:
+    return {
+        "id": int(item.id),
+        "name": str(item.name),
+        "group_name": str(item.group_name or ""),
+        "sort_order": int(item.sort_order),
+        "pct": float(item.pct),
+        "pct_minor": int(item.pct_minor),
+        "is_active": bool(item.is_active),
+    }
+
+
+def _distribution_subitem_to_payload(subitem: DistributionSubitem) -> dict[str, Any]:
+    return {
+        "id": int(subitem.id),
+        "item_id": int(subitem.item_id),
+        "name": str(subitem.name),
+        "sort_order": int(subitem.sort_order),
+        "pct": float(subitem.pct),
+        "pct_minor": int(subitem.pct_minor),
+        "is_active": bool(subitem.is_active),
     }
 
 
@@ -248,6 +272,8 @@ def export_full_backup_to_json(
     wallets: Sequence[Wallet] | None = None,
     records: Sequence[Record],
     mandatory_expenses: Sequence[MandatoryExpenseRecord],
+    distribution_items: Sequence[DistributionItem] = (),
+    distribution_subitems: Sequence[DistributionSubitem] = (),
     distribution_snapshots: Sequence[FrozenDistributionRow] = (),
     transfers: Sequence[Transfer] = (),
     initial_balance: float = 0.0,
@@ -271,6 +297,10 @@ def export_full_backup_to_json(
         "wallets": [_wallet_to_payload(wallet) for wallet in normalized_wallets],
         "records": [_record_to_payload(record) for record in records],
         "mandatory_expenses": [_record_to_payload(expense) for expense in mandatory_expenses],
+        "distribution_items": [_distribution_item_to_payload(item) for item in distribution_items],
+        "distribution_subitems": [
+            _distribution_subitem_to_payload(subitem) for subitem in distribution_subitems
+        ],
         "distribution_snapshots": [
             _distribution_snapshot_to_payload(snapshot) for snapshot in distribution_snapshots
         ],

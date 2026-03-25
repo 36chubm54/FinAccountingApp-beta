@@ -264,7 +264,7 @@ def build_operations_tab(
                 context.controller.delete_transfer(transfer_id)
                 messagebox.showinfo("Success", f"Deleted transfer #{transfer_id}.")
             elif context.controller.delete_record(repository_index):
-                messagebox.showinfo("Success", f"Deleted record at index {repository_index}.")
+                messagebox.showinfo("Success", "Deleted record.")
             else:
                 messagebox.showerror("Error", "Failed to delete record.")
                 return

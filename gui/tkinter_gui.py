@@ -365,7 +365,7 @@ class FinancialApp(tk.Tk):
             kind = str(getattr(item, "kind", "") or "").strip().lower()
             tags = (kind,) if foreground_for_kind(kind) else ()
             values = (
-                str(item.repository_index),
+                str(item.invariant_id),
                 str(item.date),
                 str(item.type_label),
                 str(item.category),

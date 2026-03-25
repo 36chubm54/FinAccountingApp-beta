@@ -74,7 +74,7 @@ def test_dry_run_valid_csv_returns_preview_without_writing(tmp_path: Path) -> No
             ImportPolicy.FULL_BACKUP,
             dry_run=True,
         )
-        assert result == ImportResult(imported=1, skipped=0, errors=[], dry_run=True)
+        assert result == ImportResult(imported=1, skipped=0, errors=(), dry_run=True)
         assert repo.load_all() == []
     finally:
         repo.close()
@@ -143,7 +143,7 @@ def test_regular_import_writes_records_to_database(tmp_path: Path) -> None:
     )
     try:
         result = controller.import_records("CSV", str(csv_path), ImportPolicy.FULL_BACKUP)
-        assert result == ImportResult(imported=1, skipped=0, errors=[])
+        assert result == ImportResult(imported=1, skipped=0, errors=())
         assert len(repo.load_all()) == 1
     finally:
         repo.close()
@@ -196,14 +196,89 @@ def test_dry_run_followed_by_real_import_keeps_database_unchanged_until_commit(
             ImportPolicy.FULL_BACKUP,
             dry_run=True,
         )
-        assert preview == ImportResult(imported=2, skipped=0, errors=[], dry_run=True)
+        assert preview == ImportResult(imported=2, skipped=0, errors=(), dry_run=True)
         assert repo.load_all() == []
 
         result = controller.import_records("CSV", str(csv_path), ImportPolicy.FULL_BACKUP)
-        assert result == ImportResult(imported=2, skipped=0, errors=[])
+        assert result == ImportResult(imported=2, skipped=0, errors=())
         records = repo.load_all()
         assert len(records) == 2
         assert {record.category for record in records} == {"Salary", "Food"}
+    finally:
+        repo.close()
+
+
+def test_real_csv_import_preserves_source_row_order_after_id_normalization(
+    tmp_path: Path,
+) -> None:
+    repo, controller, cash_id, card_id = _make_controller(tmp_path / "order_preserved.db")
+    csv_path = tmp_path / "order_preserved.csv"
+    _write_csv(
+        csv_path,
+        [
+            {
+                "date": "2026-03-05",
+                "type": "expense",
+                "wallet_id": cash_id,
+                "category": "Food",
+                "amount_original": 50,
+                "currency": "KZT",
+                "rate_at_operation": 1,
+                "amount_kzt": 50,
+                "description": "Lunch",
+                "period": "",
+                "transfer_id": "",
+                "from_wallet_id": "",
+                "to_wallet_id": "",
+            },
+            {
+                "date": "2026-03-01",
+                "type": "transfer",
+                "wallet_id": "",
+                "category": "Transfer",
+                "amount_original": 25,
+                "currency": "KZT",
+                "rate_at_operation": 1,
+                "amount_kzt": 25,
+                "description": "Move",
+                "period": "",
+                "transfer_id": "",
+                "from_wallet_id": cash_id,
+                "to_wallet_id": card_id,
+            },
+            {
+                "date": "2026-03-10",
+                "type": "income",
+                "wallet_id": card_id,
+                "category": "Salary",
+                "amount_original": 100,
+                "currency": "KZT",
+                "rate_at_operation": 1,
+                "amount_kzt": 100,
+                "description": "Payroll",
+                "period": "",
+                "transfer_id": "",
+                "from_wallet_id": "",
+                "to_wallet_id": "",
+            },
+        ],
+    )
+    try:
+        result = controller.import_records("CSV", str(csv_path), ImportPolicy.FULL_BACKUP)
+        assert result == ImportResult(imported=3, skipped=0, errors=())
+        records = repo.load_all()
+        assert [record.category for record in records] == ["Food", "Transfer", "Transfer", "Salary"]
+        assert [record.transfer_id for record in records] == [None, 1, 1, None]
+        assert [str(record.date) for record in records] == [
+            "2026-03-05",
+            "2026-03-01",
+            "2026-03-01",
+            "2026-03-10",
+        ]
+        items = controller.build_record_list_items()
+        assert [item.type_label for item in items] == ["Expense", "Transfer", "Income"]
+        assert [item.invariant_id for item in items] == [1, 2, 3]
+        assert [item.repository_index for item in items] == [0, 1, 3]
     finally:
         repo.close()
 
@@ -274,10 +349,10 @@ def test_dry_run_with_zero_imported_records_returns_zero_and_does_not_write(
 
 
 def test_import_result_summary_has_dry_run_prefix() -> None:
-    result = ImportResult(imported=2, skipped=1, errors=["row 2"], dry_run=True)
+    result = ImportResult(imported=2, skipped=1, errors=("row 2",), dry_run=True)
     assert result.summary().startswith("[DRY-RUN]")
 
 
 def test_import_result_summary_regular_mode_has_no_dry_run_prefix() -> None:
-    result = ImportResult(imported=2, skipped=1, errors=["row 2"])
+    result = ImportResult(imported=2, skipped=1, errors=("row 2",), dry_run=False)
     assert "[DRY-RUN]" not in result.summary()

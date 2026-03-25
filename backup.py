@@ -73,6 +73,7 @@ def export_to_json(
         distribution_service = DistributionService(sqlite_repo)
         if autofreeze_closed_months:
             distribution_service.freeze_closed_months()
+        distribution_items, distribution_subitems_by_item = distribution_service.export_structure()
         wallets = sqlite_repo.load_wallets()
         records = sqlite_repo.load_all()
         transfers = sqlite_repo.load_transfers()
@@ -82,6 +83,12 @@ def export_to_json(
             wallets=wallets,
             records=records,
             mandatory_expenses=mandatory_expenses,
+            distribution_items=distribution_items,
+            distribution_subitems=[
+                subitem
+                for item_id in sorted(distribution_subitems_by_item)
+                for subitem in distribution_subitems_by_item[item_id]
+            ],
             distribution_snapshots=distribution_service.get_frozen_rows(),
             transfers=transfers,
             readonly=False,

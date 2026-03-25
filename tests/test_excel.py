@@ -11,6 +11,7 @@ from domain.records import (
     MandatoryExpenseRecord,
 )
 from domain.reports import Report
+from domain.transfers import Transfer
 from utils.csv_utils import (
     export_mandatory_expenses_to_csv,
     import_mandatory_expenses_from_csv,
@@ -274,3 +275,92 @@ def test_import_records_from_xlsx_quantizes_existing_initial_balance():
         assert summary == (0, 0, [])
     finally:
         os.unlink(tmp_path)
+
+
+def test_export_records_to_xlsx_preserves_record_positions_with_transfers() -> None:
+    records = [
+        ExpenseRecord(
+            id=1,
+            date="2026-03-05",
+            wallet_id=1,
+            amount_original=50.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=50.0,
+            category="Food",
+        ),
+        ExpenseRecord(
+            id=2,
+            date="2026-03-01",
+            wallet_id=1,
+            transfer_id=7,
+            amount_original=25.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=25.0,
+            category="Transfer",
+            description="Move",
+        ),
+        IncomeRecord(
+            id=3,
+            date="2026-03-01",
+            wallet_id=2,
+            transfer_id=7,
+            amount_original=25.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=25.0,
+            category="Transfer",
+            description="Move",
+        ),
+        IncomeRecord(
+            id=4,
+            date="2026-03-10",
+            wallet_id=2,
+            amount_original=100.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=100.0,
+            category="Salary",
+        ),
+    ]
+    transfers = [
+        Transfer(
+            id=7,
+            from_wallet_id=1,
+            to_wallet_id=2,
+            date="2026-03-01",
+            amount_original=25.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=25.0,
+            description="Move",
+        )
+    ]
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        tmp_path = tmp.name
+    try:
+        export_records_to_xlsx(records, tmp_path, transfers=transfers)
+        wb = load_workbook(tmp_path, data_only=True)
+        try:
+            ws = wb["Data"]
+            exported_rows = [
+                [cell for cell in row[:4]]
+                for row in ws.iter_rows(min_row=2, max_col=4, values_only=True)
+                if any(cell is not None for cell in row)
+            ]
+            assert exported_rows == [
+                ["2026-03-05", "expense", 1, "Food"],
+                ["2026-03-01", "transfer", None, "Transfer"],
+                ["2026-03-10", "income", 2, "Salary"],
+            ]
+        finally:
+            wb.close()
+    finally:
+        for _ in range(5):
+            try:
+                os.unlink(tmp_path)
+                break
+            except PermissionError:
+                time.sleep(0.1)

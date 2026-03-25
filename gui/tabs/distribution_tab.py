@@ -168,7 +168,7 @@ def build_distribution_tab(
     def _bind_fixed_width_columns(tree: ttk.Treeview) -> None:
         tree.bind("<Button-1>", _block_separator_resize, add="+")
 
-    def _accelerated_units(delta: int, *, multiplier: int = 3) -> int:
+    def _accelerated_units(delta: int, *, multiplier: int = 10) -> int:
         if delta == 0:
             return 0
         base_units = max(1, abs(int(delta)) // 120)

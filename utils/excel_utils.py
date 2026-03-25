@@ -10,10 +10,10 @@ from openpyxl.utils import get_column_letter
 from domain.import_policy import ImportPolicy
 from domain.records import MandatoryExpenseRecord, Record
 from domain.reports import Report
+from services.import_parser import parse_transfer_row
 from utils.csv_utils import (
     _restore_missing_transfers,
     _validate_transfer_integrity,
-    parse_transfer_row,
 )
 from utils.import_core import (
     ImportSummary,

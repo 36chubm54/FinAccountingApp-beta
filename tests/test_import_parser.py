@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from domain.import_policy import ImportPolicy
 from services import import_parser
 from utils.backup_utils import BackupReadonlyError, compute_checksum
 
@@ -146,3 +147,67 @@ def test_parse_import_file_reads_distribution_snapshots_from_json(tmp_path: Path
 
     assert len(parsed.distribution_snapshots) == 1
     assert parsed.distribution_snapshots[0]["month"] == "2026-03"
+
+
+def test_parse_import_file_reads_distribution_structure_from_json(tmp_path: Path) -> None:
+    payload = {
+        "wallets": [],
+        "records": [],
+        "mandatory_expenses": [],
+        "distribution_items": [
+            {
+                "id": 1,
+                "name": "Investments",
+                "group_name": "",
+                "sort_order": 0,
+                "pct": 100.0,
+                "pct_minor": 10000,
+                "is_active": True,
+            }
+        ],
+        "distribution_subitems": [
+            {
+                "id": 10,
+                "item_id": 1,
+                "name": "BTC",
+                "sort_order": 0,
+                "pct": 100.0,
+                "pct_minor": 10000,
+                "is_active": True,
+            }
+        ],
+        "transfers": [],
+    }
+    json_path = tmp_path / "payload.json"
+    json_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    parsed = import_parser.parse_import_file(str(json_path))
+
+    assert len(parsed.distribution_items) == 1
+    assert parsed.distribution_items[0]["name"] == "Investments"
+    assert len(parsed.distribution_subitems) == 1
+    assert parsed.distribution_subitems[0]["name"] == "BTC"
+
+
+def test_parse_transfer_row_supports_legacy_policy() -> None:
+    records, transfer, next_transfer_id, error = import_parser.parse_transfer_row(
+        {
+            "date": "2026-03-24",
+            "from_wallet_id": "1",
+            "to_wallet_id": "2",
+            "amount": "1500",
+        },
+        row_label="row 2",
+        policy=ImportPolicy.LEGACY,
+        get_rate=None,
+        next_transfer_id=1,
+        wallet_ids={1, 2},
+    )
+
+    assert error is None
+    assert transfer is not None
+    assert records is not None
+    assert transfer.currency == "KZT"
+    assert transfer.amount_original == 1500.0
+    assert transfer.amount_kzt == 1500.0
+    assert next_transfer_id == 2

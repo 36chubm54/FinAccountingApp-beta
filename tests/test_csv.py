@@ -7,6 +7,7 @@ import pytest
 
 from domain.records import ExpenseRecord, IncomeRecord
 from domain.reports import Report
+from domain.transfers import Transfer
 
 
 def test_to_csv():
@@ -259,5 +260,122 @@ def test_csv_export_grouped_drill_down():
         # FINAL BALANCE should equal SUBTOTAL (since initial balance is zero)
         final_row = next(r for r in rows if r[0] == "FINAL BALANCE")
         assert final_row[3] == "150.00"
+    finally:
+        os.unlink(tmp_path)
+
+
+def test_export_records_to_csv_preserves_record_positions_with_transfers() -> None:
+    from utils.csv_utils import export_records_to_csv
+
+    records = [
+        ExpenseRecord(
+            id=1,
+            date="2026-03-05",
+            wallet_id=1,
+            amount_original=50.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=50.0,
+            category="Food",
+        ),
+        ExpenseRecord(
+            id=2,
+            date="2026-03-01",
+            wallet_id=1,
+            transfer_id=7,
+            amount_original=25.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=25.0,
+            category="Transfer",
+            description="Move",
+        ),
+        IncomeRecord(
+            id=3,
+            date="2026-03-01",
+            wallet_id=2,
+            transfer_id=7,
+            amount_original=25.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=25.0,
+            category="Transfer",
+            description="Move",
+        ),
+        IncomeRecord(
+            id=4,
+            date="2026-03-10",
+            wallet_id=2,
+            amount_original=100.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=100.0,
+            category="Salary",
+        ),
+    ]
+    transfers = [
+        Transfer(
+            id=7,
+            from_wallet_id=1,
+            to_wallet_id=2,
+            date="2026-03-01",
+            amount_original=25.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=25.0,
+            description="Move",
+        )
+    ]
+
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", newline="") as tmp:
+        tmp_path = tmp.name
+    try:
+        export_records_to_csv(records, tmp_path, transfers=transfers)
+        with open(tmp_path, encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        assert [row["type"] for row in rows] == ["expense", "transfer", "income"]
+        assert [row["category"] for row in rows] == ["Food", "Transfer", "Salary"]
+        assert [row["date"] for row in rows] == ["2026-03-05", "2026-03-01", "2026-03-10"]
+    finally:
+        os.unlink(tmp_path)
+
+
+def test_export_records_to_csv_keeps_unlinked_transfer_aggregates() -> None:
+    from utils.csv_utils import export_records_to_csv
+
+    records = [
+        IncomeRecord(
+            id=1,
+            date="2026-03-10",
+            wallet_id=2,
+            amount_original=100.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=100.0,
+            category="Salary",
+        )
+    ]
+    transfers = [
+        Transfer(
+            id=7,
+            from_wallet_id=1,
+            to_wallet_id=2,
+            date="2026-03-01",
+            amount_original=25.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=25.0,
+            description="Move",
+        )
+    ]
+
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", newline="") as tmp:
+        tmp_path = tmp.name
+    try:
+        export_records_to_csv(records, tmp_path, transfers=transfers)
+        with open(tmp_path, encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        assert [row["type"] for row in rows] == ["income", "transfer"]
+        assert rows[1]["transfer_id"] == "7"
     finally:
         os.unlink(tmp_path)

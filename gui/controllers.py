@@ -543,6 +543,9 @@ class FinancialController:
     def get_distribution_items(self) -> list:
         return GetDistributionItems(self._distribution_service()).execute()
 
+    def export_distribution_structure(self) -> tuple[list, dict[int, list]]:
+        return self._distribution_service().export_structure()
+
     def create_distribution_subitem(
         self,
         item_id: int,
@@ -604,6 +607,11 @@ class FinancialController:
 
     def replace_distribution_snapshots(self, rows: list) -> None:
         self._distribution_service().replace_frozen_rows(list(rows))
+
+    def replace_distribution_structure(
+        self, items: list, subitems_by_item: dict[int, list]
+    ) -> None:
+        self._distribution_service().replace_structure(list(items), dict(subitems_by_item))
 
     def _balance_service(self) -> BalanceService:
         if not isinstance(self._repository, SQLiteRecordRepository):

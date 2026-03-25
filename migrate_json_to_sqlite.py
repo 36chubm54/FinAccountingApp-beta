@@ -1,16 +1,23 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
+import re
 import sys
+import tempfile
 from pathlib import Path
 
+from domain.distribution import DistributionItem, DistributionSubitem, FrozenDistributionRow
 from domain.records import MandatoryExpenseRecord, Record
 from domain.wallets import Wallet
 from storage.json_storage import JsonStorage
 from storage.sqlite_storage import SQLiteStorage
+from utils.backup_utils import unwrap_backup_payload
 from utils.money import minor_to_money, rate_to_text, to_minor_units, to_money_float, to_rate_float
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
 def _resolve_schema_path(schema_path: str) -> str:
@@ -60,6 +67,9 @@ def _validate_source_integrity(
     records: list[Record],
     transfers: list,
     mandatory_expenses: list[MandatoryExpenseRecord],
+    distribution_items: list[DistributionItem],
+    distribution_subitems: list[DistributionSubitem],
+    distribution_snapshots: list[FrozenDistributionRow],
 ) -> None:
     wallet_ids = {wallet.id for wallet in wallets}
     if not wallet_ids:
@@ -107,9 +117,34 @@ def _validate_source_integrity(
     for expense in mandatory_expenses:
         _require_existing_wallet(wallets, int(expense.wallet_id), f"MandatoryExpense #{expense.id}")
 
+    item_ids = {int(item.id) for item in distribution_items}
+    for subitem in distribution_subitems:
+        if int(subitem.item_id) not in item_ids:
+            raise ValueError(
+                f"Distribution subitem #{subitem.id} references missing item_id={subitem.item_id}"
+            )
+
+    seen_snapshot_months: set[str] = set()
+    for snapshot in distribution_snapshots:
+        month = str(snapshot.month).strip()
+        if not _MONTH_RE.fullmatch(month):
+            raise ValueError(f"Distribution snapshot month must be YYYY-MM, got {snapshot.month!r}")
+        if month in seen_snapshot_months:
+            raise ValueError(f"Duplicate distribution snapshot month: {month}")
+        seen_snapshot_months.add(month)
+
 
 def _check_target_is_empty(sqlite_storage: SQLiteStorage) -> None:
-    tables = ("wallets", "transfers", "records", "mandatory_expenses")
+    tables = (
+        "wallets",
+        "transfers",
+        "records",
+        "mandatory_expenses",
+        "distribution_items",
+        "distribution_subitems",
+        "distribution_snapshots",
+        "distribution_snapshot_values",
+    )
     for table in tables:
         count = int(sqlite_storage.query_one(f"SELECT COUNT(*) FROM {table}")[0])
         if count > 0:
@@ -119,7 +154,16 @@ def _check_target_is_empty(sqlite_storage: SQLiteStorage) -> None:
 
 
 def _has_any_data(sqlite_storage: SQLiteStorage) -> bool:
-    for table in ("wallets", "transfers", "records", "mandatory_expenses"):
+    for table in (
+        "wallets",
+        "transfers",
+        "records",
+        "mandatory_expenses",
+        "distribution_items",
+        "distribution_subitems",
+        "distribution_snapshots",
+        "distribution_snapshot_values",
+    ):
         if int(sqlite_storage.query_one(f"SELECT COUNT(*) FROM {table}")[0]) > 0:
             return True
     return False
@@ -515,6 +559,15 @@ def _counts_from_sqlite(sqlite_storage: SQLiteStorage) -> dict[str, int]:
         "mandatory_expenses": int(
             sqlite_storage.query_one("SELECT COUNT(*) FROM mandatory_expenses")[0]
         ),
+        "distribution_items": int(
+            sqlite_storage.query_one("SELECT COUNT(*) FROM distribution_items")[0]
+        ),
+        "distribution_subitems": int(
+            sqlite_storage.query_one("SELECT COUNT(*) FROM distribution_subitems")[0]
+        ),
+        "distribution_snapshots": int(
+            sqlite_storage.query_one("SELECT COUNT(*) FROM distribution_snapshots")[0]
+        ),
     }
 
 
@@ -574,6 +627,9 @@ def validate_migration(
     records: list[Record],
     transfers: list,
     mandatory_expenses: list[MandatoryExpenseRecord],
+    distribution_items: list[DistributionItem],
+    distribution_subitems: list[DistributionSubitem],
+    distribution_snapshots: list[FrozenDistributionRow],
     wallet_map: dict[int, int],
     record_map: dict[int, int],
     transfer_map: dict[int, int],
@@ -586,6 +642,9 @@ def validate_migration(
         "transfers": len(transfers),
         "records": len(records),
         "mandatory_expenses": len(mandatory_expenses),
+        "distribution_items": len(distribution_items),
+        "distribution_subitems": len(distribution_subitems),
+        "distribution_snapshots": len(distribution_snapshots),
     }
     actual_counts = _counts_from_sqlite(sqlite_storage)
 
@@ -627,6 +686,15 @@ def validate_migration(
         errors.append("Transfer id mapping is incomplete")
     if len(mandatory_map) != len(mandatory_expenses):
         errors.append("Mandatory expense id mapping is incomplete")
+    if _distribution_structure_signatures_from_json(
+        distribution_items,
+        distribution_subitems,
+    ) != _distribution_structure_signatures_from_sqlite(sqlite_storage):
+        errors.append("Distribution structure payload mismatch")
+    if _distribution_snapshot_signatures_from_json(
+        distribution_snapshots
+    ) != _distribution_snapshot_signatures_from_sqlite(sqlite_storage):
+        errors.append("Distribution snapshot payload mismatch")
 
     return (len(errors) == 0, errors)
 
@@ -637,6 +705,9 @@ def _validate_existing_target_equivalence(
     records: list[Record],
     transfers: list,
     mandatory_expenses: list[MandatoryExpenseRecord],
+    distribution_items: list[DistributionItem],
+    distribution_subitems: list[DistributionSubitem],
+    distribution_snapshots: list[FrozenDistributionRow],
 ) -> tuple[bool, list[str]]:
     identity_map = {int(wallet.id): int(wallet.id) for wallet in wallets}
     return validate_migration(
@@ -645,6 +716,9 @@ def _validate_existing_target_equivalence(
         records=records,
         transfers=transfers,
         mandatory_expenses=mandatory_expenses,
+        distribution_items=distribution_items,
+        distribution_subitems=distribution_subitems,
+        distribution_snapshots=distribution_snapshots,
         wallet_map=identity_map,
         record_map={int(record.id): int(record.id) for record in records},
         transfer_map={int(transfer.id): int(transfer.id) for transfer in transfers},
@@ -652,9 +726,375 @@ def _validate_existing_target_equivalence(
     )
 
 
+def _distribution_snapshot_signatures_from_json(
+    snapshots: list[FrozenDistributionRow],
+) -> list[tuple]:
+    return sorted(
+        (
+            str(snapshot.month),
+            bool(snapshot.is_negative),
+            bool(snapshot.auto_fixed),
+            tuple(str(column) for column in snapshot.column_order),
+            tuple(sorted((str(k), str(v)) for k, v in snapshot.headings_by_column.items())),
+            tuple(sorted((str(k), str(v)) for k, v in snapshot.values_by_column.items())),
+        )
+        for snapshot in snapshots
+    )
+
+
+def _distribution_snapshot_signatures_from_sqlite(sqlite_storage: SQLiteStorage) -> list[tuple]:
+    snapshot_rows = sqlite_storage.query_all(
+        """
+        SELECT month, is_negative, auto_fixed
+        FROM distribution_snapshots
+        ORDER BY month ASC
+        """
+    )
+    if not snapshot_rows:
+        return []
+    value_rows = sqlite_storage.query_all(
+        """
+        SELECT snapshot_month, column_key, column_label, column_order, value_text
+        FROM distribution_snapshot_values
+        ORDER BY snapshot_month ASC, column_order ASC
+        """
+    )
+    column_order_by_month: dict[str, list[str]] = {}
+    headings_by_month: dict[str, dict[str, str]] = {}
+    values_by_month: dict[str, dict[str, str]] = {}
+    for snapshot_month, column_key, column_label, _column_order, value_text in value_rows:
+        month = str(snapshot_month)
+        column_key_text = str(column_key)
+        column_order_by_month.setdefault(month, []).append(column_key_text)
+        headings_by_month.setdefault(month, {})[column_key_text] = str(column_label)
+        values_by_month.setdefault(month, {})[column_key_text] = str(value_text)
+    signatures: list[tuple] = []
+    for month, is_negative, auto_fixed in snapshot_rows:
+        month_text = str(month)
+        signatures.append(
+            (
+                month_text,
+                bool(is_negative),
+                bool(auto_fixed),
+                tuple(column_order_by_month.get(month_text, [])),
+                tuple(sorted(headings_by_month.get(month_text, {}).items())),
+                tuple(sorted(values_by_month.get(month_text, {}).items())),
+            )
+        )
+    return signatures
+
+
+def _distribution_structure_signatures_from_json(
+    items: list[DistributionItem],
+    subitems: list[DistributionSubitem],
+) -> tuple[list[tuple], list[tuple]]:
+    item_signatures = sorted(
+        (
+            int(item.id),
+            str(item.name),
+            str(item.group_name or ""),
+            int(item.sort_order),
+            float(item.pct),
+            int(item.pct_minor),
+            bool(item.is_active),
+        )
+        for item in items
+    )
+    subitem_signatures = sorted(
+        (
+            int(subitem.id),
+            int(subitem.item_id),
+            str(subitem.name),
+            int(subitem.sort_order),
+            float(subitem.pct),
+            int(subitem.pct_minor),
+            bool(subitem.is_active),
+        )
+        for subitem in subitems
+    )
+    return item_signatures, subitem_signatures
+
+
+def _distribution_structure_signatures_from_sqlite(
+    sqlite_storage: SQLiteStorage,
+) -> tuple[list[tuple], list[tuple]]:
+    item_rows = sqlite_storage.query_all(
+        """
+        SELECT id, name, group_name, sort_order, pct, pct_minor, is_active
+        FROM distribution_items
+        ORDER BY id
+        """
+    )
+    subitem_rows = sqlite_storage.query_all(
+        """
+        SELECT id, item_id, name, sort_order, pct, pct_minor, is_active
+        FROM distribution_subitems
+        ORDER BY id
+        """
+    )
+    return (
+        [
+            (
+                int(row[0]),
+                str(row[1]),
+                str(row[2] or ""),
+                int(row[3]),
+                float(row[4]),
+                int(row[5]),
+                bool(row[6]),
+            )
+            for row in item_rows
+        ],
+        [
+            (
+                int(row[0]),
+                int(row[1]),
+                str(row[2]),
+                int(row[3]),
+                float(row[4]),
+                int(row[5]),
+                bool(row[6]),
+            )
+            for row in subitem_rows
+        ],
+    )
+
+
+def _insert_distribution_structure(
+    sqlite_storage: SQLiteStorage,
+    items: list[DistributionItem],
+    subitems: list[DistributionSubitem],
+) -> None:
+    for item in sorted(items, key=lambda value: int(value.id)):
+        sqlite_storage.execute(
+            """
+            INSERT INTO distribution_items (
+                id, name, group_name, sort_order, pct, pct_minor, is_active
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(item.id),
+                str(item.name),
+                str(item.group_name or ""),
+                int(item.sort_order),
+                float(item.pct),
+                int(item.pct_minor),
+                int(bool(item.is_active)),
+            ),
+        )
+    for subitem in sorted(subitems, key=lambda value: int(value.id)):
+        sqlite_storage.execute(
+            """
+            INSERT INTO distribution_subitems (
+                id, item_id, name, sort_order, pct, pct_minor, is_active
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(subitem.id),
+                int(subitem.item_id),
+                str(subitem.name),
+                int(subitem.sort_order),
+                float(subitem.pct),
+                int(subitem.pct_minor),
+                int(bool(subitem.is_active)),
+            ),
+        )
+    if items:
+        _set_sqlite_sequence(sqlite_storage, "distribution_items")
+    if subitems:
+        _set_sqlite_sequence(sqlite_storage, "distribution_subitems")
+
+
+def _insert_distribution_snapshots(
+    sqlite_storage: SQLiteStorage,
+    snapshots: list[FrozenDistributionRow],
+) -> None:
+    for snapshot in sorted(snapshots, key=lambda item: item.month):
+        sqlite_storage.execute(
+            """
+            INSERT INTO distribution_snapshots (month, is_negative, auto_fixed)
+            VALUES (?, ?, ?)
+            """,
+            (
+                str(snapshot.month),
+                int(bool(snapshot.is_negative)),
+                int(bool(snapshot.auto_fixed)),
+            ),
+        )
+        for column_order, column_key in enumerate(snapshot.column_order):
+            sqlite_storage.execute(
+                """
+                INSERT INTO distribution_snapshot_values (
+                    snapshot_month, column_key, column_label, column_order, value_text
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    str(snapshot.month),
+                    str(column_key),
+                    str(snapshot.headings_by_column.get(column_key, column_key)),
+                    int(column_order),
+                    str(snapshot.values_by_column.get(column_key, "-")),
+                ),
+            )
+
+
+def _load_distribution_snapshots_from_json(path: str) -> list[FrozenDistributionRow]:
+    with open(path, encoding="utf-8") as fp:
+        payload = json.load(fp)
+    payload = unwrap_backup_payload(payload, force=True)
+    raw_snapshots = payload.get("distribution_snapshots", [])
+    if not isinstance(raw_snapshots, list):
+        return []
+    snapshots: list[FrozenDistributionRow] = []
+    for item in raw_snapshots:
+        if not isinstance(item, dict):
+            continue
+        month = str(item.get("month", "") or "").strip()
+        if not month:
+            continue
+        column_order_raw = item.get("column_order", [])
+        headings_raw = item.get("headings_by_column", {})
+        values_raw = item.get("values_by_column", {})
+        if not isinstance(column_order_raw, list):
+            column_order_raw = []
+        if not isinstance(headings_raw, dict):
+            headings_raw = {}
+        if not isinstance(values_raw, dict):
+            values_raw = {}
+        snapshots.append(
+            FrozenDistributionRow(
+                month=month,
+                column_order=tuple(str(column) for column in column_order_raw),
+                headings_by_column={str(k): str(v) for k, v in headings_raw.items()},
+                values_by_column={str(k): str(v) for k, v in values_raw.items()},
+                is_negative=bool(item.get("is_negative", False)),
+                auto_fixed=bool(item.get("auto_fixed", False)),
+            )
+        )
+    return snapshots
+
+
+def _load_distribution_structure_from_json(
+    path: str,
+) -> tuple[list[DistributionItem], list[DistributionSubitem]]:
+    with open(path, encoding="utf-8") as fp:
+        payload = json.load(fp)
+    payload = unwrap_backup_payload(payload, force=True)
+    raw_items = payload.get("distribution_items", [])
+    raw_subitems = payload.get("distribution_subitems", [])
+    if not isinstance(raw_items, list):
+        raw_items = []
+    if not isinstance(raw_subitems, list):
+        raw_subitems = []
+    items: list[DistributionItem] = []
+    seen_item_ids: set[int] = set()
+    for item in raw_items:
+        if not isinstance(item, dict):
+            raise ValueError("Invalid distribution item payload: expected object")
+        item_id = int(item.get("id", 0) or 0)
+        if item_id <= 0:
+            raise ValueError(f"Invalid distribution item id: {item.get('id')!r}")
+        if item_id in seen_item_ids:
+            raise ValueError(f"Duplicate distribution item id: {item_id}")
+        name = str(item.get("name", "") or "").strip()
+        if not name:
+            raise ValueError(f"Distribution item #{item_id} has empty name")
+        seen_item_ids.add(item_id)
+        items.append(
+            DistributionItem(
+                id=item_id,
+                name=name,
+                group_name=str(item.get("group_name", "") or ""),
+                sort_order=int(item.get("sort_order", 0) or 0),
+                pct=float(item.get("pct", 0.0) or 0.0),
+                pct_minor=int(item.get("pct_minor", 0) or 0),
+                is_active=bool(item.get("is_active", True)),
+            )
+        )
+    item_ids = {int(item.id) for item in items}
+    subitems: list[DistributionSubitem] = []
+    seen_subitem_ids: set[int] = set()
+    for subitem in raw_subitems:
+        if not isinstance(subitem, dict):
+            raise ValueError("Invalid distribution subitem payload: expected object")
+        subitem_id = int(subitem.get("id", 0) or 0)
+        item_id = int(subitem.get("item_id", 0) or 0)
+        if subitem_id <= 0:
+            raise ValueError(f"Invalid distribution subitem id: {subitem.get('id')!r}")
+        if subitem_id in seen_subitem_ids:
+            raise ValueError(f"Duplicate distribution subitem id: {subitem_id}")
+        if item_id <= 0 or item_id not in item_ids:
+            raise ValueError(
+                f"Distribution subitem #{subitem_id} references missing item_id={item_id}"
+            )
+        name = str(subitem.get("name", "") or "").strip()
+        if not name:
+            raise ValueError(f"Distribution subitem #{subitem_id} has empty name")
+        seen_subitem_ids.add(subitem_id)
+        subitems.append(
+            DistributionSubitem(
+                id=subitem_id,
+                item_id=item_id,
+                name=name,
+                sort_order=int(subitem.get("sort_order", 0) or 0),
+                pct=float(subitem.get("pct", 0.0) or 0.0),
+                pct_minor=int(subitem.get("pct_minor", 0) or 0),
+                is_active=bool(subitem.get("is_active", True)),
+            )
+        )
+    return items, subitems
+
+
+def _load_source_dataset(
+    json_path: str,
+) -> tuple[
+    list[Wallet],
+    list[Record],
+    list,
+    list[MandatoryExpenseRecord],
+    list[DistributionItem],
+    list[DistributionSubitem],
+    list[FrozenDistributionRow],
+]:
+    with open(json_path, encoding="utf-8") as fp:
+        raw_payload = json.load(fp)
+    payload = unwrap_backup_payload(raw_payload, force=True)
+
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".json",
+        encoding="utf-8",
+        delete=False,
+    ) as temp_file:
+        json.dump(payload, temp_file, ensure_ascii=False, indent=2)
+        temp_path = temp_file.name
+    try:
+        json_storage = JsonStorage(file_path=temp_path)
+        wallets = json_storage.get_wallets()
+        transfers = json_storage.get_transfers()
+        records = json_storage.get_records()
+        mandatory_expenses = json_storage.get_mandatory_expenses()
+    finally:
+        os.unlink(temp_path)
+
+    distribution_items, distribution_subitems = _load_distribution_structure_from_json(json_path)
+    distribution_snapshots = _load_distribution_snapshots_from_json(json_path)
+    return (
+        wallets,
+        records,
+        transfers,
+        mandatory_expenses,
+        distribution_items,
+        distribution_subitems,
+        distribution_snapshots,
+    )
+
+
 def run_dry_run(args: argparse.Namespace) -> int:
     print("== DRY RUN: JSON -> SQLite migration check ==")
-    json_storage = JsonStorage(file_path=args.json_path)
     sqlite_storage = SQLiteStorage(db_path=args.sqlite_path)
     try:
         schema_path = _resolve_schema_path(args.schema_path)
@@ -664,18 +1104,34 @@ def run_dry_run(args: argparse.Namespace) -> int:
         print(f"[ok] SQLite connection is available: {args.sqlite_path}")
         print(f"[ok] Schema path resolved: {schema_path}")
 
-        wallets = json_storage.get_wallets()
-        transfers = json_storage.get_transfers()
-        records = json_storage.get_records()
-        mandatory_expenses = json_storage.get_mandatory_expenses()
+        (
+            wallets,
+            records,
+            transfers,
+            mandatory_expenses,
+            distribution_items,
+            distribution_subitems,
+            distribution_snapshots,
+        ) = _load_source_dataset(args.json_path)
 
-        _validate_source_integrity(wallets, records, transfers, mandatory_expenses)
+        _validate_source_integrity(
+            wallets,
+            records,
+            transfers,
+            mandatory_expenses,
+            distribution_items,
+            distribution_subitems,
+            distribution_snapshots,
+        )
 
         print(f"[ok] JSON source loaded: {args.json_path}")
         print(f"  wallets: {len(wallets)}")
         print(f"  transfers: {len(transfers)}")
         print(f"  records: {len(records)}")
         print(f"  mandatory_expenses: {len(mandatory_expenses)}")
+        print(f"  distribution_items: {len(distribution_items)}")
+        print(f"  distribution_subitems: {len(distribution_subitems)}")
+        print(f"  distribution_snapshots: {len(distribution_snapshots)}")
         print("[ok] Integrity checks passed")
         print("[dry-run] No INSERT and no explicit COMMIT executed")
         return 0
@@ -688,7 +1144,6 @@ def run_dry_run(args: argparse.Namespace) -> int:
 
 def run_migration(args: argparse.Namespace) -> int:
     print("== MIGRATION: JSON -> SQLite ==")
-    json_storage = JsonStorage(file_path=args.json_path)
     sqlite_storage = SQLiteStorage(db_path=args.sqlite_path)
 
     try:
@@ -696,12 +1151,25 @@ def run_migration(args: argparse.Namespace) -> int:
         if not Path(schema_path).exists():
             raise FileNotFoundError(f"schema.sql not found: {schema_path}")
 
-        wallets = json_storage.get_wallets()
-        transfers = json_storage.get_transfers()
-        records = json_storage.get_records()
-        mandatory_expenses = json_storage.get_mandatory_expenses()
+        (
+            wallets,
+            records,
+            transfers,
+            mandatory_expenses,
+            distribution_items,
+            distribution_subitems,
+            distribution_snapshots,
+        ) = _load_source_dataset(args.json_path)
 
-        _validate_source_integrity(wallets, records, transfers, mandatory_expenses)
+        _validate_source_integrity(
+            wallets,
+            records,
+            transfers,
+            mandatory_expenses,
+            distribution_items,
+            distribution_subitems,
+            distribution_snapshots,
+        )
         print("[ok] Source data integrity passed")
 
         sqlite_storage.initialize_schema(schema_path)
@@ -712,6 +1180,9 @@ def run_migration(args: argparse.Namespace) -> int:
                 records=records,
                 transfers=transfers,
                 mandatory_expenses=mandatory_expenses,
+                distribution_items=distribution_items,
+                distribution_subitems=distribution_subitems,
+                distribution_snapshots=distribution_snapshots,
             )
             if valid_existing:
                 print("[ok] Target SQLite already contains equivalent data, migration skipped")
@@ -724,14 +1195,18 @@ def run_migration(args: argparse.Namespace) -> int:
         sqlite_storage.begin()
         print("[tx] Transaction started")
 
-        print("[1/4] Migrating wallets...")
+        print("[1/6] Migrating wallets...")
         wallet_map = _insert_wallets(sqlite_storage, wallets)
-        print("[2/4] Migrating transfers...")
+        print("[2/6] Migrating transfers...")
         transfer_map = _insert_transfers(sqlite_storage, transfers, wallet_map)
-        print("[3/4] Migrating records...")
+        print("[3/6] Migrating records...")
         record_map = _insert_records(sqlite_storage, records, wallet_map, transfer_map)
-        print("[4/4] Migrating mandatory_expenses...")
+        print("[4/6] Migrating mandatory_expenses...")
         mandatory_map = _insert_mandatory_expenses(sqlite_storage, mandatory_expenses, wallet_map)
+        print("[5/6] Migrating distribution structure...")
+        _insert_distribution_structure(sqlite_storage, distribution_items, distribution_subitems)
+        print("[6/6] Migrating distribution_snapshots...")
+        _insert_distribution_snapshots(sqlite_storage, distribution_snapshots)
 
         valid, errors = validate_migration(
             sqlite_storage=sqlite_storage,
@@ -739,6 +1214,9 @@ def run_migration(args: argparse.Namespace) -> int:
             records=records,
             transfers=transfers,
             mandatory_expenses=mandatory_expenses,
+            distribution_items=distribution_items,
+            distribution_subitems=distribution_subitems,
+            distribution_snapshots=distribution_snapshots,
             wallet_map=wallet_map,
             record_map=record_map,
             transfer_map=transfer_map,

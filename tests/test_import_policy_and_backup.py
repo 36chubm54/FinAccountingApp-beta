@@ -4,7 +4,7 @@ import tempfile
 
 import pytest
 
-from domain.distribution import FrozenDistributionRow
+from domain.distribution import DistributionItem, DistributionSubitem, FrozenDistributionRow
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
 from domain.wallets import Wallet
@@ -369,6 +369,51 @@ def test_full_backup_export_includes_distribution_snapshots() -> None:
         assert payload["distribution_snapshots"][0]["month"] == "2026-03"
         assert payload["distribution_snapshots"][0]["auto_fixed"] is False
         assert payload["distribution_snapshots"][0]["values_by_column"]["item_1"] == "100,000"
+    finally:
+        os.unlink(path)
+
+
+def test_full_backup_export_includes_distribution_structure() -> None:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
+        path = tmp.name
+    try:
+        export_full_backup_to_json(
+            path,
+            wallets=[
+                Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=0.0, system=True)
+            ],
+            records=[],
+            mandatory_expenses=[],
+            distribution_items=[
+                DistributionItem(
+                    id=1,
+                    name="Investments",
+                    group_name="Goals",
+                    sort_order=0,
+                    pct=100.0,
+                    pct_minor=10000,
+                    is_active=True,
+                )
+            ],
+            distribution_subitems=[
+                DistributionSubitem(
+                    id=10,
+                    item_id=1,
+                    name="BTC",
+                    sort_order=0,
+                    pct=100.0,
+                    pct_minor=10000,
+                    is_active=True,
+                )
+            ],
+            readonly=False,
+        )
+        with open(path, encoding="utf-8") as fp:
+            payload = json.load(fp)
+        assert payload["distribution_items"][0]["name"] == "Investments"
+        assert payload["distribution_items"][0]["group_name"] == "Goals"
+        assert payload["distribution_subitems"][0]["name"] == "BTC"
+        assert payload["distribution_subitems"][0]["item_id"] == 1
     finally:
         os.unlink(path)
 

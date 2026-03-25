@@ -108,10 +108,13 @@ def export_full_backup(
     wallets=None,
     records,
     mandatory_expenses,
+    distribution_items=(),
+    distribution_subitems=(),
     distribution_snapshots=(),
     transfers=None,
     initial_balance: float = 0.0,
     readonly: bool = True,
+    storage_mode: str = "unknown",
 ) -> None:
     del initial_balance  # legacy argument
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
@@ -123,9 +126,12 @@ def export_full_backup(
             wallets=list(wallets or []),
             records=list(records),
             mandatory_expenses=list(mandatory_expenses),
+            distribution_items=list(distribution_items or []),
+            distribution_subitems=list(distribution_subitems or []),
             distribution_snapshots=list(distribution_snapshots or []),
             transfers=list(transfers or []),
             readonly=readonly,
+            storage_mode=storage_mode,
         )
     except Exception:
         logger.exception("Failed to export full backup to %s", filepath)

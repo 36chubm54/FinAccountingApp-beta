@@ -30,10 +30,7 @@ def run_import_transaction(repository: RecordRepository, operation, logger: logg
 
 
 def normalize_operation_ids_for_import(repository: RecordRepository) -> None:
-    def record_sort_key(record: Record) -> tuple[str, int]:
-        return (str(record.date), int(record.id))
-
-    records = sorted(repository.load_all(), key=record_sort_key)
+    records = list(repository.load_all())
     transfers = sorted(repository.load_transfers(), key=lambda item: (str(item.date), int(item.id)))
     transfer_id_map = {int(item.id): index for index, item in enumerate(transfers, start=1)}
     normalized_transfers: list[Transfer] = [

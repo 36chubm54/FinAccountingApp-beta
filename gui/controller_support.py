@@ -14,6 +14,7 @@ from utils.money import to_money_float
 class RecordListItem:
     record_id: str
     kind: str
+    invariant_id: int
     repository_index: int
     domain_record_id: int | None
     date: str
@@ -102,6 +103,7 @@ def build_list_items(records: Iterable[Record]) -> list[RecordListItem]:
             RecordListItem(
                 record_id=record_id,
                 kind=kind,
+                invariant_id=0,
                 repository_index=repository_index,
                 domain_record_id=int(getattr(record, "id", 0) or 0),
                 date=str(date_value),
@@ -144,6 +146,7 @@ def build_list_items(records: Iterable[Record]) -> list[RecordListItem]:
             RecordListItem(
                 record_id=record_id,
                 kind="transfer",
+                invariant_id=0,
                 repository_index=repository_index,
                 domain_record_id=int(getattr(source, "id", 0) or 0),
                 date=str(date_value),
@@ -159,7 +162,7 @@ def build_list_items(records: Iterable[Record]) -> list[RecordListItem]:
         )
 
     items.sort(key=lambda item: item.repository_index)
-    return items
+    return [replace(item, invariant_id=index) for index, item in enumerate(items, start=1)]
 
 
 def reindex_records_for_import(records: Iterable[Record]) -> list[Record]:

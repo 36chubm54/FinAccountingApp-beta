@@ -7,6 +7,29 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.8.1] - 2026-03-24
+
+### Fixed
+
+- Restored legacy transfer-row parsing in `services/import_parser.py` for `ImportPolicy.LEGACY`
+- Restored export of orphan/unlinked transfer aggregates in tabular CSV/XLSX data export
+- Preserved source record order during post-import ID normalization while keeping deterministic transfer ID remapping
+- GUI full-backup export now writes correct snapshot metadata with `meta.storage="sqlite"`
+
+### Changed
+
+- Full-backup import and JSON -> SQLite migration now reject malformed `distribution_items` / `distribution_subitems` instead of silently skipping broken structure payloads
+- Tooltip positioning logic was extracted and hardened for multi-monitor layouts with negative window origins
+- Backup/export/import docs were updated to reflect distribution structure restore, strict backup validation, and GUI backup metadata
+
+### Tests
+
+- Added regression coverage for legacy transfer parsing, orphan transfer export, tooltip geometry, strict distribution-structure validation, GUI backup metadata, and deterministic import ID normalization
+
+No breaking changes.
+
+---
+
 ## [1.8.0] - 2026-03-24
 
 ### Added

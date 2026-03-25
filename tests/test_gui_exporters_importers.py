@@ -1,9 +1,13 @@
 import os
 import tempfile
+import time
 from pathlib import Path
+
+from openpyxl import load_workbook
 
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
 from domain.reports import Report
+from domain.transfers import Transfer
 from gui import exporters, importers
 
 
@@ -120,4 +124,138 @@ def test_import_records_from_csv_xlsx_roundtrip():
     finally:
         for p in (csv_path, xlsx_path):
             if p.exists():
-                os.unlink(p)
+                for _ in range(5):
+                    try:
+                        os.unlink(p)
+                        break
+                    except PermissionError:
+                        time.sleep(0.1)
+
+
+def test_export_records_pipeline_preserves_order_for_csv_and_xlsx():
+    records = [
+        ExpenseRecord(
+            id=1,
+            date="2026-03-05",
+            wallet_id=1,
+            amount_original=50.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=50.0,
+            category="Food",
+        ),
+        ExpenseRecord(
+            id=2,
+            date="2026-03-01",
+            wallet_id=1,
+            transfer_id=7,
+            amount_original=25.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=25.0,
+            category="Transfer",
+            description="Move",
+        ),
+        IncomeRecord(
+            id=3,
+            date="2026-03-01",
+            wallet_id=2,
+            transfer_id=7,
+            amount_original=25.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=25.0,
+            category="Transfer",
+            description="Move",
+        ),
+        IncomeRecord(
+            id=4,
+            date="2026-03-10",
+            wallet_id=2,
+            amount_original=100.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=100.0,
+            category="Salary",
+        ),
+    ]
+    transfers = [
+        Transfer(
+            id=7,
+            from_wallet_id=1,
+            to_wallet_id=2,
+            date="2026-03-01",
+            amount_original=25.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=25.0,
+            description="Move",
+        )
+    ]
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as csv_tmp:
+        csv_path = Path(csv_tmp.name)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as xlsx_tmp:
+        xlsx_path = Path(xlsx_tmp.name)
+
+    try:
+        exporters.export_records(records, str(csv_path), "csv", transfers=transfers)
+        import csv
+
+        with csv_path.open(encoding="utf-8", newline="") as handle:
+            csv_rows = list(csv.DictReader(handle))
+        assert [row["type"] for row in csv_rows] == ["expense", "transfer", "income"]
+        assert [row["date"] for row in csv_rows] == ["2026-03-05", "2026-03-01", "2026-03-10"]
+
+        exporters.export_records(records, str(xlsx_path), "xlsx", transfers=transfers)
+        wb = load_workbook(xlsx_path, data_only=True)
+        try:
+            ws = wb["Data"]
+            xlsx_rows = [
+                list(row[:4])
+                for row in ws.iter_rows(min_row=2, max_col=4, values_only=True)
+                if any(cell is not None for cell in row)
+            ]
+            assert xlsx_rows == [
+                ["2026-03-05", "expense", 1, "Food"],
+                ["2026-03-01", "transfer", None, "Transfer"],
+                ["2026-03-10", "income", 2, "Salary"],
+            ]
+        finally:
+            wb.close()
+    finally:
+        for p in (csv_path, xlsx_path):
+            if p.exists():
+                for _ in range(5):
+                    try:
+                        os.unlink(p)
+                        break
+                    except PermissionError:
+                        time.sleep(0.1)
+
+
+def test_export_full_backup_preserves_storage_metadata() -> None:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as json_tmp:
+        json_path = Path(json_tmp.name)
+
+    try:
+        exporters.export_full_backup(
+            str(json_path),
+            wallets=[],
+            records=[],
+            mandatory_expenses=[],
+            distribution_items=[],
+            distribution_subitems=[],
+            distribution_snapshots=[],
+            transfers=[],
+            readonly=True,
+            storage_mode="sqlite",
+        )
+
+        import json
+
+        payload = json.loads(json_path.read_text(encoding="utf-8"))
+        assert payload["meta"]["storage"] == "sqlite"
+    finally:
+        if json_path.exists():
+            os.unlink(json_path)

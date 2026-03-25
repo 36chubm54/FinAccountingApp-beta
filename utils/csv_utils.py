@@ -1,26 +1,23 @@
 import csv
 import logging
 import os
-import re
+from collections.abc import Iterable
 from datetime import date as dt_date
 
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 from domain.reports import Report
 from domain.transfers import Transfer
+from services.import_parser import parse_transfer_row
 from utils.import_core import (
     ImportSummary,
-    as_float,
     norm_key,
     parse_import_row,
-    parse_optional_strict_int,
     safe_type,
 )
 from utils.money import (
     money_diff,
-    quantize_money,
     rate_diff,
-    to_decimal,
     to_money_float,
     to_rate_float,
 )
@@ -64,161 +61,6 @@ MANDATORY_HEADERS = [
     "description",
     "period",
 ]
-
-
-def _validate_currency(currency: str) -> bool:
-    return bool(re.fullmatch(r"[A-Za-z]{3}", currency or ""))
-
-
-def _parse_transfer_row(
-    row_lc: dict[str, str],
-    *,
-    row_label: str,
-    policy: ImportPolicy,
-    get_rate,
-    next_transfer_id: int,
-    wallet_ids: set[int] | None,
-) -> tuple[list[Record] | None, Transfer | None, int, str | None]:
-    date_value = str(row_lc.get("date", "") or "").strip()
-    if not date_value:
-        return None, None, next_transfer_id, f"{row_label}: missing required field 'date'"
-
-    from_wallet_id = parse_optional_strict_int(row_lc.get("from_wallet_id")) or 0
-    to_wallet_id = parse_optional_strict_int(row_lc.get("to_wallet_id")) or 0
-    if from_wallet_id <= 0 or to_wallet_id <= 0:
-        return (
-            None,
-            None,
-            next_transfer_id,
-            f"{row_label}: invalid transfer wallets (from_wallet_id/to_wallet_id)",
-        )
-    if from_wallet_id == to_wallet_id:
-        return None, None, next_transfer_id, f"{row_label}: transfer wallets must be different"
-
-    if wallet_ids is not None:
-        if from_wallet_id not in wallet_ids:
-            return None, None, next_transfer_id, f"{row_label}: wallet not found ({from_wallet_id})"
-        if to_wallet_id not in wallet_ids:
-            return None, None, next_transfer_id, f"{row_label}: wallet not found ({to_wallet_id})"
-
-    if policy == ImportPolicy.LEGACY:
-        amount_original = as_float(row_lc.get("amount"), None)
-        if amount_original is None:
-            return None, None, next_transfer_id, f"{row_label}: invalid amount"
-        currency = "KZT"
-        rate_at_operation = 1.0
-        amount_original = to_money_float(abs(to_decimal(amount_original)))
-        amount_kzt = amount_original
-    else:
-        amount_original = as_float(row_lc.get("amount_original"), None)
-        if amount_original is None:
-            return None, None, next_transfer_id, f"{row_label}: invalid amount_original"
-        amount_original = to_money_float(abs(to_decimal(amount_original)))
-
-        currency = str(row_lc.get("currency", "KZT") or "KZT").strip().upper()
-        if not _validate_currency(currency):
-            return None, None, next_transfer_id, f"{row_label}: invalid currency '{currency}'"
-        rate_at_operation = as_float(row_lc.get("rate_at_operation"), None)
-        amount_kzt = as_float(row_lc.get("amount_kzt"), None)
-
-        if policy == ImportPolicy.CURRENT_RATE:
-            if get_rate is None:
-                return (
-                    None,
-                    None,
-                    next_transfer_id,
-                    f"{row_label}: current-rate policy requires currency service",
-                )
-            try:
-                rate_at_operation = to_rate_float(get_rate(currency))
-                amount_kzt = to_money_float(
-                    quantize_money(amount_original) * to_decimal(rate_at_operation)
-                )
-            except Exception as exc:
-                return (
-                    None,
-                    None,
-                    next_transfer_id,
-                    f"{row_label}: failed to get current rate for {currency} ({exc})",
-                )
-
-        if rate_at_operation is None:
-            return (
-                None,
-                None,
-                next_transfer_id,
-                f"{row_label}: missing required field 'rate_at_operation'",
-            )
-        if amount_kzt is None:
-            return None, None, next_transfer_id, f"{row_label}: missing required field 'amount_kzt'"
-
-    transfer_id = parse_optional_strict_int(row_lc.get("transfer_id")) or 0
-    if transfer_id <= 0:
-        transfer_id = next_transfer_id
-        next_transfer_id += 1
-
-    description = str(row_lc.get("description", "") or "")
-    category = str(row_lc.get("category", "Transfer") or "Transfer").strip() or "Transfer"
-
-    try:
-        transfer = Transfer(
-            id=transfer_id,
-            from_wallet_id=from_wallet_id,
-            to_wallet_id=to_wallet_id,
-            date=date_value,
-            amount_original=amount_original,
-            currency=currency,
-            rate_at_operation=to_rate_float(rate_at_operation),
-            amount_kzt=to_money_float(amount_kzt),
-            description=description,
-        )
-    except Exception as exc:
-        return None, None, next_transfer_id, f"{row_label}: invalid transfer ({exc})"
-
-    expense_record = ExpenseRecord(
-        date=date_value,
-        wallet_id=from_wallet_id,
-        transfer_id=transfer.id,
-        amount_original=amount_original,
-        currency=currency,
-        rate_at_operation=to_rate_float(rate_at_operation),
-        amount_kzt=to_money_float(amount_kzt),
-        category=category,
-        description=description,
-    )
-    income_record = IncomeRecord(
-        date=date_value,
-        wallet_id=to_wallet_id,
-        transfer_id=transfer.id,
-        amount_original=amount_original,
-        currency=currency,
-        rate_at_operation=to_rate_float(rate_at_operation),
-        amount_kzt=to_money_float(amount_kzt),
-        category=category,
-        description=description,
-    )
-    return [expense_record, income_record], transfer, next_transfer_id, None
-
-
-def parse_transfer_row(
-    row_lc: dict[str, str],
-    *,
-    row_label: str,
-    policy: ImportPolicy,
-    get_rate,
-    next_transfer_id: int,
-    wallet_ids: set[int] | None,
-) -> tuple[list[Record] | None, Transfer | None, int, str | None]:
-    """Public wrapper around transfer-row parsing (avoid importing private helpers)."""
-
-    return _parse_transfer_row(
-        row_lc,
-        row_label=row_label,
-        policy=policy,
-        get_rate=get_rate,
-        next_transfer_id=next_transfer_id,
-        wallet_ids=wallet_ids,
-    )
 
 
 def _restore_missing_transfers(records: list[Record], transfers: dict[int, Transfer]) -> None:
@@ -398,11 +240,11 @@ def report_from_csv(filepath: str) -> Report:
 
 
 def export_records_to_csv(
-    records: list[Record],
+    records: Iterable[Record],
     filepath: str,
     initial_balance: float = 0.0,
     *,
-    transfers: list[Transfer] | None = None,
+    transfers: Iterable[Transfer] | None = None,
 ) -> None:
     """Export full operation dataset (wallet-based model) to CSV."""
     del initial_balance  # legacy argument, kept for compatibility
@@ -493,7 +335,7 @@ def import_records_from_csv(
 
             row_type = safe_type(str(row_lc.get("type", "") or "").lower())
             if row_type == "transfer":
-                parsed_records, transfer, next_transfer_id, error = _parse_transfer_row(
+                parsed_records, transfer, next_transfer_id, error = parse_transfer_row(
                     row_lc,
                     row_label=f"row {idx}",
                     policy=policy,

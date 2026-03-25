@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 import tkinter as tk
 from collections.abc import Callable
-from tkinter import Listbox, filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 from typing import Any, Protocol
 
 from domain.import_policy import ImportPolicy
@@ -96,25 +96,67 @@ def build_settings_tab(
     list_frame.grid_rowconfigure(0, weight=1)
     list_frame.grid_columnconfigure(0, weight=1)
 
-    wallet_listbox = Listbox(list_frame, height=8)
-    wallet_listbox.grid(row=0, column=0, sticky="nsew")
+    wallet_columns = (
+        "id",
+        "name",
+        "currency",
+        "initial_balance",
+        "balance",
+        "allow_negative",
+        "active",
+    )
+    wallet_tree = ttk.Treeview(
+        list_frame,
+        columns=wallet_columns,
+        show="headings",
+        selectmode="browse",
+        height=8,
+    )
+    wallet_tree.heading("id", text="ID")
+    wallet_tree.heading("name", text="Name")
+    wallet_tree.heading("currency", text="Cur")
+    wallet_tree.heading("initial_balance", text="Initial")
+    wallet_tree.heading("balance", text="Balance")
+    wallet_tree.heading("allow_negative", text="Allow negative")
+    wallet_tree.heading("active", text="Active")
+    wallet_tree.column("id", width=30, minwidth=30, stretch=False, anchor="e")
+    wallet_tree.column("name", width=80, minwidth=80, stretch=False, anchor="w")
+    wallet_tree.column("currency", width=45, minwidth=45, stretch=False, anchor="center")
+    wallet_tree.column("initial_balance", width=85, minwidth=85, stretch=False, anchor="e")
+    wallet_tree.column("balance", width=85, minwidth=85, stretch=False, anchor="e")
+    wallet_tree.column("allow_negative", width=95, minwidth=95, stretch=False, anchor="center")
+    wallet_tree.column("active", width=55, minwidth=55, stretch=False, anchor="center")
+    wallet_tree.grid(row=0, column=0, sticky="nsew")
 
-    wallet_scroll = ttk.Scrollbar(list_frame, orient="vertical", command=wallet_listbox.yview)
+    wallet_scroll = ttk.Scrollbar(list_frame, orient="vertical", command=wallet_tree.yview)
     wallet_scroll.grid(row=0, column=1, sticky="ns")
-    wallet_listbox.config(yscrollcommand=wallet_scroll.set)
+    wallet_xscroll = ttk.Scrollbar(list_frame, orient="horizontal", command=wallet_tree.xview)
+    wallet_xscroll.grid(row=1, column=0, sticky="ew")
+    wallet_tree.config(
+        yscrollcommand=wallet_scroll.set,
+        xscrollcommand=wallet_xscroll.set,
+    )
 
     def refresh_wallets() -> None:
-        wallet_listbox.delete(0, tk.END)
+        for iid in wallet_tree.get_children():
+            wallet_tree.delete(iid)
         for wallet in context.controller.load_wallets():
             try:
                 balance = context.controller.wallet_balance(wallet.id)
             except ValueError:
                 balance = wallet.initial_balance
-            wallet_listbox.insert(
+            wallet_tree.insert(
+                "",
                 tk.END,
-                f"[{wallet.id}] {wallet.name} | {wallet.currency} | "
-                f"Initial={wallet.initial_balance:.2f} | Balance={balance:.2f} | "
-                f"allow_negative={wallet.allow_negative} | active={wallet.is_active}",
+                values=(
+                    int(wallet.id),
+                    str(wallet.name),
+                    str(wallet.currency),
+                    f"{wallet.initial_balance:.2f}",
+                    f"{balance:.2f}",
+                    "Yes" if wallet.allow_negative else "No",
+                    "Yes" if wallet.is_active else "No",
+                ),
             )
 
         if context.refresh_transfer_wallet_menus is not None:
@@ -163,13 +205,13 @@ def build_settings_tab(
     )
 
     def delete_wallet() -> None:
-        selection = wallet_listbox.curselection()
+        selection = wallet_tree.selection()
         if not selection:
             messagebox.showerror("Error", "Select wallet to delete.")
             return
-        row = wallet_listbox.get(selection[0])
         try:
-            wallet_id = int(row.split("]")[0].strip().lstrip("["))
+            values = wallet_tree.item(selection[0], "values")
+            wallet_id = int(values[0])
         except Exception:
             messagebox.showerror("Error", "Failed to parse selected wallet id.")
             return
@@ -255,6 +297,44 @@ def build_settings_tab(
     mand_xscroll = ttk.Scrollbar(mand_list_frame, orient="horizontal", command=mand_tree.xview)
     mand_xscroll.grid(row=1, column=0, sticky="ew")
     mand_tree.config(xscrollcommand=mand_xscroll.set)
+
+    def _block_separator_resize(event: tk.Event) -> str | None:
+        if isinstance(event.widget, ttk.Treeview):
+            region = event.widget.identify_region(event.x, event.y)
+            if region == "separator":
+                return "break"
+        return None
+
+    def _mandatory_scroll_units(delta: int, *, multiplier: int = 12) -> int:
+        if delta == 0:
+            return 0
+        base_units = max(1, abs(int(delta)) // 120)
+        return base_units * multiplier
+
+    def _scroll_mandatory_horizontally(direction: int, units: int) -> str:
+        mand_tree.xview_scroll(direction * units, "units")
+        return "break"
+
+    def _on_mandatory_shift_mousewheel(event: tk.Event) -> str:
+        delta = int(getattr(event, "delta", 0))
+        units = _mandatory_scroll_units(delta)
+        if units <= 0:
+            return "break"
+        direction = -1 if delta > 0 else 1
+        return _scroll_mandatory_horizontally(direction, units)
+
+    def _on_mandatory_shift_button4(_event: tk.Event) -> str:
+        return _scroll_mandatory_horizontally(-1, 3)
+
+    def _on_mandatory_shift_button5(_event: tk.Event) -> str:
+        return _scroll_mandatory_horizontally(1, 3)
+
+    for widget in (mand_tree, mand_xscroll):
+        widget.bind("<Shift-MouseWheel>", _on_mandatory_shift_mousewheel, add="+")
+        widget.bind("<Shift-Button-4>", _on_mandatory_shift_button4, add="+")
+        widget.bind("<Shift-Button-5>", _on_mandatory_shift_button5, add="+")
+
+    mand_tree.bind("<Button-1>", _block_separator_resize, add="+")
 
     def refresh_mandatory() -> None:
         for iid in mand_tree.get_children():
@@ -822,6 +902,14 @@ def build_settings_tab(
         wallets = context.repository.load_wallets()
         records = context.repository.load_all()
         mandatory_expenses = context.repository.load_mandatory_expenses()
+        distribution_items, distribution_subitems_by_item = (
+            context.controller.export_distribution_structure()
+        )
+        distribution_subitems = [
+            subitem
+            for item_id in sorted(distribution_subitems_by_item)
+            for subitem in distribution_subitems_by_item[item_id]
+        ]
         distribution_snapshots = context.controller.get_frozen_distribution_rows()
         transfers = context.repository.load_transfers()
 
@@ -833,8 +921,11 @@ def build_settings_tab(
                 wallets=wallets,
                 records=records,
                 mandatory_expenses=mandatory_expenses,
+                distribution_items=distribution_items,
+                distribution_subitems=distribution_subitems,
                 distribution_snapshots=distribution_snapshots,
                 transfers=transfers,
+                storage_mode="sqlite",
             )
 
         def on_success(_: Any) -> None:

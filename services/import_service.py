@@ -6,14 +6,13 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from app.finance_service import FinanceService
-from domain.distribution import FrozenDistributionRow
+from domain.distribution import DistributionItem, DistributionSubitem, FrozenDistributionRow
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 from domain.transfers import Transfer
 from domain.wallets import Wallet
-from services.import_parser import ParsedImportData, parse_import_file
-from utils.csv_utils import parse_transfer_row
+from services.import_parser import ParsedImportData, parse_import_file, parse_transfer_row
 from utils.import_core import (
     as_float,
     parse_import_row,
@@ -39,6 +38,8 @@ class PreparedImportPayload:
     wallets: list[Wallet]
     parsed_records: list[Record]
     parsed_mandatory_templates: list[MandatoryExpenseRecord]
+    distribution_items: list[DistributionItem]
+    distribution_subitems_by_item: dict[int, list[DistributionSubitem]]
     frozen_distribution_rows: list[FrozenDistributionRow]
     raw_transfer_ops: list[dict[str, Any]]
     imported: int
@@ -102,6 +103,16 @@ class ImportService:
         raw_transfer_ops: list[dict[str, Any]] = []
         parsed_records: list[Record] = []
         parsed_mandatory_templates: list[MandatoryExpenseRecord] = []
+        strict_distribution = (
+            parsed.file_type == "json" and self._policy == ImportPolicy.FULL_BACKUP
+        )
+        distribution_items, distribution_subitems_by_item = (
+            self._distribution_structure_from_payload(
+                parsed.distribution_items,
+                parsed.distribution_subitems,
+                strict=strict_distribution,
+            )
+        )
         frozen_distribution_rows = self._frozen_rows_from_payload(parsed.distribution_snapshots)
         errors: list[str] = []
         skipped = 0
@@ -129,6 +140,7 @@ class ImportService:
                     skipped += 1
                     errors.append(f"{row_label}: failed to parse transfer row")
                     continue
+                parsed_records.extend(parsed_row)
                 raw_transfer_ops.append(
                     {
                         "transfer_id": int(transfer.id),
@@ -198,6 +210,8 @@ class ImportService:
             wallets=wallets,
             parsed_records=parsed_records,
             parsed_mandatory_templates=parsed_mandatory_templates,
+            distribution_items=distribution_items,
+            distribution_subitems_by_item=distribution_subitems_by_item,
             frozen_distribution_rows=frozen_distribution_rows,
             raw_transfer_ops=raw_transfer_ops,
             imported=imported,
@@ -212,6 +226,11 @@ class ImportService:
         imported_wallets = len(wallets)
         parsed_records = list(prepared.parsed_records)
         parsed_mandatory_templates = list(prepared.parsed_mandatory_templates)
+        distribution_items = list(prepared.distribution_items)
+        distribution_subitems_by_item = {
+            int(item_id): list(subitems)
+            for item_id, subitems in prepared.distribution_subitems_by_item.items()
+        }
         frozen_distribution_rows = list(prepared.frozen_distribution_rows)
         raw_transfer_ops = list(prepared.raw_transfer_ops)
         imported = prepared.imported
@@ -256,6 +275,11 @@ class ImportService:
                 mandatory_templates=mandatory_templates,
                 preserve_existing_mandatory=not bool(target_wallets),
             )
+            self._replace_distribution_structure_if_supported(
+                parsed.file_type,
+                distribution_items,
+                distribution_subitems_by_item,
+            )
             self._replace_distribution_snapshots_if_supported(
                 parsed.file_type,
                 frozen_distribution_rows,
@@ -287,6 +311,11 @@ class ImportService:
             counters=counters,
         )
         self._apply_mandatory_templates(parsed_mandatory_templates)
+        self._replace_distribution_structure_if_supported(
+            parsed.file_type,
+            distribution_items,
+            distribution_subitems_by_item,
+        )
         self._replace_distribution_snapshots_if_supported(
             parsed.file_type,
             frozen_distribution_rows,
@@ -313,6 +342,18 @@ class ImportService:
         if callable(replace_snapshots):
             replace_snapshots(rows)
 
+    def _replace_distribution_structure_if_supported(
+        self,
+        file_type: str,
+        items: list[DistributionItem],
+        subitems_by_item: dict[int, list[DistributionSubitem]],
+    ) -> None:
+        if file_type != "json":
+            return
+        replace_structure = getattr(self._finance_service, "replace_distribution_structure", None)
+        if callable(replace_structure):
+            replace_structure(items, subitems_by_item)
+
     def _build_import_operations(
         self,
         *,
@@ -324,33 +365,24 @@ class ImportService:
         transfers: list[Transfer] = []
         next_record_id = 1
         next_transfer_id = 1
-
-        for record in self._sort_records_for_import(parsed_records):
-            if record.transfer_id is not None:
-                continue
-            records.append(replace(record, id=next_record_id, transfer_id=None))
-            next_record_id += 1
-
+        created_transfer_ids: set[int] = set()
         transfer_records: dict[int, list[Record]] = defaultdict(list)
         for record in parsed_records:
             if record.transfer_id is not None:
                 transfer_records[int(record.transfer_id)].append(record)
 
-        transfers_count = counters.transfers
-        for _transfer_id, linked in sorted(
-            transfer_records.items(), key=lambda item: self._record_sort_key(item[1][0])
-        ):
-            if len(linked) != 2:
-                raise ValueError(
-                    f"Transfer integrity violated: expected 2 linked records (got {len(linked)})"
-                )
-            source = next((item for item in linked if isinstance(item, ExpenseRecord)), None)
-            target = next((item for item in linked if isinstance(item, IncomeRecord)), None)
-            if source is None or target is None:
-                raise ValueError("Transfer integrity violated: requires one expense and one income")
-            if source.wallet_id == target.wallet_id:
-                raise ValueError("Transfer integrity violated: wallets must be different")
-
+        for record in parsed_records:
+            if record.transfer_id is None:
+                records.append(replace(record, id=next_record_id, transfer_id=None))
+                next_record_id += 1
+                continue
+            transfer_id = int(record.transfer_id)
+            if transfer_id in created_transfer_ids:
+                continue
+            source, target = self._split_transfer_pair(
+                transfer_records.get(transfer_id, []),
+                label=f"#{transfer_id}",
+            )
             transfer = Transfer(
                 id=next_transfer_id,
                 from_wallet_id=int(source.wallet_id),
@@ -392,14 +424,15 @@ class ImportService:
             )
             next_record_id += 1
             next_transfer_id += 1
-            transfers_count += 1
+            created_transfer_ids.add(transfer_id)
 
         grouped_ids = {
             int(record.transfer_id)
             for record in parsed_records
             if isinstance(record.transfer_id, int) and record.transfer_id > 0
         }
-        for transfer_row in sorted(transfer_rows, key=self._transfer_row_sort_key):
+        transfers_count = counters.transfers + len(created_transfer_ids)
+        for transfer_row in transfer_rows:
             if int(transfer_row["transfer_id"]) in grouped_ids:
                 continue
             transfer = Transfer(
@@ -512,6 +545,89 @@ class ImportService:
                 )
             )
         return frozen_rows
+
+    def _distribution_structure_from_payload(
+        self,
+        item_payloads: list[dict[str, Any]],
+        subitem_payloads: list[dict[str, Any]],
+        *,
+        strict: bool = False,
+    ) -> tuple[list[DistributionItem], dict[int, list[DistributionSubitem]]]:
+        items: list[DistributionItem] = []
+        seen_item_ids: set[int] = set()
+        for item in item_payloads:
+            if not isinstance(item, dict):
+                if strict:
+                    raise ValueError("Invalid distribution item payload: expected object")
+                continue
+            item_id = parse_optional_strict_int(item.get("id")) or 0
+            if item_id <= 0:
+                if strict:
+                    raise ValueError(f"Invalid distribution item id: {item.get('id')!r}")
+                continue
+            if item_id in seen_item_ids:
+                if strict:
+                    raise ValueError(f"Duplicate distribution item id: {item_id}")
+                continue
+            name = str(item.get("name", "") or "").strip()
+            if not name:
+                if strict:
+                    raise ValueError(f"Distribution item #{item_id} has empty name")
+                continue
+            seen_item_ids.add(item_id)
+            items.append(
+                DistributionItem(
+                    id=item_id,
+                    name=name,
+                    group_name=str(item.get("group_name", "") or ""),
+                    sort_order=int(parse_optional_strict_int(item.get("sort_order")) or 0),
+                    pct=to_money_float(as_float(item.get("pct"), 0.0) or 0.0),
+                    pct_minor=int(parse_optional_strict_int(item.get("pct_minor")) or 0),
+                    is_active=bool(item.get("is_active", True)),
+                )
+            )
+        item_ids = {int(item.id) for item in items}
+        subitems_by_item: dict[int, list[DistributionSubitem]] = defaultdict(list)
+        seen_subitem_ids: set[int] = set()
+        for subitem in subitem_payloads:
+            if not isinstance(subitem, dict):
+                if strict:
+                    raise ValueError("Invalid distribution subitem payload: expected object")
+                continue
+            subitem_id = parse_optional_strict_int(subitem.get("id")) or 0
+            item_id = parse_optional_strict_int(subitem.get("item_id")) or 0
+            if subitem_id <= 0:
+                if strict:
+                    raise ValueError(f"Invalid distribution subitem id: {subitem.get('id')!r}")
+                continue
+            if subitem_id in seen_subitem_ids:
+                if strict:
+                    raise ValueError(f"Duplicate distribution subitem id: {subitem_id}")
+                continue
+            if item_id <= 0 or item_id not in item_ids:
+                if strict:
+                    raise ValueError(
+                        f"Distribution subitem #{subitem_id} references missing item_id={item_id}"
+                    )
+                continue
+            name = str(subitem.get("name", "") or "").strip()
+            if not name:
+                if strict:
+                    raise ValueError(f"Distribution subitem #{subitem_id} has empty name")
+                continue
+            seen_subitem_ids.add(subitem_id)
+            subitems_by_item[item_id].append(
+                DistributionSubitem(
+                    id=subitem_id,
+                    item_id=item_id,
+                    name=name,
+                    sort_order=int(parse_optional_strict_int(subitem.get("sort_order")) or 0),
+                    pct=to_money_float(as_float(subitem.get("pct"), 0.0) or 0.0),
+                    pct_minor=int(parse_optional_strict_int(subitem.get("pct_minor")) or 0),
+                    is_active=bool(subitem.get("is_active", True)),
+                )
+            )
+        return items, dict(subitems_by_item)
 
     def _apply_operations_with_relaxed_wallet_limits(
         self,
@@ -628,8 +744,35 @@ class ImportService:
         self, parsed_records: list[Record], counters: ImportCounters
     ) -> ImportCounters:
         records_count = counters.records
-        for record in self._sort_records_for_import(parsed_records):
+        created_transfer_ids: set[int] = set()
+        transfer_records: dict[int, list[Record]] = defaultdict(list)
+        for record in parsed_records:
             if record.transfer_id is not None:
+                transfer_records[int(record.transfer_id)].append(record)
+
+        transfers_count = counters.transfers
+        for record in parsed_records:
+            if record.transfer_id is not None:
+                transfer_id = int(record.transfer_id)
+                if transfer_id in created_transfer_ids:
+                    continue
+                source, target = self._split_transfer_pair(
+                    transfer_records.get(transfer_id, []),
+                    label=f"#{transfer_id}",
+                )
+                self._finance_service.create_transfer(
+                    from_wallet_id=int(source.wallet_id),
+                    to_wallet_id=int(target.wallet_id),
+                    transfer_date=str(source.date),
+                    amount=to_money_float(source.amount_original or 0.0),
+                    currency=str(source.currency).upper(),
+                    description=str(source.description or ""),
+                    amount_kzt=self._fixed_amount_kzt(source.amount_kzt),
+                    rate_at_operation=self._fixed_rate(source.rate_at_operation),
+                )
+                created_transfer_ids.add(transfer_id)
+                records_count += 2
+                transfers_count += 1
                 continue
             if isinstance(record, IncomeRecord):
                 self._finance_service.create_income(
@@ -676,7 +819,7 @@ class ImportService:
         return ImportCounters(
             wallets=counters.wallets,
             records=records_count,
-            transfers=counters.transfers,
+            transfers=transfers_count,
         )
 
     def _apply_grouped_transfers(
@@ -684,60 +827,7 @@ class ImportService:
         parsed_records: list[Record],
         counters: ImportCounters,
     ) -> ImportCounters:
-        transfer_records: dict[int, list[Record]] = defaultdict(list)
-        for record in parsed_records:
-            if record.transfer_id is None:
-                continue
-            transfer_records[int(record.transfer_id)].append(record)
-
-        transfers_count = counters.transfers
-        for transfer_id, linked in sorted(
-            transfer_records.items(), key=lambda item: self._record_sort_key(item[1][0])
-        ):
-            if len(linked) != 2:
-                raise ValueError(
-                    f"Transfer integrity violated for #{transfer_id}: expected 2 linked records"
-                )
-            source = next((item for item in linked if isinstance(item, ExpenseRecord)), None)
-            target = next((item for item in linked if isinstance(item, IncomeRecord)), None)
-            if source is None or target is None:
-                raise ValueError(
-                    f"Transfer integrity violated for #{transfer_id}: "
-                    "requires one expense and one income"
-                )
-            if source.wallet_id == target.wallet_id:
-                raise ValueError(
-                    f"Transfer integrity violated for #{transfer_id}: wallets must be different"
-                )
-            if str(source.date) != str(target.date):
-                raise ValueError(f"Transfer integrity violated for #{transfer_id}: date mismatch")
-            if str(source.currency).upper() != str(target.currency).upper():
-                raise ValueError(
-                    f"Transfer integrity violated for #{transfer_id}: currency mismatch"
-                )
-            source_amount = to_money_float(source.amount_original or 0.0)
-            target_amount = to_money_float(target.amount_original or 0.0)
-            if abs(source_amount - target_amount) > 1e-9:
-                raise ValueError(
-                    f"Transfer integrity violated for #{transfer_id}: amount_original mismatch"
-                )
-
-            self._finance_service.create_transfer(
-                from_wallet_id=int(source.wallet_id),
-                to_wallet_id=int(target.wallet_id),
-                transfer_date=str(source.date),
-                amount=source_amount,
-                currency=str(source.currency).upper(),
-                description=str(source.description or ""),
-                amount_kzt=self._fixed_amount_kzt(source.amount_kzt),
-                rate_at_operation=self._fixed_rate(source.rate_at_operation),
-            )
-            transfers_count += 1
-        return ImportCounters(
-            wallets=counters.wallets,
-            records=counters.records,
-            transfers=transfers_count,
-        )
+        return counters
 
     def _apply_transfer_rows(
         self,
@@ -751,7 +841,7 @@ class ImportService:
             for record in parsed_records
             if isinstance(record.transfer_id, int) and record.transfer_id > 0
         }
-        for transfer in sorted(transfer_rows, key=self._transfer_row_sort_key):
+        for transfer in transfer_rows:
             if int(transfer["transfer_id"]) in grouped_ids:
                 continue
             self._finance_service.create_transfer(
@@ -869,6 +959,8 @@ class ImportService:
             file_type=parsed.file_type,
             rows=rows,
             mandatory_rows=mandatory_rows,
+            distribution_items=list(parsed.distribution_items),
+            distribution_subitems=list(parsed.distribution_subitems),
             distribution_snapshots=list(parsed.distribution_snapshots),
             wallets=wallets,
             initial_balance=parsed.initial_balance,
@@ -931,20 +1023,27 @@ class ImportService:
         return to_rate_float(rate_at_operation)
 
     @staticmethod
-    def _record_sort_key(record: Record) -> tuple[str, int, int]:
-        date_value = str(record.date)
-        if isinstance(record, IncomeRecord):
-            priority = 0
-        elif isinstance(record, MandatoryExpenseRecord):
-            priority = 1
-        else:
-            priority = 2
-        return (date_value, priority, int(record.id))
-
-    @classmethod
-    def _sort_records_for_import(cls, records: list[Record]) -> list[Record]:
-        return sorted(records, key=cls._record_sort_key)
-
-    @staticmethod
-    def _transfer_row_sort_key(transfer: dict[str, Any]) -> tuple[str, int]:
-        return (str(transfer.get("transfer_date", "")), int(transfer.get("transfer_id", 0)))
+    def _split_transfer_pair(
+        linked: list[Record],
+        *,
+        label: str,
+    ) -> tuple[ExpenseRecord, IncomeRecord]:
+        if len(linked) != 2:
+            raise ValueError(f"Transfer integrity violated for {label}: expected 2 linked records")
+        source = next((item for item in linked if isinstance(item, ExpenseRecord)), None)
+        target = next((item for item in linked if isinstance(item, IncomeRecord)), None)
+        if source is None or target is None:
+            raise ValueError(
+                f"Transfer integrity violated for {label}: requires one expense and one income"
+            )
+        if source.wallet_id == target.wallet_id:
+            raise ValueError(f"Transfer integrity violated for {label}: wallets must be different")
+        if str(source.date) != str(target.date):
+            raise ValueError(f"Transfer integrity violated for {label}: date mismatch")
+        if str(source.currency).upper() != str(target.currency).upper():
+            raise ValueError(f"Transfer integrity violated for {label}: currency mismatch")
+        source_amount = to_money_float(source.amount_original or 0.0)
+        target_amount = to_money_float(target.amount_original or 0.0)
+        if abs(source_amount - target_amount) > 1e-9:
+            raise ValueError(f"Transfer integrity violated for {label}: amount_original mismatch")
+        return source, target

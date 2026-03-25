@@ -95,15 +95,26 @@ def _export_fixture(source_repo: SQLiteRecordRepository, path: Path, fmt: str) -
     transfers = source_repo.load_transfers()
     if fmt == "json":
         source_snapshots = []
+        source_items = []
+        source_subitems = []
         if hasattr(source_repo, "db_path"):
             from services.distribution_service import DistributionService
 
-            source_snapshots = DistributionService(source_repo).get_frozen_rows()
+            distribution_service = DistributionService(source_repo)
+            source_snapshots = distribution_service.get_frozen_rows()
+            source_items, source_subitems_by_item = distribution_service.export_structure()
+            source_subitems = [
+                subitem
+                for item_id in sorted(source_subitems_by_item)
+                for subitem in source_subitems_by_item[item_id]
+            ]
         export_full_backup_to_json(
             str(path),
             wallets=source_repo.load_wallets(),
             records=records,
             mandatory_expenses=source_repo.load_mandatory_expenses(),
+            distribution_items=source_items,
+            distribution_subitems=source_subitems,
             distribution_snapshots=source_snapshots,
             transfers=transfers,
         )
@@ -234,6 +245,9 @@ def test_sqlite_json_full_backup_restores_distribution_snapshots(tmp_path: Path)
         )
 
         assert result.imported == 5
+        restored_items = target_controller.get_distribution_items()
+        assert len(restored_items) == 1
+        assert restored_items[0].name == "Investments"
         assert _snapshot_months(target_controller) == ["2026-03"]
         restored_rows = target_controller.get_frozen_distribution_rows()
         assert len(restored_rows) == 1

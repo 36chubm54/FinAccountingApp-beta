@@ -4,7 +4,11 @@ import pytest
 
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
+from domain.records import ExpenseRecord, IncomeRecord
+from domain.transfers import Transfer
 from domain.wallets import Wallet
+from gui.controller_import_support import normalize_operation_ids_for_import
+from gui.controller_support import build_list_items
 from services.import_parser import ParsedImportData
 from services.import_service import ImportService
 
@@ -72,6 +76,198 @@ def test_import_service_groups_two_transfer_records_into_single_transfer() -> No
     finance_service.create_income.assert_called_once()
     finance_service.create_transfer.assert_called_once()
     finance_service.create_expense.assert_not_called()
+
+
+def test_import_service_preserves_original_row_order_without_type_sorting() -> None:
+    finance_service = _finance_mock()
+    payload = ParsedImportData(
+        path="data_backup.json",
+        file_type="json",
+        rows=[
+            {
+                "date": "2026-01-03",
+                "type": "expense",
+                "wallet_id": "1",
+                "category": "Food",
+                "amount_original": "15",
+                "currency": "KZT",
+                "rate_at_operation": "1",
+                "amount_kzt": "15",
+            },
+            {
+                "date": "2026-01-03",
+                "type": "income",
+                "wallet_id": "1",
+                "category": "Salary",
+                "amount_original": "100",
+                "currency": "KZT",
+                "rate_at_operation": "1",
+                "amount_kzt": "100",
+            },
+            {
+                "date": "2026-01-03",
+                "type": "expense",
+                "wallet_id": "1",
+                "transfer_id": "55",
+                "category": "Transfer",
+                "amount_original": "10",
+                "currency": "KZT",
+                "rate_at_operation": "1",
+                "amount_kzt": "10",
+            },
+            {
+                "date": "2026-01-03",
+                "type": "income",
+                "wallet_id": "2",
+                "transfer_id": "55",
+                "category": "Transfer",
+                "amount_original": "10",
+                "currency": "KZT",
+                "rate_at_operation": "1",
+                "amount_kzt": "10",
+            },
+            {
+                "date": "2026-01-03",
+                "type": "mandatory_expense",
+                "wallet_id": "1",
+                "category": "Rent",
+                "amount_original": "50",
+                "currency": "KZT",
+                "rate_at_operation": "1",
+                "amount_kzt": "50",
+                "description": "Monthly",
+                "period": "monthly",
+            },
+        ],
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        summary = ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file(
+            "data_backup.json"
+        )
+
+    assert summary == ImportResult(imported=5, skipped=0, errors=tuple())
+    method_order = [call[0] for call in finance_service.method_calls]
+    assert method_order.index("create_expense") < method_order.index("create_income")
+    assert method_order.index("create_income") < method_order.index("create_transfer")
+    assert method_order.index("create_transfer") < method_order.index(
+        "create_mandatory_expense_record"
+    )
+
+
+def test_import_service_bulk_replace_preserves_original_row_order() -> None:
+    finance_service = _finance_mock()
+    finance_service.supports_bulk_import_replace = True
+    payload = ParsedImportData(
+        path="data_backup.json",
+        file_type="json",
+        rows=[
+            {
+                "date": "2026-01-03",
+                "type": "expense",
+                "wallet_id": "1",
+                "category": "Food",
+                "amount_original": "15",
+                "currency": "KZT",
+                "rate_at_operation": "1",
+                "amount_kzt": "15",
+            },
+            {
+                "date": "2026-01-03",
+                "type": "expense",
+                "wallet_id": "1",
+                "transfer_id": "55",
+                "category": "Transfer",
+                "amount_original": "10",
+                "currency": "KZT",
+                "rate_at_operation": "1",
+                "amount_kzt": "10",
+            },
+            {
+                "date": "2026-01-03",
+                "type": "income",
+                "wallet_id": "2",
+                "transfer_id": "55",
+                "category": "Transfer",
+                "amount_original": "10",
+                "currency": "KZT",
+                "rate_at_operation": "1",
+                "amount_kzt": "10",
+            },
+            {
+                "date": "2026-01-03",
+                "type": "income",
+                "wallet_id": "1",
+                "category": "Salary",
+                "amount_original": "100",
+                "currency": "KZT",
+                "rate_at_operation": "1",
+                "amount_kzt": "100",
+            },
+        ],
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        summary = ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file(
+            "data_backup.json"
+        )
+
+    assert summary == ImportResult(imported=4, skipped=0, errors=tuple())
+    kwargs = finance_service.replace_all_for_import.call_args.kwargs
+    records = kwargs["records"]
+    assert [record.category for record in records] == ["Food", "Transfer", "Transfer", "Salary"]
+    assert [record.transfer_id for record in records] == [None, 1, 1, None]
+
+
+def test_import_service_preserves_csv_transfer_row_position() -> None:
+    finance_service = _finance_mock()
+    payload = ParsedImportData(
+        path="data.csv",
+        file_type="csv",
+        rows=[
+            {
+                "date": "2026-01-03",
+                "type": "expense",
+                "wallet_id": "1",
+                "category": "Food",
+                "amount_original": "15",
+                "currency": "KZT",
+                "rate_at_operation": "1",
+                "amount_kzt": "15",
+            },
+            {
+                "date": "2026-01-03",
+                "type": "transfer",
+                "from_wallet_id": "1",
+                "to_wallet_id": "2",
+                "amount_original": "10",
+                "currency": "KZT",
+                "rate_at_operation": "1",
+                "amount_kzt": "10",
+                "description": "Move",
+            },
+            {
+                "date": "2026-01-03",
+                "type": "income",
+                "wallet_id": "1",
+                "category": "Salary",
+                "amount_original": "100",
+                "currency": "KZT",
+                "rate_at_operation": "1",
+                "amount_kzt": "100",
+            },
+        ],
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        summary = ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file(
+            "data.csv"
+        )
+
+    assert summary == ImportResult(imported=3, skipped=0, errors=tuple())
+    method_order = [call[0] for call in finance_service.method_calls]
+    assert method_order.index("create_expense") < method_order.index("create_transfer")
+    assert method_order.index("create_transfer") < method_order.index("create_income")
 
 
 def test_import_service_skips_missing_wallet_and_does_not_apply_changes() -> None:
@@ -284,6 +480,99 @@ def test_import_service_bulk_replace_preserves_mandatory_date() -> None:
     assert len(mandatory_templates) == 1
     assert str(mandatory_templates[0].date) == "2026-03-20"
     assert mandatory_templates[0].auto_pay is True
+
+
+def test_import_service_json_backup_restores_distribution_structure() -> None:
+    finance_service = _finance_mock()
+    payload = ParsedImportData(
+        path="data_backup.json",
+        file_type="json",
+        rows=[],
+        distribution_items=[
+            {
+                "id": 1,
+                "name": "Investments",
+                "group_name": "Goals",
+                "sort_order": 0,
+                "pct": 100.0,
+                "pct_minor": 10000,
+                "is_active": True,
+            }
+        ],
+        distribution_subitems=[
+            {
+                "id": 10,
+                "item_id": 1,
+                "name": "BTC",
+                "sort_order": 0,
+                "pct": 100.0,
+                "pct_minor": 10000,
+                "is_active": True,
+            }
+        ],
+        wallets=[
+            {
+                "id": 1,
+                "name": "Main",
+                "currency": "KZT",
+                "initial_balance": 10.0,
+                "system": True,
+                "allow_negative": False,
+                "is_active": True,
+            }
+        ],
+        initial_balance=10.0,
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        summary = ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file(
+            "data_backup.json"
+        )
+
+    assert summary == ImportResult(imported=0, skipped=0, errors=tuple())
+    finance_service.replace_distribution_structure.assert_called_once()
+    items_arg, subitems_arg = finance_service.replace_distribution_structure.call_args.args
+    assert len(items_arg) == 1
+    assert items_arg[0].name == "Investments"
+    assert len(subitems_arg[1]) == 1
+    assert subitems_arg[1][0].name == "BTC"
+
+
+def test_import_service_full_backup_rejects_invalid_distribution_structure() -> None:
+    finance_service = _finance_mock()
+    payload = ParsedImportData(
+        path="data_backup.json",
+        file_type="json",
+        rows=[],
+        distribution_items=[
+            {
+                "id": 1,
+                "name": "Investments",
+                "group_name": "Goals",
+                "sort_order": 0,
+                "pct": 100.0,
+                "pct_minor": 10000,
+                "is_active": True,
+            }
+        ],
+        distribution_subitems=[
+            {
+                "id": 10,
+                "item_id": 999,
+                "name": "BTC",
+                "sort_order": 0,
+                "pct": 100.0,
+                "pct_minor": 10000,
+                "is_active": True,
+            }
+        ],
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        with pytest.raises(ValueError, match="references missing item_id=999"):
+            ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file(
+                "data_backup.json"
+            )
 
 
 def test_import_service_full_backup_passes_fixed_rate_values() -> None:
@@ -500,3 +789,131 @@ def test_import_service_rejects_fractional_wallet_id_in_wallet_payload() -> None
     with patch("services.import_service.parse_import_file", return_value=payload):
         with pytest.raises(ValueError, match="Invalid wallet id in import payload"):
             ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file("data.json")
+
+
+def test_build_list_items_uses_invariant_ids_where_transfer_counts_once() -> None:
+    items = build_list_items(
+        [
+            ExpenseRecord(
+                id=1,
+                date="2026-03-05",
+                wallet_id=1,
+                amount_original=50.0,
+                currency="KZT",
+                rate_at_operation=1.0,
+                amount_kzt=50.0,
+                category="Food",
+            ),
+            ExpenseRecord(
+                id=2,
+                date="2026-03-01",
+                wallet_id=1,
+                transfer_id=7,
+                amount_original=25.0,
+                currency="KZT",
+                rate_at_operation=1.0,
+                amount_kzt=25.0,
+                category="Transfer",
+                description="Move",
+            ),
+            IncomeRecord(
+                id=3,
+                date="2026-03-01",
+                wallet_id=2,
+                transfer_id=7,
+                amount_original=25.0,
+                currency="KZT",
+                rate_at_operation=1.0,
+                amount_kzt=25.0,
+                category="Transfer",
+                description="Move",
+            ),
+            IncomeRecord(
+                id=4,
+                date="2026-03-10",
+                wallet_id=2,
+                amount_original=100.0,
+                currency="KZT",
+                rate_at_operation=1.0,
+                amount_kzt=100.0,
+                category="Salary",
+            ),
+        ]
+    )
+
+    assert [item.type_label for item in items] == ["Expense", "Transfer", "Income"]
+    assert [item.invariant_id for item in items] == [1, 2, 3]
+    assert [item.repository_index for item in items] == [0, 1, 3]
+
+
+def test_normalize_operation_ids_for_import_is_deterministic_by_date_then_id() -> None:
+    repository = Mock()
+    repository.load_all.return_value = [
+        ExpenseRecord(
+            id=7,
+            date="2026-03-03",
+            wallet_id=1,
+            transfer_id=20,
+            amount_original=10.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=10.0,
+            category="Transfer",
+        ),
+        IncomeRecord(
+            id=8,
+            date="2026-03-03",
+            wallet_id=2,
+            transfer_id=20,
+            amount_original=10.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=10.0,
+            category="Transfer",
+        ),
+        ExpenseRecord(
+            id=3,
+            date="2026-03-01",
+            wallet_id=1,
+            transfer_id=None,
+            amount_original=5.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=5.0,
+            category="Food",
+        ),
+    ]
+    repository.load_transfers.return_value = [
+        Transfer(
+            id=20,
+            from_wallet_id=1,
+            to_wallet_id=2,
+            date="2026-03-03",
+            amount_original=10.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=10.0,
+            description="Later",
+        ),
+        Transfer(
+            id=10,
+            from_wallet_id=1,
+            to_wallet_id=3,
+            date="2026-03-02",
+            amount_original=7.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=7.0,
+            description="Earlier",
+        ),
+    ]
+
+    normalize_operation_ids_for_import(repository)
+
+    normalized_records, normalized_transfers = (
+        repository.replace_records_and_transfers.call_args.args
+    )
+    assert [transfer.id for transfer in normalized_transfers] == [1, 2]
+    assert [transfer.description for transfer in normalized_transfers] == ["Earlier", "Later"]
+    assert [record.id for record in normalized_records] == [1, 2, 3]
+    assert [record.transfer_id for record in normalized_records] == [2, 2, None]
