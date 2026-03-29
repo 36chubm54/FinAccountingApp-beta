@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from datetime import date as dt_date
 from typing import Any
 
+from domain.budget import Budget
 from domain.distribution import DistributionItem, DistributionSubitem, FrozenDistributionRow
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
@@ -75,6 +76,18 @@ def _transfer_to_payload(transfer: Transfer) -> dict:
         "rate_at_operation": to_rate_float(transfer.rate_at_operation),
         "amount_kzt": to_money_float(transfer.amount_kzt),
         "description": str(transfer.description or ""),
+    }
+
+
+def _budget_to_payload(budget: Budget) -> dict[str, Any]:
+    return {
+        "id": int(budget.id),
+        "category": str(budget.category),
+        "start_date": str(budget.start_date),
+        "end_date": str(budget.end_date),
+        "limit_kzt": to_money_float(budget.limit_kzt),
+        "limit_kzt_minor": int(budget.limit_kzt_minor),
+        "include_mandatory": bool(budget.include_mandatory),
     }
 
 
@@ -272,6 +285,7 @@ def export_full_backup_to_json(
     wallets: Sequence[Wallet] | None = None,
     records: Sequence[Record],
     mandatory_expenses: Sequence[MandatoryExpenseRecord],
+    budgets: Sequence[Budget] = (),
     distribution_items: Sequence[DistributionItem] = (),
     distribution_subitems: Sequence[DistributionSubitem] = (),
     distribution_snapshots: Sequence[FrozenDistributionRow] = (),
@@ -297,6 +311,7 @@ def export_full_backup_to_json(
         "wallets": [_wallet_to_payload(wallet) for wallet in normalized_wallets],
         "records": [_record_to_payload(record) for record in records],
         "mandatory_expenses": [_record_to_payload(expense) for expense in mandatory_expenses],
+        "budgets": [_budget_to_payload(budget) for budget in budgets],
         "distribution_items": [_distribution_item_to_payload(item) for item in distribution_items],
         "distribution_subitems": [
             _distribution_subitem_to_payload(subitem) for subitem in distribution_subitems

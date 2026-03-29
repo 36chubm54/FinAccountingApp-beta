@@ -8,7 +8,6 @@ from backup import create_backup, export_to_json
 from config import JSON_BACKUP_KEEP_LAST, JSON_PATH, LAZY_EXPORT_SIZE_THRESHOLD, SQLITE_PATH
 from infrastructure.repositories import RecordRepository
 from infrastructure.sqlite_repository import SQLiteRecordRepository
-from services.distribution_service import DistributionService
 
 
 def _resolve_schema_path(schema_path: str) -> str:
@@ -42,6 +41,8 @@ def _ensure_system_wallet(sqlite_repo: SQLiteRecordRepository) -> None:
 
 
 def _freeze_closed_distribution_months(sqlite_repo: SQLiteRecordRepository) -> None:
+    from services.distribution_service import DistributionService
+
     DistributionService(sqlite_repo).freeze_closed_months()
 
 
@@ -188,27 +189,16 @@ def _export_in_background() -> None:
     logging.info("[bootstrap] Started background JSON export thread")
 
 
-def bootstrap_repository() -> RecordRepository:
-    db_path = Path(SQLITE_PATH)
-    db_existed = db_path.exists()
-
+def _run_post_startup_maintenance(db_path: Path) -> None:
     repository = SQLiteRecordRepository(
         SQLITE_PATH,
         schema_path=_resolve_schema_path("db/schema.sql"),
     )
+    try:
+        _freeze_closed_distribution_months(repository)
+    finally:
+        repository.close()
 
-    if db_existed:
-        logging.info("[bootstrap] Existing SQLite database detected")
-    else:
-        logging.info("[bootstrap] SQLite database created and schema initialized")
-
-    _ensure_system_wallet(repository)
-    if not _is_migration_verified(repository):
-        _mark_migration_verified(repository)
-    _validate_sqlite_integrity_only(repository)
-    _freeze_closed_distribution_months(repository)
-
-    # Lazy export: only if needed, and possibly in background for large DB
     if _should_export_json():
         sqlite_size = db_path.stat().st_size if db_path.exists() else 0
         if sqlite_size > LAZY_EXPORT_SIZE_THRESHOLD:
@@ -230,5 +220,33 @@ def bootstrap_repository() -> RecordRepository:
     else:
         create_backup(JSON_PATH, keep_last=JSON_BACKUP_KEEP_LAST)
         logging.info("[bootstrap] Skipping JSON export (already up‑to‑date)")
+
+
+def run_post_startup_maintenance() -> None:
+    db_path = Path(SQLITE_PATH)
+    _run_post_startup_maintenance(db_path)
+
+
+def bootstrap_repository(*, run_maintenance: bool = True) -> RecordRepository:
+    db_path = Path(SQLITE_PATH)
+    db_existed = db_path.exists()
+
+    repository = SQLiteRecordRepository(
+        SQLITE_PATH,
+        schema_path=_resolve_schema_path("db/schema.sql"),
+    )
+
+    if db_existed:
+        logging.info("[bootstrap] Existing SQLite database detected")
+    else:
+        logging.info("[bootstrap] SQLite database created and schema initialized")
+
+    _ensure_system_wallet(repository)
+    if not _is_migration_verified(repository):
+        _mark_migration_verified(repository)
+    _validate_sqlite_integrity_only(repository)
+
+    if run_maintenance:
+        _run_post_startup_maintenance(db_path)
 
     return repository

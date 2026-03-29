@@ -4,6 +4,7 @@ import tempfile
 
 import pytest
 
+from domain.budget import Budget
 from domain.distribution import DistributionItem, DistributionSubitem, FrozenDistributionRow
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
@@ -414,6 +415,39 @@ def test_full_backup_export_includes_distribution_structure() -> None:
         assert payload["distribution_items"][0]["group_name"] == "Goals"
         assert payload["distribution_subitems"][0]["name"] == "BTC"
         assert payload["distribution_subitems"][0]["item_id"] == 1
+    finally:
+        os.unlink(path)
+
+
+def test_full_backup_export_includes_budgets() -> None:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
+        path = tmp.name
+    try:
+        export_full_backup_to_json(
+            path,
+            wallets=[
+                Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=0.0, system=True)
+            ],
+            records=[],
+            mandatory_expenses=[],
+            budgets=[
+                Budget(
+                    id=1,
+                    category="Food",
+                    start_date="2026-03-01",
+                    end_date="2026-03-31",
+                    limit_kzt=150000.0,
+                    limit_kzt_minor=15000000,
+                    include_mandatory=True,
+                )
+            ],
+            readonly=False,
+        )
+        with open(path, encoding="utf-8") as fp:
+            payload = json.load(fp)
+        assert payload["budgets"][0]["category"] == "Food"
+        assert payload["budgets"][0]["limit_kzt_minor"] == 15000000
+        assert payload["budgets"][0]["include_mandatory"] is True
     finally:
         os.unlink(path)
 

@@ -34,6 +34,8 @@ class OperationsTabContext(Protocol):
 
     def _refresh_budgets(self) -> None: ...
 
+    def _refresh_all(self) -> None: ...
+
     def _run_background(
         self,
         task: Callable[[], Any],
@@ -80,6 +82,7 @@ def build_operations_tab(
     )
     date_entry = ttk.Entry(form_frame)
     date_entry.grid(row=1, column=1, sticky="ew", padx=6, pady=4)
+    date_entry.insert(0, date.today().isoformat())
 
     ttk.Label(form_frame, text="Amount:").grid(row=2, column=0, sticky="w", padx=6, pady=4)
     amount_entry = ttk.Entry(form_frame)
@@ -234,7 +237,6 @@ def build_operations_tab(
                 )
                 messagebox.showinfo("Success", "Expense record added.")
 
-            date_entry.delete(0, tk.END)
             amount_entry.delete(0, tk.END)
             category_combo.delete(0, tk.END)
             description_entry.delete(0, tk.END)
@@ -421,9 +423,7 @@ def build_operations_tab(
         if confirm:
             context.controller.delete_all_records()
             messagebox.showinfo("Success", "All records have been deleted.")
-            context._refresh_list()
-            context._refresh_charts()
-            context._refresh_budgets()
+            refresh_operation_views(context)
 
     wallet_id_map: dict[str, int] = {}
 

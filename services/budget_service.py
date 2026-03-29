@@ -97,6 +97,36 @@ class BudgetService:
         self._repo.commit()
         return self._load_budget_by_id(int(budget_id))
 
+    def replace_budgets(self, budgets: list[Budget]) -> None:
+        with self._repo.transaction():
+            self._repo.execute("DELETE FROM budgets")
+            for budget in sorted(budgets, key=lambda item: int(item.id)):
+                self._repo.execute(
+                    """
+                    INSERT INTO budgets (
+                        id, category, start_date, end_date,
+                        limit_kzt, limit_kzt_minor, include_mandatory
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        int(budget.id),
+                        str(budget.category),
+                        str(budget.start_date),
+                        str(budget.end_date),
+                        float(budget.limit_kzt),
+                        int(budget.limit_kzt_minor),
+                        int(bool(budget.include_mandatory)),
+                    ),
+                )
+            self._repo.execute("DELETE FROM sqlite_sequence WHERE name = ?", ("budgets",))
+            if budgets:
+                max_budget_id = max(int(budget.id) for budget in budgets)
+                self._repo.execute(
+                    "INSERT INTO sqlite_sequence(name, seq) VALUES(?, ?)",
+                    ("budgets", max_budget_id),
+                )
+
     def get_budget_result(self, budget: Budget, today: dt_date | None = None) -> BudgetResult:
         today = today or dt_date.today()
         type_filter = (

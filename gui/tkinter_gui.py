@@ -7,19 +7,10 @@ from tkinter import messagebox, ttk
 from typing import Any
 
 from app.services import CurrencyService
-from bootstrap import bootstrap_repository
+from bootstrap import bootstrap_repository, run_post_startup_maintenance
 from domain.import_policy import ImportPolicy
 from gui.controllers import FinancialController
 from gui.record_colors import KIND_TO_FOREGROUND, foreground_for_kind
-from gui.tabs import (
-    build_analytics_tab,
-    build_budget_tab,
-    build_distribution_tab,
-    build_infographics_tab,
-    build_operations_tab,
-    build_reports_tab,
-    build_settings_tab,
-)
 from utils.charting import (
     aggregate_daily_cashflow,
     aggregate_expenses_by_category,
@@ -48,47 +39,27 @@ class FinancialApp(tk.Tk):
         # when user closes the window via the window manager.
         self.protocol("WM_DELETE_WINDOW", self.destroy)
 
-        self.repository = bootstrap_repository()
+        self.repository = bootstrap_repository(run_maintenance=False)
         self.currency = CurrencyService()
         self.controller = FinancialController(self.repository, self.currency)
-        try:
-            created_auto_payments = self.controller.apply_mandatory_auto_payments()
-            if created_auto_payments:
-                logger.info(
-                    "Auto-applied mandatory payments on startup: %s", len(created_auto_payments)
-                )
-                details = []
-                for record in created_auto_payments:
-                    details.append(
-                        f"- {record.category}: {record.amount_kzt:.2f} KZT ({record.date})"
-                    )
-                max_details = 5
-                if len(details) > max_details:
-                    displayed = details[:max_details]
-                    remaining = len(details) - max_details
-                    displayed.append(f"+ {remaining} more")
-                    details_text = "\n".join(displayed)
-                else:
-                    details_text = "\n".join(details)
-                message_text = (
-                    f"Successfully created {len(created_auto_payments)} autopayments:\n"
-                    + details_text
-                )
-                messagebox.showinfo("Auto-payments applied", message_text)
-        except Exception:
-            logger.exception("Failed to apply mandatory auto payments on startup")
 
         self._executor = ThreadPoolExecutor(max_workers=2)
         self._busy = False
+        self._startup_sync_running = False
         self._record_id_to_repo_index: dict[str, int] = {}
         self._record_id_to_domain_id: dict[str, int] = {}
         self._chart_refresh_suspended = False
+        self._built_tabs: set[str] = set()
+        self._analytics_bindings: Any | None = None
+        self._budget_bindings: Any | None = None
+        self._distribution_bindings: Any | None = None
 
         self.records_tree: ttk.Treeview | None = None
         self.refresh_operation_wallet_menu: Callable[[], None] | None = None
         self.refresh_transfer_wallet_menus: Callable[[], None] | None = None
         self.refresh_wallets: Callable[[], None] | None = None
         self.refresh_budgets: Callable[[], None] | None = None
+        self.refresh_all: Callable[[], None] | None = None
         self._status_refresh_job: str | None = None
         self._online_var: tk.BooleanVar | None = None
         self._currency_status_label: ttk.Label | None = None
@@ -112,6 +83,7 @@ class FinancialApp(tk.Tk):
 
         notebook = ttk.Notebook(self)
         notebook.pack(fill=tk.BOTH, expand=True)
+        self._notebook = notebook
 
         self.tab_infographics = ttk.Frame(notebook)
         self.tab_operations = ttk.Frame(notebook)
@@ -128,47 +100,25 @@ class FinancialApp(tk.Tk):
         notebook.add(self.tab_budget, text="Budget")
         notebook.add(self.tab_distribution, text="Distribution")
         notebook.add(self.tab_settings, text="Settings")
+        self._tab_keys_by_widget = {
+            str(self.tab_infographics): "infographics",
+            str(self.tab_operations): "operations",
+            str(self.tab_reports): "reports",
+            str(self.tab_analytics): "analytics",
+            str(self.tab_budget): "budget",
+            str(self.tab_distribution): "distribution",
+            str(self.tab_settings): "settings",
+        }
+        notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed, add="+")
 
-        infographics = build_infographics_tab(
-            self.tab_infographics,
-            on_chart_filter_change=self._on_chart_filter_change,
-            on_refresh_charts=self._refresh_charts,
-            on_legend_mousewheel=self._on_legend_mousewheel,
-            bind_all=self.bind_all,
-            after=self.after,
-            after_cancel=self.after_cancel,
-        )
-        self.pie_month_var = infographics.pie_month_var
-        self.pie_month_menu = infographics.pie_month_menu
-        self.chart_month_var = infographics.chart_month_var
-        self.chart_month_menu = infographics.chart_month_menu
-        self.chart_year_var = infographics.chart_year_var
-        self.chart_year_menu = infographics.chart_year_menu
-        self.expense_pie_canvas = infographics.expense_pie_canvas
-        self.expense_legend_canvas = infographics.expense_legend_canvas
-        self.expense_legend_frame = infographics.expense_legend_frame
-        self.daily_bar_canvas = infographics.daily_bar_canvas
-        self.monthly_bar_canvas = infographics.monthly_bar_canvas
-
-        operations = build_operations_tab(self.tab_operations, self, IMPORT_FORMATS)
-        self.records_tree = operations.records_tree
-        self.refresh_operation_wallet_menu = operations.refresh_operation_wallet_menu
-        self.refresh_transfer_wallet_menus = operations.refresh_transfer_wallet_menus
-
-        build_reports_tab(self.tab_reports, self)
-        self._analytics_bindings = build_analytics_tab(self.tab_analytics, context=self)
-        self._budget_bindings = build_budget_tab(self.tab_budget, context=self)
-        self._distribution_bindings = build_distribution_tab(self.tab_distribution, context=self)
-        self.refresh_budgets = self._budget_bindings.refresh
-        build_settings_tab(self.tab_settings, self, IMPORT_FORMATS)
+        self._ensure_tab_built("infographics")
+        self._ensure_tab_built("operations")
 
         self.progress = ttk.Progressbar(self, mode="indeterminate")
         self.progress.pack(fill=tk.X, padx=8, pady=(0, 8))
         self.progress.pack_forget()
 
-        self._refresh_list()
-        self._refresh_charts()
-        self._apply_saved_online_mode()
+        self.after_idle(self._start_deferred_startup)
 
     def destroy(self) -> None:
         if self._status_refresh_job is not None:
@@ -345,7 +295,7 @@ class FinancialApp(tk.Tk):
             return ImportPolicy.LEGACY
         return ImportPolicy.CURRENT_RATE
 
-    def _refresh_list(self) -> None:
+    def _refresh_list(self, records: list[Any] | None = None) -> None:
         if self.records_tree is None:
             return
         for iid in self.records_tree.get_children():
@@ -358,7 +308,12 @@ class FinancialApp(tk.Tk):
             except Exception:
                 pass
 
-        for item in self.controller.build_record_list_items():
+        list_items = (
+            self.controller.build_record_list_items(records)
+            if records is not None
+            else self.controller.build_record_list_items()
+        )
+        for item in list_items:
             self._record_id_to_repo_index[item.record_id] = item.repository_index
             if item.domain_record_id is not None:
                 self._record_id_to_domain_id[item.record_id] = item.domain_record_id
@@ -380,7 +335,7 @@ class FinancialApp(tk.Tk):
             except Exception:
                 self.records_tree.insert("", "end", values=values, tags=tags)
 
-    def _refresh_charts(self) -> None:
+    def _refresh_charts(self, records: list[Any] | None = None) -> None:
         if (
             self.chart_month_menu is None
             or self.chart_month_var is None
@@ -391,7 +346,8 @@ class FinancialApp(tk.Tk):
         ):
             return
 
-        records = self.repository.load_all()
+        if records is None:
+            records = self.repository.load_all()
 
         self._chart_refresh_suspended = True
         self._update_month_options(records)
@@ -402,6 +358,138 @@ class FinancialApp(tk.Tk):
         self._draw_expense_pie(records)
         self._draw_daily_bars(records)
         self._draw_monthly_bars(records)
+
+    def _ensure_tab_built(self, tab_key: str) -> None:
+        if tab_key in self._built_tabs:
+            return
+
+        if tab_key == "infographics":
+            from gui.tabs.infographics_tab import build_infographics_tab
+
+            infographics = build_infographics_tab(
+                self.tab_infographics,
+                on_chart_filter_change=self._on_chart_filter_change,
+                on_refresh_charts=self._refresh_charts,
+                on_legend_mousewheel=self._on_legend_mousewheel,
+                bind_all=self.bind_all,
+                after=self.after,
+                after_cancel=self.after_cancel,
+            )
+            self.pie_month_var = infographics.pie_month_var
+            self.pie_month_menu = infographics.pie_month_menu
+            self.chart_month_var = infographics.chart_month_var
+            self.chart_month_menu = infographics.chart_month_menu
+            self.chart_year_var = infographics.chart_year_var
+            self.chart_year_menu = infographics.chart_year_menu
+            self.expense_pie_canvas = infographics.expense_pie_canvas
+            self.expense_legend_canvas = infographics.expense_legend_canvas
+            self.expense_legend_frame = infographics.expense_legend_frame
+            self.daily_bar_canvas = infographics.daily_bar_canvas
+            self.monthly_bar_canvas = infographics.monthly_bar_canvas
+        elif tab_key == "operations":
+            from gui.tabs.operations_tab import build_operations_tab
+
+            operations = build_operations_tab(self.tab_operations, self, IMPORT_FORMATS)
+            self.records_tree = operations.records_tree
+            self.refresh_operation_wallet_menu = operations.refresh_operation_wallet_menu
+            self.refresh_transfer_wallet_menus = operations.refresh_transfer_wallet_menus
+        elif tab_key == "reports":
+            from gui.tabs.reports_tab import build_reports_tab
+
+            build_reports_tab(self.tab_reports, self)
+        elif tab_key == "analytics":
+            from gui.tabs.analytics_tab import build_analytics_tab
+
+            self._analytics_bindings = build_analytics_tab(self.tab_analytics, context=self)
+        elif tab_key == "budget":
+            from gui.tabs.budget_tab import build_budget_tab
+
+            self._budget_bindings = build_budget_tab(self.tab_budget, context=self)
+            self.refresh_budgets = self._budget_bindings.refresh
+        elif tab_key == "distribution":
+            from gui.tabs.distribution_tab import build_distribution_tab
+
+            self._distribution_bindings = build_distribution_tab(
+                self.tab_distribution, context=self
+            )
+            self.refresh_all = self._distribution_bindings.refresh
+        elif tab_key == "settings":
+            from gui.tabs.settings_tab import build_settings_tab
+
+            build_settings_tab(self.tab_settings, self, IMPORT_FORMATS)
+        else:
+            return
+
+        self._built_tabs.add(tab_key)
+
+    def _on_tab_changed(self, _event: tk.Event) -> None:
+        if not hasattr(self, "_notebook"):
+            return
+        selected = self._notebook.select()
+        tab_key = self._tab_keys_by_widget.get(str(selected))
+        if tab_key is not None:
+            self._ensure_tab_built(tab_key)
+
+    def _start_deferred_startup(self) -> None:
+        if self._startup_sync_running:
+            return
+        self._startup_sync_running = True
+
+        def task() -> tuple[list[Any], list[Any]]:
+            created_auto_payments = self.controller.apply_mandatory_auto_payments()
+            run_post_startup_maintenance()
+            records = self.repository.load_all()
+            return created_auto_payments, records
+
+        def on_success(result: tuple[list[Any], list[Any]]) -> None:
+            self._startup_sync_running = False
+            created_auto_payments, records = result
+            self._refresh_list(records=records)
+            self._refresh_charts(records=records)
+            self._refresh_budgets()
+            self._refresh_all()
+            self._apply_saved_online_mode()
+            self._show_startup_auto_payment_message(created_auto_payments)
+
+        def on_error(exc: BaseException) -> None:
+            self._startup_sync_running = False
+            logger.exception("Deferred startup sync failed", exc_info=exc)
+            try:
+                records = self.repository.load_all()
+            except Exception:
+                records = None
+            if records is not None:
+                self._refresh_list(records=records)
+                self._refresh_charts(records=records)
+            self._apply_saved_online_mode()
+
+        self._run_background(
+            task,
+            on_success=on_success,
+            on_error=on_error,
+            busy_message="",
+            block_ui=False,
+        )
+
+    def _show_startup_auto_payment_message(self, created_auto_payments: list[Any]) -> None:
+        if not created_auto_payments:
+            return
+        logger.info("Auto-applied mandatory payments on startup: %s", len(created_auto_payments))
+        details = []
+        for record in created_auto_payments:
+            details.append(f"- {record.category}: {record.amount_kzt:.2f} KZT ({record.date})")
+        max_details = 5
+        if len(details) > max_details:
+            displayed = details[:max_details]
+            remaining = len(details) - max_details
+            displayed.append(f"+ {remaining} more")
+            details_text = "\n".join(displayed)
+        else:
+            details_text = "\n".join(details)
+        message_text = (
+            f"Successfully created {len(created_auto_payments)} autopayments:\n" + details_text
+        )
+        messagebox.showinfo("Auto-payments applied", message_text)
 
     def _refresh_wallets(self) -> None:
         """Refresh wallet list in settings tab and wallet menus in operations tab."""
@@ -425,6 +513,13 @@ class FinancialApp(tk.Tk):
         if self.refresh_budgets is not None:
             try:
                 self.refresh_budgets()
+            except Exception:
+                pass
+
+    def _refresh_all(self) -> None:
+        if self.refresh_all is not None:
+            try:
+                self.refresh_all()
             except Exception:
                 pass
 

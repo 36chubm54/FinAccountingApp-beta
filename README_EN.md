@@ -62,6 +62,7 @@ After launch, the graphical window of the Financial Accounting application will 
 
 After running `python main.py` from the `project` directory, a window will open with control tabs and an infographic block.
 The bottom of the window now includes a persistent status bar with the app version, currency-rate status, and an `Online` toggle that can be switched at runtime without restarting.
+Core tabs can now be built lazily, and post-startup maintenance runs after the first window paint to reduce startup blocking.
 
 Tabs and actions:
 
@@ -91,6 +92,7 @@ Financial analytics for an arbitrary period.
 - **Monthly Report** — table with income, expenses, cashflow and savings rate by month.
 
 The period filter uses `YYYY-MM-DD` in the `From` / `To` fields. Transfers are excluded from calculations.
+For the `Dashboard`, net worth is now evaluated at the selected `To` date instead of using the current balance at tab-open time.
 The Dashboard now includes an `ⓘ` tooltip that explains the metric formulas.
 `Year expense` is calculated as calendar-year expenses up to the selected end date, and `Cost per day/hour/minute` now derives from that year-to-date expense instead of an annualized burn rate.
 
@@ -347,7 +349,7 @@ Formats:
 - Import pipeline: `parser -> dry-run validation -> user confirmation -> SQLite transaction`.
 - For `CSV/XLSX`, the real import replaces runtime data with valid rows from the file; invalid rows remain only in the import report.
 - For readonly `JSON` snapshots, `force=True` is required; readonly/checksum validation happens before the commit stage.
-- `JSON` full backup can now include `distribution_items`, `distribution_subitems`, and `distribution_snapshots`; on import they are restored into SQLite when the repository supports the Distribution System.
+- `JSON` full backup can now include `budgets`, `distribution_items`, `distribution_subitems`, and `distribution_snapshots`; on import they are restored into SQLite when the corresponding subsystems are supported.
 - For `JSON` full backup, distribution structure is validated strictly: malformed item/subitem payloads now fail the import instead of being skipped silently.
 
 Data format:
@@ -453,7 +455,7 @@ JSON (`data.json`) is no longer used as an application backend and remains only 
 - backups.
 
 During startup, after SQLite integrity validation, the current runtime state is exported to `data.json`.
-This export now preserves `mandatory_expenses.date`, the Distribution System structure, and frozen `distribution_snapshots`.
+This export now preserves `mandatory_expenses.date`, `budgets`, the Distribution System structure, and frozen `distribution_snapshots`.
 
 A dedicated `storage/` layer is used for data access:
 
@@ -480,7 +482,7 @@ What the script does:
 
 - loads source data via `JsonStorage`;
 - writes to SQLite in one explicit transaction with strict order:
-  `wallets -> distribution_items -> distribution_subitems -> transfers -> records -> mandatory_expenses -> distribution_snapshots`;
+  `wallets -> budgets -> distribution_items -> distribution_subitems -> transfers -> records -> mandatory_expenses -> distribution_snapshots`;
 - preserves existing `id` values (or builds `old_id -> new_id` mapping when ids are auto-generated);
 - populates precision fields `*_minor` and `rate_at_operation_text` while writing;
 - for full backup, strictly validates `distribution_items` / `distribution_subitems` and aborts migration on malformed payloads;
@@ -510,6 +512,7 @@ Initialization is handled by `bootstrap.py`:
 - after a successful integrity check, a lazy SQLite → `data.json` export is performed:
   export runs only if `data.json` is missing or older than `finance.db`;
   for large databases, export may run in a background thread (non-blocking UI);
+- post-startup maintenance can run separately from `bootstrap_repository()` so the GUI can show the window first and then perform freeze/export/backup synchronization;
 - JSON bootstrap and direct runtime work against `data.json` have been removed.
 
 SQLite behavior by identifiers:
@@ -746,6 +749,7 @@ Below are the key classes and functions synchronized with the actual code.
 `gui/tkinter_gui.py`
 
 - `FinancialApp` is the main application class with Tkinter.
+- The app opens with `bootstrap_repository(run_maintenance=False)`, then performs deferred startup maintenance and lazy tab building.
 
 `gui/tabs/infographics_tab.py`
 
@@ -839,7 +843,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `get_monthly_summary(start_date=None, end_date=None)` — monthly aggregates (Metrics Engine, SQLite-only).
 - `get_average_monthly_income(start_date, end_date)` — average monthly income over a range.
 - `get_average_monthly_expenses(start_date, end_date)` — average monthly expenses over a range.
-- `create_budget(...)`, `get_budgets()`, `get_budget_results()`, `delete_budget(...)`, `update_budget_limit(...)` — Budget System API surface.
+- `create_budget(...)`, `get_budgets()`, `get_budget_results()`, `delete_budget(...)`, `update_budget_limit(...)`, `replace_budgets(...)` — Budget System API surface.
 - `create_distribution_item(...)`, `create_distribution_subitem(...)`, `update_distribution_item_pct(...)`, `update_distribution_subitem_pct(...)`, `delete_distribution_item(...)`, `delete_distribution_subitem(...)` — Distribution System CRUD API.
 - `validate_distribution()`, `get_distribution_history(start_month, end_month)`, `get_frozen_distribution_rows(...)`, `toggle_distribution_month_fixed(month)` — frozen-row lifecycle and monthly distribution calculations.
 
@@ -869,7 +873,7 @@ Below are the key classes and functions synchronized with the actual code.
 
 - `parse_import_file(path, force=False)` -> `ParsedImportData` (DTO/dict parsing layer, no storage writes).
 - Enforces safety limits: file size, row count, CSV field size.
-- For `JSON`, it also reads `distribution_items`, `distribution_subitems`, and `distribution_snapshots`.
+- For `JSON`, it also reads `budgets`, `distribution_items`, `distribution_subitems`, and `distribution_snapshots`.
 - `parse_transfer_row(...)` handles legacy transfer rows as well as current-rate/full-backup parsing.
 
 `services/import_service.py`
@@ -878,7 +882,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `ImportService.import_mandatory_file(path)` — imports mandatory templates and returns `ImportResult`.
 - Dry-run uses the same parse/validation pipeline but performs no SQLite writes.
 - `Full Backup` keeps fixed `amount_kzt/rate_at_operation`; `Current Rate` recalculates values.
-- For `JSON` full backup, it can also restore distribution structure and frozen snapshots through `replace_distribution_structure(...)` / `replace_distribution_snapshots(...)`.
+- For `JSON` full backup, it can also restore budgets, distribution structure, and frozen snapshots through `replace_budgets(...)`, `replace_distribution_structure(...)`, and `replace_distribution_snapshots(...)`.
 - Malformed distribution structure in a `JSON` full backup is now treated as an import error instead of being skipped silently.
 
 `services/audit_service.py`
@@ -941,6 +945,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `get_budgets()` — list of all budgets.
 - `delete_budget(budget_id)` — deleting a budget.
 - `update_budget_limit(budget_id, new_limit_kzt)` — updating the budget limit.
+- `replace_budgets(budgets)` — full budget replacement used by JSON full-backup import.
 - `get_budget_result(budget, today)` — budget results for the specified date.
 - `get_all_results(today)` — batch calculation of all budget results for the specified date.
 
@@ -965,7 +970,7 @@ Below are the key classes and functions synchronized with the actual code.
 `utils/backup_utils.py`
 
 - `compute_checksum(data)` — SHA256 checksum for `data`.
-- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, distribution_items=(), distribution_subitems=(), distribution_snapshots=(), transfers=(), initial_balance=0.0, readonly=True, storage_mode="unknown")`.
+- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, budgets=(), distribution_items=(), distribution_subitems=(), distribution_snapshots=(), transfers=(), initial_balance=0.0, readonly=True, storage_mode="unknown")`.
 - `import_full_backup_from_json(filepath, force=False)`.
 - Backup/import normalizes money values and FX rates via `utils.money`.
 - JSON export writes atomically via a temporary file + `os.replace`.

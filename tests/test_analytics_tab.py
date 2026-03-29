@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import sqlite3
+import tkinter as tk
 from pathlib import Path
+from tkinter import ttk
 
 from app.services import CurrencyService
 from gui.controllers import FinancialController
+from gui.tabs.analytics_tab import build_analytics_tab
 from infrastructure.sqlite_repository import SQLiteRecordRepository
 
 
@@ -348,3 +351,84 @@ def test_get_year_expense_and_time_costs_use_year_to_date_expenses(tmp_path: Pat
         assert per_minute == 0.01
     finally:
         repo.close()
+
+
+def test_analytics_tab_net_worth_uses_period_end_date() -> None:
+    class _Controller:
+        def __init__(self) -> None:
+            self.total_balance_dates: list[str | None] = []
+
+        def get_total_balance(self, date: str | None = None) -> float:
+            self.total_balance_dates.append(date)
+            return 1234.0
+
+        def get_savings_rate(self, start_date: str, end_date: str) -> float:
+            return 0.0
+
+        def get_burn_rate(self, start_date: str, end_date: str) -> float:
+            return 0.0
+
+        def get_average_monthly_income(self, year: int, *, up_to_date: str | None = None) -> float:
+            return 0.0
+
+        def get_year_income(self, year: int, *, up_to_date: str | None = None) -> float:
+            return 0.0
+
+        def convert_kzt_to_usd(self, amount_kzt: float) -> float:
+            return 0.0
+
+        def get_year_expense(self, year: int, *, up_to_date: str | None = None) -> float:
+            return 0.0
+
+        def get_average_monthly_expenses(self, start_date: str, end_date: str) -> float:
+            return 0.0
+
+        def get_time_costs(self, start_date: str, end_date: str) -> tuple[float, float, float]:
+            return (0.0, 0.0, 0.0)
+
+        def get_net_worth_timeline(self) -> list:
+            return []
+
+        def get_spending_by_category(self, start_date: str, end_date: str, *, limit=None) -> list:
+            return []
+
+        def get_income_by_category(self, start_date: str, end_date: str, *, limit=None) -> list:
+            return []
+
+        def get_monthly_summary(
+            self,
+            start_date: str | None = None,
+            end_date: str | None = None,
+        ) -> list:
+            return []
+
+    class _Context(tk.Tk):
+        def __init__(self) -> None:
+            super().__init__()
+            self.withdraw()
+            self.controller = _Controller()
+
+    context = _Context()
+    try:
+        parent = ttk.Frame(context)
+        parent.grid()
+        bindings = build_analytics_tab(parent, context)
+        context.update()
+
+        bindings.period_from_entry.delete(0, tk.END)
+        bindings.period_from_entry.insert(0, "2026-01-01")
+        bindings.period_to_entry.delete(0, tk.END)
+        bindings.period_to_entry.insert(0, "2026-01-31")
+
+        refresh_button = next(
+            child
+            for child in parent.winfo_children()[0].winfo_children()
+            if isinstance(child, ttk.Button) and child.cget("text") == "Refresh"
+        )
+        refresh_button.invoke()
+        context.update()
+
+        assert context.controller.total_balance_dates[-1] == "2026-01-31"
+        assert bindings.net_worth_label.cget("text") == "Net worth:  1,234 KZT"
+    finally:
+        context.destroy()

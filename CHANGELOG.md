@@ -7,6 +7,34 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.8.2] - 2026-03-29
+
+### Added
+
+- JSON full backup now includes `budgets` alongside records, mandatory expenses, distribution structure, and frozen snapshots
+- `FinanceService` / `BudgetService` / `FinancialController` now expose `replace_budgets(...)` for full-backup restore flows
+
+### Changed
+
+- Full-backup import and JSON -> SQLite migration now restore budgets in addition to distribution data
+- Startup maintenance was split from repository bootstrap so the GUI can defer heavy post-startup work until after the main window appears
+- `FinancialApp` now builds tabs lazily and runs deferred startup sync after the first UI paint, reducing startup blocking
+- Operations and Settings refresh paths now also trigger full cross-tab refresh where needed
+- Analytics Dashboard net worth now respects the selected period end date (`To`) instead of always using the current balance
+- `backup.py` loads budget/distribution services lazily to reduce import-time coupling
+
+### Tests
+
+- Added coverage for budget export/import in full backup, budget restore in JSON -> SQLite migration, runtime JSON restore, and deferred startup maintenance paths
+
+### Docs
+
+- Updated `README.md` and `README_EN.md` for budgets in full backup, deferred startup maintenance, Analytics Dashboard date semantics, and the expanded import/export API
+
+No breaking changes.
+
+---
+
 ## [1.8.1] - 2026-03-24
 
 ### Fixed

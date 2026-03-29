@@ -189,6 +189,34 @@ def test_parse_import_file_reads_distribution_structure_from_json(tmp_path: Path
     assert parsed.distribution_subitems[0]["name"] == "BTC"
 
 
+def test_parse_import_file_reads_budgets_from_json(tmp_path: Path) -> None:
+    payload = {
+        "wallets": [],
+        "records": [],
+        "mandatory_expenses": [],
+        "budgets": [
+            {
+                "id": 1,
+                "category": "Food",
+                "start_date": "2026-03-01",
+                "end_date": "2026-03-31",
+                "limit_kzt": 1500.0,
+                "limit_kzt_minor": 150000,
+                "include_mandatory": True,
+            }
+        ],
+        "transfers": [],
+    }
+    json_path = tmp_path / "payload.json"
+    json_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    parsed = import_parser.parse_import_file(str(json_path))
+
+    assert len(parsed.budgets) == 1
+    assert parsed.budgets[0]["category"] == "Food"
+    assert parsed.budgets[0]["include_mandatory"] is True
+
+
 def test_parse_transfer_row_supports_legacy_policy() -> None:
     records, transfer, next_transfer_id, error = import_parser.parse_transfer_row(
         {

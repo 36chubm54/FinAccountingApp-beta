@@ -538,6 +538,50 @@ def test_import_service_json_backup_restores_distribution_structure() -> None:
     assert subitems_arg[1][0].name == "BTC"
 
 
+def test_import_service_json_backup_restores_budgets() -> None:
+    finance_service = _finance_mock()
+    payload = ParsedImportData(
+        path="data_backup.json",
+        file_type="json",
+        rows=[],
+        budgets=[
+            {
+                "id": 1,
+                "category": "Food",
+                "start_date": "2026-03-01",
+                "end_date": "2026-03-31",
+                "limit_kzt": 1500.0,
+                "limit_kzt_minor": 150000,
+                "include_mandatory": True,
+            }
+        ],
+        wallets=[
+            {
+                "id": 1,
+                "name": "Main",
+                "currency": "KZT",
+                "initial_balance": 10.0,
+                "system": True,
+                "allow_negative": False,
+                "is_active": True,
+            }
+        ],
+        initial_balance=10.0,
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        summary = ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file(
+            "data_backup.json"
+        )
+
+    assert summary == ImportResult(imported=0, skipped=0, errors=tuple())
+    finance_service.replace_budgets.assert_called_once()
+    budgets_arg = finance_service.replace_budgets.call_args.args[0]
+    assert len(budgets_arg) == 1
+    assert budgets_arg[0].category == "Food"
+    assert budgets_arg[0].include_mandatory is True
+
+
 def test_import_service_full_backup_rejects_invalid_distribution_structure() -> None:
     finance_service = _finance_mock()
     payload = ParsedImportData(

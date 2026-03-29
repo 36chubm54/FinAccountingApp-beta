@@ -7,7 +7,6 @@ from datetime import datetime
 from pathlib import Path
 
 from infrastructure.sqlite_repository import SQLiteRecordRepository
-from services.distribution_service import DistributionService
 from utils.backup_utils import export_full_backup_to_json
 
 logger = logging.getLogger(__name__)
@@ -68,8 +67,12 @@ def export_to_json(
     *,
     autofreeze_closed_months: bool = True,
 ) -> None:
+    from services.budget_service import BudgetService
+    from services.distribution_service import DistributionService
+
     sqlite_repo = SQLiteRecordRepository(sqlite_path, schema_path=schema_path)
     try:
+        budget_service = BudgetService(sqlite_repo)
         distribution_service = DistributionService(sqlite_repo)
         if autofreeze_closed_months:
             distribution_service.freeze_closed_months()
@@ -83,6 +86,7 @@ def export_to_json(
             wallets=wallets,
             records=records,
             mandatory_expenses=mandatory_expenses,
+            budgets=budget_service.get_budgets(),
             distribution_items=distribution_items,
             distribution_subitems=[
                 subitem

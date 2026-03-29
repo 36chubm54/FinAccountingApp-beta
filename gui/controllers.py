@@ -42,6 +42,7 @@ from app.use_cases import (
     UpdateDistributionSubitemPct,
 )
 from domain.audit import AuditReport
+from domain.budget import Budget
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
 from domain.records import MandatoryExpenseRecord, Record
@@ -66,7 +67,6 @@ from services.audit_service import AuditService
 from services.balance_service import BalanceService, CashflowResult, WalletBalance
 from services.budget_service import BudgetService
 from services.distribution_service import DistributionService
-from services.import_service import ImportService
 from services.metrics_service import MetricsService
 from services.timeline_service import TimelineService
 from utils.money import to_money_float
@@ -82,8 +82,9 @@ class FinancialController:
         self._distribution_service_instance: DistributionService | None = None
         self.supports_bulk_import_replace = True
 
-    def build_record_list_items(self) -> list[RecordListItem]:
-        records = self._repository.load_all()
+    def build_record_list_items(self, records: list[Record] | None = None) -> list[RecordListItem]:
+        if records is None:
+            records = self._repository.load_all()
         return build_list_items(records)
 
     def delete_record(self, repository_index: int) -> bool:
@@ -444,6 +445,9 @@ class FinancialController:
             transfers=transfers,
         )
 
+    def replace_budgets(self, budgets: list[Budget]) -> None:
+        self._budget_service().replace_budgets(budgets)
+
     def run_import_transaction(self, operation):
         return run_import_op(self._repository, operation, logger)
 
@@ -461,12 +465,16 @@ class FinancialController:
     ) -> ImportResult:
         if fmt not in {"CSV", "XLSX", "JSON"}:
             raise ValueError(f"Unsupported format: {fmt}")
+        from services.import_service import ImportService
+
         service = ImportService(self, policy=policy)
         return service.import_file(filepath, force=force, dry_run=dry_run)
 
     def import_mandatory(self, fmt: str, filepath: str) -> ImportResult:
         if fmt not in {"CSV", "XLSX", "JSON"}:
             raise ValueError(f"Unsupported format: {fmt}")
+        from services.import_service import ImportService
+
         return ImportService(self, policy=ImportPolicy.FULL_BACKUP).import_mandatory_file(filepath)
 
     def run_audit(self) -> AuditReport:

@@ -8,6 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from domain.budget import Budget
 from domain.distribution import DistributionItem, DistributionSubitem, FrozenDistributionRow
 from domain.records import MandatoryExpenseRecord, Record
 from domain.wallets import Wallet
@@ -67,6 +68,7 @@ def _validate_source_integrity(
     records: list[Record],
     transfers: list,
     mandatory_expenses: list[MandatoryExpenseRecord],
+    budgets: list[Budget],
     distribution_items: list[DistributionItem],
     distribution_subitems: list[DistributionSubitem],
     distribution_snapshots: list[FrozenDistributionRow],
@@ -117,6 +119,25 @@ def _validate_source_integrity(
     for expense in mandatory_expenses:
         _require_existing_wallet(wallets, int(expense.wallet_id), f"MandatoryExpense #{expense.id}")
 
+    seen_budget_ids: set[int] = set()
+    for budget in budgets:
+        budget_id = int(budget.id)
+        if budget_id <= 0:
+            raise ValueError(f"Budget id must be positive, got {budget.id}")
+        if budget_id in seen_budget_ids:
+            raise ValueError(f"Duplicate budget id: {budget_id}")
+        if not str(budget.category).strip():
+            raise ValueError(f"Budget #{budget_id} has empty category")
+        if not str(budget.start_date).strip() or not str(budget.end_date).strip():
+            raise ValueError(f"Budget #{budget_id} is missing start_date/end_date")
+        if str(budget.start_date) > str(budget.end_date):
+            raise ValueError(
+                f"Budget #{budget_id} has invalid period: {budget.start_date} > {budget.end_date}"
+            )
+        if int(budget.limit_kzt_minor) <= 0:
+            raise ValueError(f"Budget #{budget_id} must have positive limit_kzt_minor")
+        seen_budget_ids.add(budget_id)
+
     item_ids = {int(item.id) for item in distribution_items}
     for subitem in distribution_subitems:
         if int(subitem.item_id) not in item_ids:
@@ -140,6 +161,7 @@ def _check_target_is_empty(sqlite_storage: SQLiteStorage) -> None:
         "transfers",
         "records",
         "mandatory_expenses",
+        "budgets",
         "distribution_items",
         "distribution_subitems",
         "distribution_snapshots",
@@ -159,6 +181,7 @@ def _has_any_data(sqlite_storage: SQLiteStorage) -> bool:
         "transfers",
         "records",
         "mandatory_expenses",
+        "budgets",
         "distribution_items",
         "distribution_subitems",
         "distribution_snapshots",
@@ -551,6 +574,43 @@ def _insert_mandatory_expenses(
     return mapping
 
 
+def _insert_budgets(sqlite_storage: SQLiteStorage, budgets: list[Budget]) -> None:
+    preserve_ids = _all_positive_unique_ids(budgets, lambda budget: budget.id)
+    for budget in budgets:
+        payload = (
+            str(budget.category),
+            str(budget.start_date),
+            str(budget.end_date),
+            to_money_float(budget.limit_kzt),
+            int(budget.limit_kzt_minor),
+            int(bool(budget.include_mandatory)),
+        )
+        if preserve_ids:
+            sqlite_storage.execute(
+                """
+                INSERT INTO budgets (
+                    id, category, start_date, end_date,
+                    limit_kzt, limit_kzt_minor, include_mandatory
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (int(budget.id), *payload),
+            )
+        else:
+            sqlite_storage.execute(
+                """
+                INSERT INTO budgets (
+                    category, start_date, end_date,
+                    limit_kzt, limit_kzt_minor, include_mandatory
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                payload,
+            )
+    if preserve_ids and budgets:
+        _set_sqlite_sequence(sqlite_storage, "budgets")
+
+
 def _counts_from_sqlite(sqlite_storage: SQLiteStorage) -> dict[str, int]:
     return {
         "wallets": int(sqlite_storage.query_one("SELECT COUNT(*) FROM wallets")[0]),
@@ -559,6 +619,7 @@ def _counts_from_sqlite(sqlite_storage: SQLiteStorage) -> dict[str, int]:
         "mandatory_expenses": int(
             sqlite_storage.query_one("SELECT COUNT(*) FROM mandatory_expenses")[0]
         ),
+        "budgets": int(sqlite_storage.query_one("SELECT COUNT(*) FROM budgets")[0]),
         "distribution_items": int(
             sqlite_storage.query_one("SELECT COUNT(*) FROM distribution_items")[0]
         ),
@@ -627,6 +688,7 @@ def validate_migration(
     records: list[Record],
     transfers: list,
     mandatory_expenses: list[MandatoryExpenseRecord],
+    budgets: list[Budget],
     distribution_items: list[DistributionItem],
     distribution_subitems: list[DistributionSubitem],
     distribution_snapshots: list[FrozenDistributionRow],
@@ -642,6 +704,7 @@ def validate_migration(
         "transfers": len(transfers),
         "records": len(records),
         "mandatory_expenses": len(mandatory_expenses),
+        "budgets": len(budgets),
         "distribution_items": len(distribution_items),
         "distribution_subitems": len(distribution_subitems),
         "distribution_snapshots": len(distribution_snapshots),
@@ -686,6 +749,8 @@ def validate_migration(
         errors.append("Transfer id mapping is incomplete")
     if len(mandatory_map) != len(mandatory_expenses):
         errors.append("Mandatory expense id mapping is incomplete")
+    if _budget_signatures_from_json(budgets) != _budget_signatures_from_sqlite(sqlite_storage):
+        errors.append("Budget payload mismatch")
     if _distribution_structure_signatures_from_json(
         distribution_items,
         distribution_subitems,
@@ -705,6 +770,7 @@ def _validate_existing_target_equivalence(
     records: list[Record],
     transfers: list,
     mandatory_expenses: list[MandatoryExpenseRecord],
+    budgets: list[Budget],
     distribution_items: list[DistributionItem],
     distribution_subitems: list[DistributionSubitem],
     distribution_snapshots: list[FrozenDistributionRow],
@@ -716,6 +782,7 @@ def _validate_existing_target_equivalence(
         records=records,
         transfers=transfers,
         mandatory_expenses=mandatory_expenses,
+        budgets=budgets,
         distribution_items=distribution_items,
         distribution_subitems=distribution_subitems,
         distribution_snapshots=distribution_snapshots,
@@ -724,6 +791,43 @@ def _validate_existing_target_equivalence(
         transfer_map={int(transfer.id): int(transfer.id) for transfer in transfers},
         mandatory_map={int(expense.id): int(expense.id) for expense in mandatory_expenses},
     )
+
+
+def _budget_signatures_from_json(budgets: list[Budget]) -> list[tuple]:
+    return sorted(
+        (
+            int(budget.id),
+            str(budget.category),
+            str(budget.start_date),
+            str(budget.end_date),
+            float(budget.limit_kzt),
+            int(budget.limit_kzt_minor),
+            bool(budget.include_mandatory),
+        )
+        for budget in budgets
+    )
+
+
+def _budget_signatures_from_sqlite(sqlite_storage: SQLiteStorage) -> list[tuple]:
+    rows = sqlite_storage.query_all(
+        """
+        SELECT id, category, start_date, end_date, limit_kzt, limit_kzt_minor, include_mandatory
+        FROM budgets
+        ORDER BY id
+        """
+    )
+    return [
+        (
+            int(row[0]),
+            str(row[1]),
+            str(row[2]),
+            str(row[3]),
+            float(row[4]),
+            int(row[5]),
+            bool(row[6]),
+        )
+        for row in rows
+    ]
 
 
 def _distribution_snapshot_signatures_from_json(
@@ -977,6 +1081,47 @@ def _load_distribution_snapshots_from_json(path: str) -> list[FrozenDistribution
     return snapshots
 
 
+def _load_budgets_from_json(path: str) -> list[Budget]:
+    with open(path, encoding="utf-8") as fp:
+        payload = json.load(fp)
+    payload = unwrap_backup_payload(payload, force=True)
+    raw_budgets = payload.get("budgets", [])
+    if not isinstance(raw_budgets, list):
+        raw_budgets = []
+    budgets: list[Budget] = []
+    seen_ids: set[int] = set()
+    for item in raw_budgets:
+        if not isinstance(item, dict):
+            raise ValueError("Invalid budget payload: expected object")
+        budget_id = int(item.get("id", 0) or 0)
+        if budget_id <= 0:
+            raise ValueError(f"Invalid budget id: {item.get('id')!r}")
+        if budget_id in seen_ids:
+            raise ValueError(f"Duplicate budget id: {budget_id}")
+        category = str(item.get("category", "") or "").strip()
+        start_date = str(item.get("start_date", "") or "").strip()
+        end_date = str(item.get("end_date", "") or "").strip()
+        if not category:
+            raise ValueError(f"Budget #{budget_id} has empty category")
+        if not start_date or not end_date:
+            raise ValueError(f"Budget #{budget_id} is missing start_date/end_date")
+        limit_kzt = to_money_float(item.get("limit_kzt", 0.0) or 0.0)
+        limit_kzt_minor = int(item.get("limit_kzt_minor", 0) or 0)
+        budgets.append(
+            Budget(
+                id=budget_id,
+                category=category,
+                start_date=start_date,
+                end_date=end_date,
+                limit_kzt=limit_kzt,
+                limit_kzt_minor=limit_kzt_minor,
+                include_mandatory=bool(item.get("include_mandatory", False)),
+            )
+        )
+        seen_ids.add(budget_id)
+    return budgets
+
+
 def _load_distribution_structure_from_json(
     path: str,
 ) -> tuple[list[DistributionItem], list[DistributionSubitem]]:
@@ -1055,6 +1200,7 @@ def _load_source_dataset(
     list[Record],
     list,
     list[MandatoryExpenseRecord],
+    list[Budget],
     list[DistributionItem],
     list[DistributionSubitem],
     list[FrozenDistributionRow],
@@ -1080,6 +1226,7 @@ def _load_source_dataset(
     finally:
         os.unlink(temp_path)
 
+    budgets = _load_budgets_from_json(json_path)
     distribution_items, distribution_subitems = _load_distribution_structure_from_json(json_path)
     distribution_snapshots = _load_distribution_snapshots_from_json(json_path)
     return (
@@ -1087,6 +1234,7 @@ def _load_source_dataset(
         records,
         transfers,
         mandatory_expenses,
+        budgets,
         distribution_items,
         distribution_subitems,
         distribution_snapshots,
@@ -1109,6 +1257,7 @@ def run_dry_run(args: argparse.Namespace) -> int:
             records,
             transfers,
             mandatory_expenses,
+            budgets,
             distribution_items,
             distribution_subitems,
             distribution_snapshots,
@@ -1119,6 +1268,7 @@ def run_dry_run(args: argparse.Namespace) -> int:
             records,
             transfers,
             mandatory_expenses,
+            budgets,
             distribution_items,
             distribution_subitems,
             distribution_snapshots,
@@ -1129,6 +1279,7 @@ def run_dry_run(args: argparse.Namespace) -> int:
         print(f"  transfers: {len(transfers)}")
         print(f"  records: {len(records)}")
         print(f"  mandatory_expenses: {len(mandatory_expenses)}")
+        print(f"  budgets: {len(budgets)}")
         print(f"  distribution_items: {len(distribution_items)}")
         print(f"  distribution_subitems: {len(distribution_subitems)}")
         print(f"  distribution_snapshots: {len(distribution_snapshots)}")
@@ -1156,6 +1307,7 @@ def run_migration(args: argparse.Namespace) -> int:
             records,
             transfers,
             mandatory_expenses,
+            budgets,
             distribution_items,
             distribution_subitems,
             distribution_snapshots,
@@ -1166,6 +1318,7 @@ def run_migration(args: argparse.Namespace) -> int:
             records,
             transfers,
             mandatory_expenses,
+            budgets,
             distribution_items,
             distribution_subitems,
             distribution_snapshots,
@@ -1180,6 +1333,7 @@ def run_migration(args: argparse.Namespace) -> int:
                 records=records,
                 transfers=transfers,
                 mandatory_expenses=mandatory_expenses,
+                budgets=budgets,
                 distribution_items=distribution_items,
                 distribution_subitems=distribution_subitems,
                 distribution_snapshots=distribution_snapshots,
@@ -1195,17 +1349,19 @@ def run_migration(args: argparse.Namespace) -> int:
         sqlite_storage.begin()
         print("[tx] Transaction started")
 
-        print("[1/6] Migrating wallets...")
+        print("[1/7] Migrating wallets...")
         wallet_map = _insert_wallets(sqlite_storage, wallets)
-        print("[2/6] Migrating transfers...")
+        print("[2/7] Migrating transfers...")
         transfer_map = _insert_transfers(sqlite_storage, transfers, wallet_map)
-        print("[3/6] Migrating records...")
+        print("[3/7] Migrating records...")
         record_map = _insert_records(sqlite_storage, records, wallet_map, transfer_map)
-        print("[4/6] Migrating mandatory_expenses...")
+        print("[4/7] Migrating mandatory_expenses...")
         mandatory_map = _insert_mandatory_expenses(sqlite_storage, mandatory_expenses, wallet_map)
-        print("[5/6] Migrating distribution structure...")
+        print("[5/7] Migrating budgets...")
+        _insert_budgets(sqlite_storage, budgets)
+        print("[6/7] Migrating distribution structure...")
         _insert_distribution_structure(sqlite_storage, distribution_items, distribution_subitems)
-        print("[6/6] Migrating distribution_snapshots...")
+        print("[7/7] Migrating distribution_snapshots...")
         _insert_distribution_snapshots(sqlite_storage, distribution_snapshots)
 
         valid, errors = validate_migration(
@@ -1214,6 +1370,7 @@ def run_migration(args: argparse.Namespace) -> int:
             records=records,
             transfers=transfers,
             mandatory_expenses=mandatory_expenses,
+            budgets=budgets,
             distribution_items=distribution_items,
             distribution_subitems=distribution_subitems,
             distribution_snapshots=distribution_snapshots,

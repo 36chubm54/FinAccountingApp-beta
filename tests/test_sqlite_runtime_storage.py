@@ -97,9 +97,12 @@ def _export_fixture(source_repo: SQLiteRecordRepository, path: Path, fmt: str) -
         source_snapshots = []
         source_items = []
         source_subitems = []
+        source_budgets = []
         if hasattr(source_repo, "db_path"):
+            from services.budget_service import BudgetService
             from services.distribution_service import DistributionService
 
+            source_budgets = BudgetService(source_repo).get_budgets()
             distribution_service = DistributionService(source_repo)
             source_snapshots = distribution_service.get_frozen_rows()
             source_items, source_subitems_by_item = distribution_service.export_structure()
@@ -113,6 +116,7 @@ def _export_fixture(source_repo: SQLiteRecordRepository, path: Path, fmt: str) -
             wallets=source_repo.load_wallets(),
             records=records,
             mandatory_expenses=source_repo.load_mandatory_expenses(),
+            budgets=source_budgets,
             distribution_items=source_items,
             distribution_subitems=source_subitems,
             distribution_snapshots=source_snapshots,
@@ -252,6 +256,41 @@ def test_sqlite_json_full_backup_restores_distribution_snapshots(tmp_path: Path)
         restored_rows = target_controller.get_frozen_distribution_rows()
         assert len(restored_rows) == 1
         assert restored_rows[0].auto_fixed is False
+    finally:
+        source_repo.close()
+        target_repo.close()
+
+
+def test_sqlite_json_full_backup_restores_budgets(tmp_path: Path) -> None:
+    source_repo, source_controller = _make_controller(tmp_path / "source_budget.db")
+    target_repo = _make_repo(tmp_path / "target_budget.db")
+    target_controller = FinancialController(target_repo, CurrencyService())
+    export_path = tmp_path / "budget_import.json"
+
+    try:
+        source_controller.create_budget(
+            category="Food",
+            start_date="2026-03-01",
+            end_date="2026-03-31",
+            limit_kzt=1500.0,
+            include_mandatory=True,
+        )
+
+        _export_fixture(source_repo, export_path, "json")
+
+        result = target_controller.import_records(
+            "JSON",
+            str(export_path),
+            ImportPolicy.FULL_BACKUP,
+            force=True,
+        )
+
+        assert result.imported == 5
+        restored_budgets = target_controller.get_budgets()
+        assert len(restored_budgets) == 1
+        assert restored_budgets[0].category == "Food"
+        assert restored_budgets[0].include_mandatory is True
+        assert restored_budgets[0].limit_kzt_minor == 150000
     finally:
         source_repo.close()
         target_repo.close()

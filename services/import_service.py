@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from app.finance_service import FinanceService
+from domain.budget import Budget
 from domain.distribution import DistributionItem, DistributionSubitem, FrozenDistributionRow
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
@@ -38,6 +39,7 @@ class PreparedImportPayload:
     wallets: list[Wallet]
     parsed_records: list[Record]
     parsed_mandatory_templates: list[MandatoryExpenseRecord]
+    budgets: list[Budget]
     distribution_items: list[DistributionItem]
     distribution_subitems_by_item: dict[int, list[DistributionSubitem]]
     frozen_distribution_rows: list[FrozenDistributionRow]
@@ -113,6 +115,7 @@ class ImportService:
                 strict=strict_distribution,
             )
         )
+        budgets = self._budgets_from_payload(parsed.budgets, strict=strict_distribution)
         frozen_distribution_rows = self._frozen_rows_from_payload(parsed.distribution_snapshots)
         errors: list[str] = []
         skipped = 0
@@ -210,6 +213,7 @@ class ImportService:
             wallets=wallets,
             parsed_records=parsed_records,
             parsed_mandatory_templates=parsed_mandatory_templates,
+            budgets=budgets,
             distribution_items=distribution_items,
             distribution_subitems_by_item=distribution_subitems_by_item,
             frozen_distribution_rows=frozen_distribution_rows,
@@ -226,6 +230,7 @@ class ImportService:
         imported_wallets = len(wallets)
         parsed_records = list(prepared.parsed_records)
         parsed_mandatory_templates = list(prepared.parsed_mandatory_templates)
+        budgets = list(prepared.budgets)
         distribution_items = list(prepared.distribution_items)
         distribution_subitems_by_item = {
             int(item_id): list(subitems)
@@ -241,6 +246,9 @@ class ImportService:
             imported == 0
             and not wallets
             and not parsed_mandatory_templates
+            and not budgets
+            and not distribution_items
+            and not frozen_distribution_rows
             and not raw_transfer_ops
         ):
             return ImportResult(imported=0, skipped=skipped, errors=errors)
@@ -280,6 +288,7 @@ class ImportService:
                 distribution_items,
                 distribution_subitems_by_item,
             )
+            self._replace_budgets_if_supported(parsed.file_type, budgets)
             self._replace_distribution_snapshots_if_supported(
                 parsed.file_type,
                 frozen_distribution_rows,
@@ -316,6 +325,7 @@ class ImportService:
             distribution_items,
             distribution_subitems_by_item,
         )
+        self._replace_budgets_if_supported(parsed.file_type, budgets)
         self._replace_distribution_snapshots_if_supported(
             parsed.file_type,
             frozen_distribution_rows,
@@ -341,6 +351,13 @@ class ImportService:
         replace_snapshots = getattr(self._finance_service, "replace_distribution_snapshots", None)
         if callable(replace_snapshots):
             replace_snapshots(rows)
+
+    def _replace_budgets_if_supported(self, file_type: str, budgets: list[Budget]) -> None:
+        if file_type != "json":
+            return
+        replace_budgets = getattr(self._finance_service, "replace_budgets", None)
+        if callable(replace_budgets):
+            replace_budgets(budgets)
 
     def _replace_distribution_structure_if_supported(
         self,
@@ -545,6 +562,65 @@ class ImportService:
                 )
             )
         return frozen_rows
+
+    def _budgets_from_payload(
+        self,
+        payloads: list[dict[str, Any]],
+        *,
+        strict: bool = False,
+    ) -> list[Budget]:
+        budgets: list[Budget] = []
+        seen_ids: set[int] = set()
+        for item in payloads:
+            if not isinstance(item, dict):
+                if strict:
+                    raise ValueError("Invalid budget payload: expected object")
+                continue
+            budget_id = parse_optional_strict_int(item.get("id")) or 0
+            if budget_id <= 0:
+                if strict:
+                    raise ValueError(f"Invalid budget id: {item.get('id')!r}")
+                continue
+            if budget_id in seen_ids:
+                if strict:
+                    raise ValueError(f"Duplicate budget id: {budget_id}")
+                continue
+            category = str(item.get("category", "") or "").strip()
+            start_date = str(item.get("start_date", "") or "").strip()
+            end_date = str(item.get("end_date", "") or "").strip()
+            limit_kzt = as_float(item.get("limit_kzt"), None)
+            limit_kzt_minor = parse_optional_strict_int(item.get("limit_kzt_minor"))
+            if not category:
+                if strict:
+                    raise ValueError(f"Budget #{budget_id} has empty category")
+                continue
+            if not start_date or not end_date:
+                if strict:
+                    raise ValueError(f"Budget #{budget_id} is missing start_date/end_date")
+                continue
+            if limit_kzt is None:
+                if strict:
+                    raise ValueError(f"Budget #{budget_id} has invalid limit_kzt")
+                continue
+            if limit_kzt_minor is None:
+                limit_kzt_minor = int(round(to_money_float(limit_kzt) * 100))
+            if limit_kzt_minor <= 0:
+                if strict:
+                    raise ValueError(f"Budget #{budget_id} must have positive limit_kzt_minor")
+                continue
+            seen_ids.add(budget_id)
+            budgets.append(
+                Budget(
+                    id=budget_id,
+                    category=category,
+                    start_date=start_date,
+                    end_date=end_date,
+                    limit_kzt=to_money_float(limit_kzt),
+                    limit_kzt_minor=int(limit_kzt_minor),
+                    include_mandatory=bool(item.get("include_mandatory", False)),
+                )
+            )
+        return budgets
 
     def _distribution_structure_from_payload(
         self,
@@ -959,6 +1035,7 @@ class ImportService:
             file_type=parsed.file_type,
             rows=rows,
             mandatory_rows=mandatory_rows,
+            budgets=list(parsed.budgets),
             distribution_items=list(parsed.distribution_items),
             distribution_subitems=list(parsed.distribution_subitems),
             distribution_snapshots=list(parsed.distribution_snapshots),

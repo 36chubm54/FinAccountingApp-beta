@@ -29,6 +29,8 @@ class SettingsTabContext(Protocol):
 
     def _refresh_budgets(self) -> None: ...
 
+    def _refresh_all(self) -> None: ...
+
     def _run_background(
         self,
         task: Callable[[], Any],
@@ -192,7 +194,6 @@ def build_settings_tab(
             wallet_initial_entry.delete(0, tk.END)
             wallet_initial_entry.insert(0, "0")
             refresh_wallets()
-            context._refresh_charts()
         except Exception as error:
             messagebox.showerror("Error", f"Failed to create wallet: {str(error)}")
 
@@ -673,6 +674,7 @@ def build_settings_tab(
                 context._refresh_list()
                 context._refresh_charts()
                 context._refresh_budgets()
+                context._refresh_all()
             except ValueError as error:
                 messagebox.showerror("Error", f"Invalid date: {str(error)}. Use YYYY-MM-DD.")
 
@@ -698,8 +700,6 @@ def build_settings_tab(
         if context.controller.delete_mandatory_expense(index):
             messagebox.showinfo("Success", "Mandatory expense deleted.")
             refresh_mandatory()
-            context._refresh_charts()
-            context._refresh_budgets()
         else:
             messagebox.showerror("Error", "Failed to delete mandatory expense.")
 
@@ -712,8 +712,6 @@ def build_settings_tab(
         context.controller.delete_all_mandatory_expenses()
         messagebox.showinfo("Success", "All mandatory expenses deleted.")
         refresh_mandatory()
-        context._refresh_charts()
-        context._refresh_budgets()
 
     actions = ttk.Frame(mand_frame)
     actions.grid(row=1, column=0, columnspan=2, sticky="ew", padx=pad_x, pady=(0, pad_y))
@@ -771,8 +769,6 @@ def build_settings_tab(
                 "\nAll existing mandatory expenses have been replaced." + details,
             )
             refresh_mandatory()
-            context._refresh_charts()
-            context._refresh_budgets()
 
         def on_error(exc: BaseException) -> None:
             if isinstance(exc, FileNotFoundError):
@@ -835,7 +831,8 @@ def build_settings_tab(
 
         if not messagebox.askyesno(
             "Confirm Backup Import",
-            "This will replace all wallets, records, transfers and mandatory expenses. Continue?",
+            "This will replace all wallets, records, transfers, mandatory expenses, budgets, "
+            "and distribution data. Continue?",
         ):
             return
 
@@ -859,6 +856,7 @@ def build_settings_tab(
             context._refresh_list()
             context._refresh_charts()
             context._refresh_budgets()
+            context._refresh_all()
 
         def run_import(force: bool) -> None:
             def current_task() -> ImportResult:
@@ -902,6 +900,7 @@ def build_settings_tab(
         wallets = context.repository.load_wallets()
         records = context.repository.load_all()
         mandatory_expenses = context.repository.load_mandatory_expenses()
+        budgets = context.controller.get_budgets()
         distribution_items, distribution_subitems_by_item = (
             context.controller.export_distribution_structure()
         )
@@ -921,6 +920,7 @@ def build_settings_tab(
                 wallets=wallets,
                 records=records,
                 mandatory_expenses=mandatory_expenses,
+                budgets=budgets,
                 distribution_items=distribution_items,
                 distribution_subitems=distribution_subitems,
                 distribution_snapshots=distribution_snapshots,

@@ -27,6 +27,7 @@ class ParsedImportData:
     file_type: str
     rows: list[dict[str, Any]] = field(default_factory=list)
     mandatory_rows: list[dict[str, Any]] = field(default_factory=list)
+    budgets: list[dict[str, Any]] = field(default_factory=list)
     distribution_items: list[dict[str, Any]] = field(default_factory=list)
     distribution_subitems: list[dict[str, Any]] = field(default_factory=list)
     distribution_snapshots: list[dict[str, Any]] = field(default_factory=list)
@@ -270,6 +271,9 @@ def _read_json_payload(path: str, *, force: bool = False) -> ParsedImportData:
     mandatory = payload.get("mandatory_expenses", [])
     if not isinstance(mandatory, list):
         mandatory = []
+    budgets = payload.get("budgets", [])
+    if not isinstance(budgets, list):
+        budgets = []
     distribution_items = payload.get("distribution_items", [])
     if not isinstance(distribution_items, list):
         distribution_items = []
@@ -317,6 +321,7 @@ def _read_json_payload(path: str, *, force: bool = False) -> ParsedImportData:
         file_type="json",
         rows=rows,
         mandatory_rows=mandatory_rows,
+        budgets=[item for item in budgets if isinstance(item, dict)],
         distribution_items=[item for item in distribution_items if isinstance(item, dict)],
         distribution_subitems=[item for item in distribution_subitems if isinstance(item, dict)],
         distribution_snapshots=[item for item in distribution_snapshots if isinstance(item, dict)],

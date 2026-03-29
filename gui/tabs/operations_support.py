@@ -19,6 +19,7 @@ def refresh_operation_views(context) -> None:
     context._refresh_charts()
     context._refresh_wallets()
     context._refresh_budgets()
+    context._refresh_all()
 
 
 def show_import_preview_dialog(

@@ -20,8 +20,6 @@ logger = logging.getLogger(__name__)
 class DistributionTabContext(Protocol):
     controller: Any
 
-    def _refresh_charts(self) -> None: ...
-
 
 @dataclass(slots=True)
 class DistributionTabBindings:

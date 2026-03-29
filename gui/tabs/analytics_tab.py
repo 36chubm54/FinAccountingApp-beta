@@ -404,7 +404,7 @@ def build_analytics_tab(
             start = parsed_start.isoformat()
             end = parsed_end.isoformat()
 
-            net_worth = float(context.controller.get_total_balance())
+            net_worth = float(context.controller.get_total_balance(date=end))
             savings_rate = float(context.controller.get_savings_rate(start, end))
             burn_rate = float(context.controller.get_burn_rate(start, end))
             year = int(parsed_end.year)

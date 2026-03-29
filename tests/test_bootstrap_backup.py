@@ -76,6 +76,15 @@ def test_export_to_json_from_sqlite(tmp_path) -> None:
         VALUES ('Investments', '', 0, 100.0, 10000, 1)
         """
     )
+    repo.execute(
+        """
+        INSERT INTO budgets (
+            id, category, start_date, end_date,
+            limit_kzt, limit_kzt_minor, include_mandatory
+        )
+        VALUES (1, 'Food', '2020-03-01', '2020-03-31', 300.0, 30000, 1)
+        """
+    )
     repo.commit()
     repo.close()
 
@@ -93,6 +102,8 @@ def test_export_to_json_from_sqlite(tmp_path) -> None:
     assert str(mandatory[0].date) == "2020-03-12"
     assert mandatory[0].auto_pay is True
     payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["budgets"][0]["category"] == "Food"
+    assert payload["budgets"][0]["include_mandatory"] is True
     snapshot = payload["distribution_snapshots"][0]
     assert snapshot["month"] == "2020-02"
     item_keys = [key for key in snapshot["values_by_column"] if key.startswith("item_")]

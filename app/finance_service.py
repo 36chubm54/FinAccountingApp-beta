@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol, TypeVar
 
+from domain.budget import Budget
 from domain.wallets import Wallet
 
 T = TypeVar("T")
@@ -93,6 +94,8 @@ class FinanceService(Protocol):
     def reset_mandatory_for_import(self) -> None: ...
 
     def reset_all_for_import(self, *, wallets: list[Wallet], initial_balance: float) -> None: ...
+
+    def replace_budgets(self, budgets: list[Budget]) -> None: ...
 
     def run_import_transaction(self, operation: Callable[[], T]) -> T: ...
 
