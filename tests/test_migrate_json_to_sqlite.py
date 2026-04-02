@@ -5,6 +5,7 @@ from argparse import Namespace
 from pathlib import Path
 
 from domain.budget import Budget
+from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
 from domain.distribution import FrozenDistributionRow
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
 from domain.transfers import Transfer
@@ -370,3 +371,88 @@ def test_migration_rejects_invalid_distribution_structure_in_backup(tmp_path) ->
 
     code = run_migration(args)
     assert code == 1
+
+
+def test_migration_moves_debts_and_debt_payments_from_full_backup_json(tmp_path) -> None:
+    json_path = tmp_path / "backup_with_debts.json"
+    sqlite_path = tmp_path / "records.db"
+    schema_path = Path(__file__).resolve().parents[1] / "db" / "schema.sql"
+
+    debt = Debt(
+        id=1,
+        contact_name="Alex",
+        kind=DebtKind.DEBT,
+        total_amount_minor=10000,
+        remaining_amount_minor=7500,
+        currency="KZT",
+        interest_rate=0.0,
+        status=DebtStatus.OPEN,
+        created_at="2026-03-01",
+        closed_at=None,
+    )
+    record = ExpenseRecord(
+        id=10,
+        date="2026-03-02",
+        wallet_id=1,
+        related_debt_id=1,
+        amount_original=25.0,
+        currency="KZT",
+        rate_at_operation=1.0,
+        amount_kzt=25.0,
+        category="Debt payment",
+    )
+    debt_payment = DebtPayment(
+        id=5,
+        debt_id=1,
+        record_id=10,
+        operation_type=DebtOperationType.DEBT_REPAY,
+        principal_paid_minor=2500,
+        is_write_off=False,
+        payment_date="2026-03-02",
+    )
+
+    export_full_backup_to_json(
+        str(json_path),
+        wallets=[
+            Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=1000.0, system=True),
+        ],
+        records=[record],
+        mandatory_expenses=[],
+        debts=[debt],
+        debt_payments=[debt_payment],
+        transfers=[],
+        readonly=False,
+    )
+
+    args = Namespace(
+        json_path=str(json_path),
+        sqlite_path=str(sqlite_path),
+        schema_path=str(schema_path),
+        dry_run=False,
+    )
+
+    code = run_migration(args)
+    assert code == 0
+
+    sqlite_storage = SQLiteStorage(str(sqlite_path))
+    sqlite_storage.initialize_schema(str(schema_path))
+    debt_row = sqlite_storage.query_one(
+        "SELECT contact_name, total_amount_minor, remaining_amount_minor FROM debts WHERE id = 1"
+    )
+    assert debt_row[0] == "Alex"
+    assert debt_row[1] == 10000
+    assert debt_row[2] == 7500
+    payment_row = sqlite_storage.query_one(
+        """
+        SELECT debt_id, record_id, operation_type, principal_paid_minor
+        FROM debt_payments
+        WHERE id = 5
+        """
+    )
+    assert payment_row[0] == 1
+    assert payment_row[1] == 10
+    assert payment_row[2] == "debt_repay"
+    assert payment_row[3] == 2500
+    record_row = sqlite_storage.query_one("SELECT related_debt_id FROM records WHERE id = 10")
+    assert record_row[0] == 1
+    sqlite_storage.close()

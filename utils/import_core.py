@@ -221,6 +221,7 @@ def parse_import_row(
         "date": date_value,
         "wallet_id": wallet_id,
         "transfer_id": None,
+        "related_debt_id": None,
         "amount_original": amount_original_value,
         "currency": currency,
         "rate_at_operation": rate_value,
@@ -228,11 +229,25 @@ def parse_import_row(
         "category": category,
         "description": description,
     }
+    if row_lc.get("id") not in (None, ""):
+        record_id = parse_optional_strict_int(row_lc.get("id"))
+        if record_id is None or record_id <= 0:
+            return None, None, f"{row_label}: invalid id '{row_lc.get('id')}'"
+        common["id"] = record_id
     if row_lc.get("transfer_id") not in (None, ""):
         transfer_id = parse_optional_strict_int(row_lc.get("transfer_id"))
         if transfer_id is None:
             return None, None, f"{row_label}: invalid transfer_id '{row_lc.get('transfer_id')}'"
         common["transfer_id"] = transfer_id if transfer_id > 0 else None
+    if row_lc.get("related_debt_id") not in (None, ""):
+        related_debt_id = parse_optional_strict_int(row_lc.get("related_debt_id"))
+        if related_debt_id is None:
+            return (
+                None,
+                None,
+                f"{row_label}: invalid related_debt_id '{row_lc.get('related_debt_id')}'",
+            )
+        common["related_debt_id"] = related_debt_id if related_debt_id > 0 else None
 
     if row_type == "income":
         return IncomeRecord(**common), None, None

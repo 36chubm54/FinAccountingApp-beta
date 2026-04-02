@@ -81,12 +81,16 @@ def export_to_json(
         records = sqlite_repo.load_all()
         transfers = sqlite_repo.load_transfers()
         mandatory_expenses = sqlite_repo.load_mandatory_expenses()
+        debts = sqlite_repo.load_debts()
+        debt_payments = sqlite_repo.load_debt_payments()
         export_full_backup_to_json(
             json_path,
             wallets=wallets,
             records=records,
             mandatory_expenses=mandatory_expenses,
             budgets=budget_service.get_budgets(),
+            debts=debts,
+            debt_payments=debt_payments,
             distribution_items=distribution_items,
             distribution_subitems=[
                 subitem

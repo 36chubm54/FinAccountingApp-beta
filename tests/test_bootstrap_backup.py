@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from backup import create_backup, export_to_json
+from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
 from domain.records import IncomeRecord, MandatoryExpenseRecord
 from domain.wallets import Wallet
 from infrastructure.repositories import JsonFileRecordRepository
@@ -85,6 +86,30 @@ def test_export_to_json_from_sqlite(tmp_path) -> None:
         VALUES (1, 'Food', '2020-03-01', '2020-03-31', 300.0, 30000, 1)
         """
     )
+    repo.save_debt(
+        Debt(
+            id=1,
+            contact_name="Alice",
+            kind=DebtKind.DEBT,
+            total_amount_minor=50000,
+            remaining_amount_minor=30000,
+            currency="KZT",
+            interest_rate=0.0,
+            status=DebtStatus.OPEN,
+            created_at="2020-03-01",
+        )
+    )
+    repo.save_debt_payment(
+        DebtPayment(
+            id=1,
+            debt_id=1,
+            record_id=1,
+            operation_type=DebtOperationType.DEBT_REPAY,
+            principal_paid_minor=20000,
+            is_write_off=False,
+            payment_date="2020-03-05",
+        )
+    )
     repo.commit()
     repo.close()
 
@@ -104,6 +129,10 @@ def test_export_to_json_from_sqlite(tmp_path) -> None:
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["budgets"][0]["category"] == "Food"
     assert payload["budgets"][0]["include_mandatory"] is True
+    assert payload["debts"][0]["contact_name"] == "Alice"
+    assert payload["debts"][0]["remaining_amount_minor"] == 30000
+    assert payload["debt_payments"][0]["operation_type"] == "debt_repay"
+    assert payload["debt_payments"][0]["record_id"] == 1
     snapshot = payload["distribution_snapshots"][0]
     assert snapshot["month"] == "2020-02"
     item_keys = [key for key in snapshot["values_by_column"] if key.startswith("item_")]

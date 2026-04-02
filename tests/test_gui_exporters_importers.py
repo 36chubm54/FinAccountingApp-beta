@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import time
@@ -5,6 +6,7 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
+from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
 from domain.reports import Report
 from domain.transfers import Transfer
@@ -256,6 +258,128 @@ def test_export_full_backup_preserves_storage_metadata() -> None:
 
         payload = json.loads(json_path.read_text(encoding="utf-8"))
         assert payload["meta"]["storage"] == "sqlite"
+    finally:
+        if json_path.exists():
+            os.unlink(json_path)
+
+
+def test_import_full_backup_exposes_debts_and_payments_without_breaking_legacy_unpack() -> None:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as json_tmp:
+        json_path = Path(json_tmp.name)
+
+    try:
+        debt = Debt(
+            id=1,
+            contact_name="Alice",
+            kind=DebtKind.LOAN,
+            total_amount_minor=100000,
+            remaining_amount_minor=40000,
+            currency="KZT",
+            interest_rate=0.0,
+            status=DebtStatus.OPEN,
+            created_at="2026-04-01",
+        )
+        payment = DebtPayment(
+            id=1,
+            debt_id=1,
+            record_id=1,
+            operation_type=DebtOperationType.LOAN_COLLECT,
+            principal_paid_minor=60000,
+            is_write_off=False,
+            payment_date="2026-04-02",
+        )
+        record = IncomeRecord(
+            id=1,
+            date="2026-04-02",
+            wallet_id=1,
+            related_debt_id=1,
+            amount_original=600.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=600.0,
+            category="Loan payment",
+        )
+
+        exporters.export_full_backup(
+            str(json_path),
+            wallets=[],
+            records=[record],
+            mandatory_expenses=[],
+            debts=[debt],
+            debt_payments=[payment],
+            distribution_items=[],
+            distribution_subitems=[],
+            distribution_snapshots=[],
+            transfers=[],
+            readonly=False,
+            storage_mode="sqlite",
+        )
+
+        imported = importers.import_full_backup(str(json_path), force=True)
+        wallets, records, mandatory, transfers, summary = imported
+
+        assert len(wallets) == 1
+        assert wallets[0].system is True
+        assert len(records) == 1
+        assert mandatory == []
+        assert transfers == []
+        assert summary[1] == 0
+        assert len(imported.debts) == 1
+        assert len(imported.debt_payments) == 1
+        assert imported.debts[0].contact_name == "Alice"
+        assert imported.debt_payments[0].record_id == 1
+    finally:
+        if json_path.exists():
+            os.unlink(json_path)
+
+
+def test_export_full_backup_includes_debts_and_debt_payments() -> None:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as json_tmp:
+        json_path = Path(json_tmp.name)
+
+    try:
+        exporters.export_full_backup(
+            str(json_path),
+            wallets=[],
+            records=[],
+            mandatory_expenses=[],
+            debts=[
+                Debt(
+                    id=1,
+                    contact_name="Alice",
+                    kind=DebtKind.DEBT,
+                    total_amount_minor=50000,
+                    remaining_amount_minor=25000,
+                    currency="KZT",
+                    interest_rate=0.0,
+                    status=DebtStatus.OPEN,
+                    created_at="2026-03-01",
+                )
+            ],
+            debt_payments=[
+                DebtPayment(
+                    id=1,
+                    debt_id=1,
+                    record_id=None,
+                    operation_type=DebtOperationType.DEBT_FORGIVE,
+                    principal_paid_minor=25000,
+                    is_write_off=True,
+                    payment_date="2026-03-10",
+                )
+            ],
+            distribution_items=[],
+            distribution_subitems=[],
+            distribution_snapshots=[],
+            transfers=[],
+            readonly=True,
+            storage_mode="sqlite",
+        )
+
+        payload = json.loads(json_path.read_text(encoding="utf-8"))
+        data = payload["data"]
+        assert data["debts"][0]["contact_name"] == "Alice"
+        assert data["debt_payments"][0]["operation_type"] == "debt_forgive"
+        assert data["debt_payments"][0]["is_write_off"] is True
     finally:
         if json_path.exists():
             os.unlink(json_path)

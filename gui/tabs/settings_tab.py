@@ -114,20 +114,17 @@ def build_settings_tab(
         selectmode="browse",
         height=8,
     )
-    wallet_tree.heading("id", text="ID")
-    wallet_tree.heading("name", text="Name")
-    wallet_tree.heading("currency", text="Cur")
-    wallet_tree.heading("initial_balance", text="Initial")
-    wallet_tree.heading("balance", text="Balance")
-    wallet_tree.heading("allow_negative", text="Allow negative")
-    wallet_tree.heading("active", text="Active")
-    wallet_tree.column("id", width=30, minwidth=30, stretch=False, anchor="e")
-    wallet_tree.column("name", width=80, minwidth=80, stretch=False, anchor="w")
-    wallet_tree.column("currency", width=45, minwidth=45, stretch=False, anchor="center")
-    wallet_tree.column("initial_balance", width=85, minwidth=85, stretch=False, anchor="e")
-    wallet_tree.column("balance", width=85, minwidth=85, stretch=False, anchor="e")
-    wallet_tree.column("allow_negative", width=95, minwidth=95, stretch=False, anchor="center")
-    wallet_tree.column("active", width=55, minwidth=55, stretch=False, anchor="center")
+    for col, text, width, minwidth, stretch, anchor in (
+        ("id", "ID", 30, 30, False, "e"),
+        ("name", "Name", 80, 80, False, "w"),
+        ("currency", "Currency", 45, 45, False, "center"),
+        ("initial_balance", "Initial balance", 85, 85, False, "e"),
+        ("balance", "Balance", 85, 85, False, "e"),
+        ("allow_negative", "Allow negative", 95, 95, False, "center"),
+        ("active", "Active", 55, 55, False, "center"),
+    ):
+        wallet_tree.heading(col, text=text)
+        wallet_tree.column(col, width=width, minwidth=minwidth, stretch=stretch, anchor=anchor)  # type: ignore
     wallet_tree.grid(row=0, column=0, sticky="nsew")
 
     wallet_scroll = ttk.Scrollbar(list_frame, orient="vertical", command=wallet_tree.yview)
@@ -271,24 +268,19 @@ def build_settings_tab(
         ),
         height=10,
     )
-    mand_tree.heading("index", text="#")
-    mand_tree.heading("amount", text="Amount")
-    mand_tree.heading("currency", text="Cur")
-    mand_tree.heading("kzt", text="KZT")
-    mand_tree.heading("category", text="Category")
-    mand_tree.heading("description", text="Description")
-    mand_tree.heading("period", text="Period")
-    mand_tree.heading("date", text="Date")
-    mand_tree.heading("autopay", text="Autopay")
-    mand_tree.column("index", width=30, minwidth=40, stretch=False, anchor="e")
-    mand_tree.column("amount", width=70, minwidth=90, stretch=False, anchor="e")
-    mand_tree.column("currency", width=50, minwidth=50, stretch=False, anchor="center")
-    mand_tree.column("kzt", width=80, minwidth=90, stretch=False, anchor="e")
-    mand_tree.column("category", width=100, minwidth=120, stretch=False)
-    mand_tree.column("description", width=200, minwidth=160, stretch=True)
-    mand_tree.column("period", width=80, minwidth=70, stretch=False)
-    mand_tree.column("date", width=80, minwidth=90, stretch=False)
-    mand_tree.column("autopay", width=70, minwidth=60, stretch=False, anchor="center")
+    for col, text, width, minwidth, stretch, anchor in (
+        ("index", "#", 30, 40, False, "e"),
+        ("amount", "Amount", 70, 90, False, "e"),
+        ("currency", "Cur", 50, 50, False, "center"),
+        ("kzt", "KZT", 80, 90, False, "e"),
+        ("category", "Category", 100, 120, False, "w"),
+        ("description", "Description", 200, 160, True, "w"),
+        ("period", "Period", 80, 70, False, "w"),
+        ("date", "Date", 80, 90, False, "w"),
+        ("autopay", "Autopay", 70, 60, False, "center"),
+    ):
+        mand_tree.heading(col, text=text)
+        mand_tree.column(col, width=width, minwidth=minwidth, stretch=stretch, anchor=anchor)  # type: ignore[arg-type]
     mand_tree.grid(row=0, column=0, sticky="nsew")
 
     mand_scroll = ttk.Scrollbar(mand_list_frame, orient="vertical", command=mand_tree.yview)
@@ -901,6 +893,10 @@ def build_settings_tab(
         records = context.repository.load_all()
         mandatory_expenses = context.repository.load_mandatory_expenses()
         budgets = context.controller.get_budgets()
+        debts = context.controller.get_debts()
+        debt_payments = []
+        for debt in debts:
+            debt_payments.extend(context.controller.get_debt_history(debt.id))
         distribution_items, distribution_subitems_by_item = (
             context.controller.export_distribution_structure()
         )
@@ -921,6 +917,8 @@ def build_settings_tab(
                 records=records,
                 mandatory_expenses=mandatory_expenses,
                 budgets=budgets,
+                debts=debts,
+                debt_payments=debt_payments,
                 distribution_items=distribution_items,
                 distribution_subitems=distribution_subitems,
                 distribution_snapshots=distribution_snapshots,
