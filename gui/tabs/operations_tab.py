@@ -161,22 +161,18 @@ def build_operations_tab(
             "wallets",
         ),
     )
-    records_tree.heading("index", text="#")
-    records_tree.heading("date", text="Date")
-    records_tree.heading("type", text="Type")
-    records_tree.heading("category", text="Category")
-    records_tree.heading("amount", text="Amount")
-    records_tree.heading("currency", text="Cur")
-    records_tree.heading("kzt", text="KZT")
-    records_tree.heading("wallets", text="Wallets")
-    records_tree.column("index", width=40, minwidth=50, stretch=False, anchor="e")
-    records_tree.column("date", width=80, minwidth=90, stretch=False)
-    records_tree.column("type", width=120, minwidth=110, stretch=False)
-    records_tree.column("category", width=160, minwidth=140, stretch=True)
-    records_tree.column("amount", width=70, minwidth=90, stretch=False, anchor="e")
-    records_tree.column("currency", width=60, minwidth=50, stretch=False, anchor="center")
-    records_tree.column("kzt", width=100, minwidth=90, stretch=False, anchor="e")
-    records_tree.column("wallets", width=80, minwidth=110, stretch=False, anchor="center")
+    for col, text, width, minwidth, stretch, anchor in (
+        ("index", "#", 40, 50, False, "e"),
+        ("date", "Date", 80, 90, False, "w"),
+        ("type", "Type", 120, 110, False, "w"),
+        ("category", "Category", 160, 140, True, "w"),
+        ("amount", "Amount", 70, 90, False, "e"),
+        ("currency", "Cur", 60, 50, False, "center"),
+        ("kzt", "KZT", 100, 90, False, "e"),
+        ("wallets", "Wallets", 80, 110, False, "center"),
+    ):
+        records_tree.heading(col, text=text)
+        records_tree.column(col, width=width, minwidth=minwidth, stretch=stretch, anchor=anchor)  # type: ignore[arg-type]
     records_tree.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
 
     scrollbar = ttk.Scrollbar(list_frame, orient=VERTICAL, command=records_tree.yview)

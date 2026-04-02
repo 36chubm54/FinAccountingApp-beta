@@ -52,6 +52,7 @@ class FinancialApp(tk.Tk):
         self._built_tabs: set[str] = set()
         self._analytics_bindings: Any | None = None
         self._budget_bindings: Any | None = None
+        self._debt_bindings: Any | None = None
         self._distribution_bindings: Any | None = None
 
         self.records_tree: ttk.Treeview | None = None
@@ -90,6 +91,7 @@ class FinancialApp(tk.Tk):
         self.tab_reports = ttk.Frame(notebook)
         self.tab_analytics = ttk.Frame(notebook)
         self.tab_budget = ttk.Frame(notebook)
+        self.tab_debts = ttk.Frame(notebook)
         self.tab_distribution = ttk.Frame(notebook)
         self.tab_settings = ttk.Frame(notebook)
 
@@ -98,6 +100,7 @@ class FinancialApp(tk.Tk):
         notebook.add(self.tab_reports, text="Reports")
         notebook.add(self.tab_analytics, text="Analytics")
         notebook.add(self.tab_budget, text="Budget")
+        notebook.add(self.tab_debts, text="Debts")
         notebook.add(self.tab_distribution, text="Distribution")
         notebook.add(self.tab_settings, text="Settings")
         self._tab_keys_by_widget = {
@@ -106,6 +109,7 @@ class FinancialApp(tk.Tk):
             str(self.tab_reports): "reports",
             str(self.tab_analytics): "analytics",
             str(self.tab_budget): "budget",
+            str(self.tab_debts): "debts",
             str(self.tab_distribution): "distribution",
             str(self.tab_settings): "settings",
         }
@@ -406,6 +410,10 @@ class FinancialApp(tk.Tk):
 
             self._budget_bindings = build_budget_tab(self.tab_budget, context=self)
             self.refresh_budgets = self._budget_bindings.refresh
+        elif tab_key == "debts":
+            from gui.tabs.debts_tab import build_debts_tab
+
+            self._debt_bindings = build_debts_tab(self.tab_debts, context=self)
         elif tab_key == "distribution":
             from gui.tabs.distribution_tab import build_distribution_tab
 
