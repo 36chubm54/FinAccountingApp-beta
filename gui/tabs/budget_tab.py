@@ -169,24 +169,19 @@ def build_budget_tab(
     )
     budget_tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=10)
 
-    budget_tree.heading("category", text="Category")
-    budget_tree.heading("period", text="Period")
-    budget_tree.heading("include", text="Include mandatory")
-    budget_tree.heading("limit", text="Limit KZT")
-    budget_tree.heading("spent", text="Spent KZT")
-    budget_tree.heading("remaining", text="Remaining")
-    budget_tree.heading("usage", text="Usage %")
-    budget_tree.heading("pace", text="Pace")
-    budget_tree.heading("status", text="Status")
-    budget_tree.column("category", width=110, anchor="w")
-    budget_tree.column("period", width=185, anchor="w")
-    budget_tree.column("include", width=120, anchor="center", stretch=False)
-    budget_tree.column("limit", width=100, anchor="e")
-    budget_tree.column("spent", width=100, anchor="e")
-    budget_tree.column("remaining", width=100, anchor="e")
-    budget_tree.column("usage", width=65, anchor="center")
-    budget_tree.column("pace", width=85, anchor="center")
-    budget_tree.column("status", width=70, anchor="center")
+    for col, text, width, anchor in (
+        ("category", "Category", 110, "w"),
+        ("period", "Period", 185, "w"),
+        ("include", "Include mandatory", 120, "center"),
+        ("limit", "Limit KZT", 100, "e"),
+        ("spent", "Spent KZT", 100, "e"),
+        ("remaining", "Remaining", 100, "e"),
+        ("usage", "Usage %", 65, "center"),
+        ("pace", "Pace", 85, "center"),
+        ("status", "Status", 70, "center"),
+    ):
+        budget_tree.heading(col, text=text)
+        budget_tree.column(col, width=width, anchor=anchor)  # type: ignore[arg-type]
 
     budget_tree.tag_configure("overspent", foreground="#ef4444")
     budget_tree.tag_configure("overpace", foreground="#f59e0b")

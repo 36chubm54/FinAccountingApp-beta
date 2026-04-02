@@ -7,6 +7,7 @@ from typing import Any
 
 from app.finance_service import FinanceService
 from domain.budget import Budget
+from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
 from domain.distribution import DistributionItem, DistributionSubitem, FrozenDistributionRow
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
@@ -40,6 +41,8 @@ class PreparedImportPayload:
     parsed_records: list[Record]
     parsed_mandatory_templates: list[MandatoryExpenseRecord]
     budgets: list[Budget]
+    debts: list[Debt]
+    debt_payments: list[DebtPayment]
     distribution_items: list[DistributionItem]
     distribution_subitems_by_item: dict[int, list[DistributionSubitem]]
     frozen_distribution_rows: list[FrozenDistributionRow]
@@ -116,6 +119,13 @@ class ImportService:
             )
         )
         budgets = self._budgets_from_payload(parsed.budgets, strict=strict_distribution)
+        debts = self._debts_from_payload(parsed.debts, strict=strict_distribution)
+        debt_payments = self._debt_payments_from_payload(
+            parsed.debt_payments,
+            debts=debts,
+            records=parsed.rows,
+            strict=strict_distribution,
+        )
         frozen_distribution_rows = self._frozen_rows_from_payload(parsed.distribution_snapshots)
         errors: list[str] = []
         skipped = 0
@@ -214,6 +224,8 @@ class ImportService:
             parsed_records=parsed_records,
             parsed_mandatory_templates=parsed_mandatory_templates,
             budgets=budgets,
+            debts=debts,
+            debt_payments=debt_payments,
             distribution_items=distribution_items,
             distribution_subitems_by_item=distribution_subitems_by_item,
             frozen_distribution_rows=frozen_distribution_rows,
@@ -231,6 +243,8 @@ class ImportService:
         parsed_records = list(prepared.parsed_records)
         parsed_mandatory_templates = list(prepared.parsed_mandatory_templates)
         budgets = list(prepared.budgets)
+        debts = list(prepared.debts)
+        debt_payments = list(prepared.debt_payments)
         distribution_items = list(prepared.distribution_items)
         distribution_subitems_by_item = {
             int(item_id): list(subitems)
@@ -247,6 +261,8 @@ class ImportService:
             and not wallets
             and not parsed_mandatory_templates
             and not budgets
+            and not debts
+            and not debt_payments
             and not distribution_items
             and not frozen_distribution_rows
             and not raw_transfer_ops
@@ -281,6 +297,8 @@ class ImportService:
                 records=records,
                 transfers=transfers,
                 mandatory_templates=mandatory_templates,
+                debts=debts,
+                debt_payments=debt_payments,
                 preserve_existing_mandatory=not bool(target_wallets),
             )
             self._replace_distribution_structure_if_supported(
@@ -705,6 +723,111 @@ class ImportService:
             )
         return items, dict(subitems_by_item)
 
+    @staticmethod
+    def _debts_from_payload(raw_debts: list[dict[str, Any]], *, strict: bool = False) -> list[Debt]:
+        debts: list[Debt] = []
+        seen_ids: set[int] = set()
+        for item in raw_debts:
+            if not isinstance(item, dict):
+                if strict:
+                    raise ValueError("Invalid debt payload: expected object")
+                continue
+            debt_id = parse_optional_strict_int(item.get("id")) or 0
+            if debt_id <= 0:
+                if strict:
+                    raise ValueError(f"Invalid debt id: {item.get('id')!r}")
+                continue
+            if debt_id in seen_ids:
+                if strict:
+                    raise ValueError(f"Duplicate debt id: {debt_id}")
+                continue
+            try:
+                debt = Debt(
+                    id=debt_id,
+                    contact_name=str(item.get("contact_name", "") or "").strip(),
+                    kind=DebtKind(str(item.get("kind", "") or "").strip().lower()),
+                    total_amount_minor=int(
+                        parse_optional_strict_int(item.get("total_amount_minor")) or 0
+                    ),
+                    remaining_amount_minor=int(
+                        parse_optional_strict_int(item.get("remaining_amount_minor")) or 0
+                    ),
+                    currency=str(item.get("currency", "KZT") or "KZT").upper(),
+                    interest_rate=float(as_float(item.get("interest_rate"), 0.0) or 0.0),
+                    status=DebtStatus(str(item.get("status", "") or "").strip().lower()),
+                    created_at=str(item.get("created_at", "") or "").strip(),
+                    closed_at=str(item.get("closed_at", "") or "").strip() or None,
+                )
+            except Exception:
+                if strict:
+                    raise
+                continue
+            seen_ids.add(debt_id)
+            debts.append(debt)
+        return debts
+
+    @staticmethod
+    def _debt_payments_from_payload(
+        raw_payments: list[dict[str, Any]],
+        *,
+        debts: list[Debt],
+        records: list[dict[str, Any]],
+        strict: bool = False,
+    ) -> list[DebtPayment]:
+        payments: list[DebtPayment] = []
+        seen_ids: set[int] = set()
+        debt_ids = {int(debt.id) for debt in debts}
+        record_ids = {
+            int(record_id)
+            for row in records
+            if isinstance(row, dict)
+            and (record_id := parse_optional_strict_int(row.get("id"))) is not None
+            and record_id > 0
+        }
+        for item in raw_payments:
+            if not isinstance(item, dict):
+                if strict:
+                    raise ValueError("Invalid debt payment payload: expected object")
+                continue
+            payment_id = parse_optional_strict_int(item.get("id")) or 0
+            debt_id = parse_optional_strict_int(item.get("debt_id")) or 0
+            record_id = parse_optional_strict_int(item.get("record_id"))
+            if payment_id <= 0:
+                if strict:
+                    raise ValueError(f"Invalid debt payment id: {item.get('id')!r}")
+                continue
+            if payment_id in seen_ids:
+                if strict:
+                    raise ValueError(f"Duplicate debt payment id: {payment_id}")
+                continue
+            if strict and debt_id not in debt_ids:
+                raise ValueError(f"Debt payment #{payment_id} references missing debt_id={debt_id}")
+            if strict and record_id is not None and record_id not in record_ids:
+                raise ValueError(
+                    f"Debt payment #{payment_id} references missing record_id={record_id}"
+                )
+            try:
+                payment = DebtPayment(
+                    id=payment_id,
+                    debt_id=debt_id,
+                    record_id=record_id,
+                    operation_type=DebtOperationType(
+                        str(item.get("operation_type", "") or "").strip().lower()
+                    ),
+                    principal_paid_minor=int(
+                        parse_optional_strict_int(item.get("principal_paid_minor")) or 0
+                    ),
+                    is_write_off=bool(item.get("is_write_off", False)),
+                    payment_date=str(item.get("payment_date", "") or "").strip(),
+                )
+            except Exception:
+                if strict:
+                    raise
+                continue
+            seen_ids.add(payment_id)
+            payments.append(payment)
+        return payments
+
     def _apply_operations_with_relaxed_wallet_limits(
         self,
         *,
@@ -1036,6 +1159,8 @@ class ImportService:
             rows=rows,
             mandatory_rows=mandatory_rows,
             budgets=list(parsed.budgets),
+            debts=list(parsed.debts),
+            debt_payments=list(parsed.debt_payments),
             distribution_items=list(parsed.distribution_items),
             distribution_subitems=list(parsed.distribution_subitems),
             distribution_snapshots=list(parsed.distribution_snapshots),

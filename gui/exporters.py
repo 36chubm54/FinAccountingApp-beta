@@ -5,7 +5,7 @@ from collections.abc import Iterable
 logger = logging.getLogger(__name__)
 
 
-def export_report(report, filepath: str, fmt: str) -> None:
+def export_report(report, filepath: str, fmt: str, *, debts=None) -> None:
     fmt = (fmt or "csv").lower()
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     try:
@@ -16,11 +16,11 @@ def export_report(report, filepath: str, fmt: str) -> None:
         elif fmt in ("xlsx", "xls"):
             from utils.excel_utils import report_to_xlsx
 
-            report_to_xlsx(report, filepath)
+            report_to_xlsx(report, filepath, debts=list(debts or []))
         elif fmt == "pdf":
             from utils.pdf_utils import report_to_pdf
 
-            report_to_pdf(report, filepath)
+            report_to_pdf(report, filepath, debts=list(debts or []))
         else:
             raise ValueError(f"Unsupported export format: {fmt}")
     except Exception:
@@ -109,6 +109,8 @@ def export_full_backup(
     records,
     mandatory_expenses,
     budgets=(),
+    debts=(),
+    debt_payments=(),
     distribution_items=(),
     distribution_subitems=(),
     distribution_snapshots=(),
@@ -128,6 +130,8 @@ def export_full_backup(
             records=list(records),
             mandatory_expenses=list(mandatory_expenses),
             budgets=list(budgets or []),
+            debts=list(debts or []),
+            debt_payments=list(debt_payments or []),
             distribution_items=list(distribution_items or []),
             distribution_subitems=list(distribution_subitems or []),
             distribution_snapshots=list(distribution_snapshots or []),

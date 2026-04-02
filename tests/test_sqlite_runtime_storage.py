@@ -5,8 +5,11 @@ from pathlib import Path
 import pytest
 
 from app.services import CurrencyService
+from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
+from domain.records import ExpenseRecord, IncomeRecord
+from domain.wallets import Wallet
 from gui.controllers import FinancialController
 from infrastructure.sqlite_repository import SQLiteRecordRepository
 from utils.backup_utils import export_full_backup_to_json
@@ -418,6 +421,240 @@ def test_sqlite_import_rollback_keeps_database_unchanged_on_failure(
     finally:
         source_repo.close()
         target_repo.close()
+
+
+def test_sqlite_repository_saves_and_loads_debts_and_payments(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path / "debts_repo.db")
+
+    try:
+        repo.save_initial_balance(0.0)
+        debt = Debt(
+            id=1,
+            contact_name="Alice",
+            kind=DebtKind.DEBT,
+            total_amount_minor=100_000,
+            remaining_amount_minor=40_000,
+            currency="KZT",
+            interest_rate=0.0,
+            status=DebtStatus.OPEN,
+            created_at="2026-03-01",
+        )
+        repo.save_debt(debt)
+        stored_debt_id = repo.load_debts()[0].id
+        repo.save(
+            IncomeRecord(
+                id=1,
+                date="2026-03-01",
+                wallet_id=1,
+                related_debt_id=stored_debt_id,
+                amount_original=1000.0,
+                currency="KZT",
+                rate_at_operation=1.0,
+                amount_kzt=1000.0,
+                category="Debt",
+                description="Debt take",
+            )
+        )
+        payment = DebtPayment(
+            id=1,
+            debt_id=stored_debt_id,
+            record_id=1,
+            operation_type=DebtOperationType.DEBT_REPAY,
+            principal_paid_minor=60_000,
+            is_write_off=False,
+            payment_date="2026-03-05",
+        )
+        repo.save_debt_payment(payment)
+
+        loaded_debt = repo.get_debt_by_id(stored_debt_id)
+        loaded_payments = repo.load_debt_payments(stored_debt_id)
+        loaded_record = repo.get_by_id(1)
+
+        assert loaded_debt.contact_name == "Alice"
+        assert loaded_debt.remaining_amount_minor == 40_000
+        assert loaded_record.related_debt_id == stored_debt_id
+        assert len(loaded_payments) == 1
+        assert loaded_payments[0].record_id == 1
+        assert loaded_payments[0].operation_type is DebtOperationType.DEBT_REPAY
+    finally:
+        repo.close()
+
+
+def test_sqlite_record_delete_reindexes_ids_after_delete(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path / "record_delete_reindex.db")
+
+    try:
+        repo.save_wallet(Wallet(id=1, name="Cash", currency="KZT", initial_balance=0.0))
+        repo.save(
+            IncomeRecord(
+                date="2026-03-01",
+                wallet_id=1,
+                amount_original=100.0,
+                currency="KZT",
+                rate_at_operation=1.0,
+                amount_kzt=100.0,
+                category="Salary",
+            )
+        )
+        repo.save(
+            ExpenseRecord(
+                date="2026-03-02",
+                wallet_id=1,
+                amount_original=30.0,
+                currency="KZT",
+                rate_at_operation=1.0,
+                amount_kzt=30.0,
+                category="Food",
+            )
+        )
+        repo.save(
+            IncomeRecord(
+                date="2026-03-03",
+                wallet_id=1,
+                amount_original=50.0,
+                currency="KZT",
+                rate_at_operation=1.0,
+                amount_kzt=50.0,
+                category="Bonus",
+            )
+        )
+
+        assert repo.delete_by_index(1) is True
+
+        remaining = repo.load_all()
+        assert [record.id for record in remaining] == [1, 2]
+        assert [record.category for record in remaining] == ["Salary", "Bonus"]
+    finally:
+        repo.close()
+
+
+def test_sqlite_replace_all_data_remaps_debt_links_and_payments(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path / "debts_replace.db")
+
+    try:
+        wallets = repo.load_wallets()
+        debt = Debt(
+            id=7,
+            contact_name="Bob",
+            kind=DebtKind.LOAN,
+            total_amount_minor=80_000,
+            remaining_amount_minor=20_000,
+            currency="KZT",
+            interest_rate=2.5,
+            status=DebtStatus.OPEN,
+            created_at="2026-02-01",
+        )
+        record = IncomeRecord(
+            id=9,
+            date="2026-02-01",
+            wallet_id=1,
+            related_debt_id=7,
+            amount_original=800.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=800.0,
+            category="Loan collect",
+            description="Loan return",
+        )
+        payment = DebtPayment(
+            id=11,
+            debt_id=7,
+            record_id=9,
+            operation_type=DebtOperationType.LOAN_COLLECT,
+            principal_paid_minor=60_000,
+            is_write_off=False,
+            payment_date="2026-02-10",
+        )
+
+        repo.replace_all_data(
+            wallets=wallets,
+            records=[record],
+            mandatory_expenses=[],
+            transfers=[],
+            debts=[debt],
+            debt_payments=[payment],
+        )
+
+        restored_records = repo.load_all()
+        restored_debts = repo.load_debts()
+        restored_payments = repo.load_debt_payments()
+
+        assert len(restored_records) == 1
+        assert len(restored_debts) == 1
+        assert len(restored_payments) == 1
+        assert restored_debts[0].id == 1
+        assert restored_records[0].related_debt_id == restored_debts[0].id
+        assert restored_payments[0].debt_id == restored_debts[0].id
+        assert restored_payments[0].record_id == restored_records[0].id
+    finally:
+        repo.close()
+
+
+def test_sqlite_debt_delete_reindexes_ids_and_links(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path / "debt_delete_reindex.db")
+
+    try:
+        repo.save_wallet(Wallet(id=1, name="Cash", currency="KZT", initial_balance=0.0))
+        first = Debt(
+            id=1,
+            contact_name="Alice",
+            kind=DebtKind.DEBT,
+            total_amount_minor=10_000,
+            remaining_amount_minor=10_000,
+            currency="KZT",
+            interest_rate=0.0,
+            status=DebtStatus.OPEN,
+            created_at="2026-03-01",
+        )
+        second = Debt(
+            id=2,
+            contact_name="Bob",
+            kind=DebtKind.LOAN,
+            total_amount_minor=20_000,
+            remaining_amount_minor=5_000,
+            currency="KZT",
+            interest_rate=0.0,
+            status=DebtStatus.OPEN,
+            created_at="2026-03-02",
+        )
+        repo.save_debt(first)
+        repo.save_debt(second)
+        repo.save(
+            IncomeRecord(
+                id=1,
+                date="2026-03-03",
+                wallet_id=1,
+                related_debt_id=2,
+                amount_original=150.0,
+                currency="KZT",
+                rate_at_operation=1.0,
+                amount_kzt=150.0,
+                category="Loan payment",
+            )
+        )
+        repo.save_debt_payment(
+            DebtPayment(
+                id=1,
+                debt_id=2,
+                record_id=1,
+                operation_type=DebtOperationType.LOAN_COLLECT,
+                principal_paid_minor=15_000,
+                is_write_off=False,
+                payment_date="2026-03-03",
+            )
+        )
+
+        assert repo.delete_debt(1) is True
+
+        debts = repo.load_debts()
+        payments = repo.load_debt_payments()
+        records = repo.load_all()
+        assert [debt.id for debt in debts] == [1]
+        assert debts[0].contact_name == "Bob"
+        assert payments[0].debt_id == 1
+        assert records[0].related_debt_id == 1
+    finally:
+        repo.close()
 
 
 def test_sqlite_transfer_delete_cascades_linked_records(tmp_path: Path) -> None:

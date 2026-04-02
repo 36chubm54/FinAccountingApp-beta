@@ -247,21 +247,35 @@ class Report:
     ) -> tuple[int, list[tuple[str, float, float]]]:
         year_months = self._year_months()
         today = dt_date.today()
+        period_start = parse_ymd(self._period_start_date) if self._period_start_date else None
+        period_end = parse_ymd(self._period_end_date) if self._period_end_date else None
 
         if year is None:
-            if year_months:
+            if period_end is not None:
+                year = period_end.year
+            elif year_months:
                 year, _ = max(year_months)
             else:
                 year, _ = today.year, today.month
 
         if up_to_month is None:
-            months_in_year = [m for y, m in year_months if y == year]
-            if months_in_year:
-                up_to_month = max(months_in_year)
+            if period_end is not None and int(year) == int(period_end.year):
+                up_to_month = period_end.month
             else:
-                up_to_month = today.month if year == today.year else 12
+                months_in_year = [m for y, m in year_months if y == year]
+                if months_in_year:
+                    up_to_month = max(months_in_year)
+                else:
+                    up_to_month = today.month if year == today.year else 12
 
-        up_to_month = max(1, min(12, up_to_month))
+        start_month = 1
+        if period_start is not None and int(year) == int(period_start.year):
+            start_month = period_start.month
+
+        if period_end is not None and int(year) == int(period_end.year):
+            up_to_month = min(int(up_to_month), period_end.month)
+
+        up_to_month = max(start_month, min(12, int(up_to_month)))
 
         aggregates: dict[tuple[int, int], tuple[float, float]] = {}
         for record in self._display_records():
@@ -269,7 +283,7 @@ class Report:
             if not parsed:
                 continue
             rec_year, rec_month = parsed
-            if rec_year != year or not (1 <= rec_month <= up_to_month):
+            if rec_year != year or not (start_month <= rec_month <= up_to_month):
                 continue
             income_total, expense_total = aggregates.get((rec_year, rec_month), (0.0, 0.0))
             if isinstance(record, IncomeRecord):
@@ -279,7 +293,7 @@ class Report:
             aggregates[(rec_year, rec_month)] = (income_total, expense_total)
 
         rows: list[tuple[str, float, float]] = []
-        for month in range(1, up_to_month + 1):
+        for month in range(start_month, up_to_month + 1):
             income_total, expense_total = aggregates.get((year, month), (0.0, 0.0))
             rows.append((f"{year}-{month:02d}", income_total, expense_total))
 

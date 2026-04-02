@@ -7,8 +7,10 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import SimpleDocTemplate, Spacer, Table, TableStyle
 
+from domain.debt import Debt
 from domain.records import IncomeRecord, MandatoryExpenseRecord
 from domain.reports import Report
+from utils.debt_report_utils import debt_progress_percent, debts_for_report_period
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,90 @@ def _should_add_by_category_section(report: Report, groups: dict[str, Report]) -
         return False
     only_subreport = next(iter(groups.values()))
     return len(list(only_subreport.records())) < len(list(report.records()))
+
+
+def _append_debt_summary(
+    elems: list,
+    *,
+    debts: list[Debt],
+    available_width: float,
+    font_name: str,
+) -> None:
+    if not debts:
+        return
+    title = Table([["Debt summary"]], colWidths=[available_width])
+    title.setStyle(
+        TableStyle(
+            [
+                ("FONT", (0, 0), (-1, -1), font_name),
+                ("FONTSIZE", (0, 0), (-1, -1), 12),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.lightgrey),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    elems.append(Spacer(1, 8))  # type: ignore
+    elems.append(title)
+    data = [
+        [
+            "Contact",
+            "Kind",
+            "Status",
+            "Opened",
+            "Closed",
+            "Total",
+            "Remain",
+            "Covered",
+            "Progress %",
+        ]
+    ]
+    for debt in debts:
+        settled = (int(debt.total_amount_minor) - int(debt.remaining_amount_minor)) / 100.0
+        data.append(
+            [
+                _safe_str(debt.contact_name),
+                str(debt.kind.value).title(),
+                str(debt.status.value).title(),
+                _safe_str(debt.created_at),
+                _safe_str(debt.closed_at or "-"),
+                f"{debt.total_amount_minor / 100.0:.2f}",
+                f"{debt.remaining_amount_minor / 100.0:.2f}",
+                f"{settled:.2f}",
+                f"{debt_progress_percent(debt):.2f}",
+            ]
+        )
+    table = Table(
+        data,
+        colWidths=[
+            available_width * 0.24,
+            available_width * 0.06,
+            available_width * 0.08,
+            available_width * 0.11,
+            available_width * 0.11,
+            available_width * 0.10,
+            available_width * 0.10,
+            available_width * 0.10,
+            available_width * 0.10,
+        ],
+        repeatRows=1,
+    )
+    table.setStyle(
+        TableStyle(
+            [
+                ("FONT", (0, 0), (-1, -1), font_name),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("ALIGN", (5, 0), (-1, -1), "RIGHT"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    elems.append(table)
 
 
 def _register_cyrillic_font() -> str:
@@ -114,7 +200,7 @@ def _register_cyrillic_font() -> str:
     return "Helvetica"
 
 
-def report_to_pdf(report: Report, filepath: str) -> None:
+def report_to_pdf(report: Report, filepath: str, *, debts: list[Debt] | None = None) -> None:
     """Export report as PDF (fixed amounts by operation-time FX rates)."""
     # Build table data
     data = []
@@ -276,6 +362,13 @@ def report_to_pdf(report: Report, filepath: str) -> None:
             )
             cat_table.setStyle(cat_style)
             elems.append(cat_table)
+
+    _append_debt_summary(
+        elems,
+        debts=debts_for_report_period(report, list(debts or [])),
+        available_width=available_width,
+        font_name=font_name,
+    )
 
     summary_header = [f"Month ({summary_year})", "Income (KZT)", "Expense (KZT)"]
     summary_data = [summary_header]

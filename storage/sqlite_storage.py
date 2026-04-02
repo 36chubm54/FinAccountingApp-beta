@@ -243,6 +243,7 @@ class SQLiteStorage(Storage):
                 date,
                 wallet_id,
                 transfer_id,
+                related_debt_id,
                 amount_original,
                 amount_original_minor,
                 currency,
@@ -264,6 +265,9 @@ class SQLiteStorage(Storage):
                 "date": str(row["date"]),
                 "wallet_id": int(row["wallet_id"]),
                 "transfer_id": int(row["transfer_id"]) if row["transfer_id"] is not None else None,
+                "related_debt_id": (
+                    int(row["related_debt_id"]) if row["related_debt_id"] is not None else None
+                ),
                 "amount_original": self._money_from_row(
                     row, "amount_original", "amount_original_minor"
                 ),
@@ -302,6 +306,7 @@ class SQLiteStorage(Storage):
                     date = ?,
                     wallet_id = ?,
                     transfer_id = ?,
+                    related_debt_id = ?,
                     amount_original = ?,
                     amount_original_minor = ?,
                     currency = ?,
@@ -319,6 +324,7 @@ class SQLiteStorage(Storage):
                     self._date_as_text(record.date),
                     int(record.wallet_id),
                     int(record.transfer_id) if record.transfer_id is not None else None,
+                    int(record.related_debt_id) if record.related_debt_id is not None else None,
                     to_money_float(record.amount_original or 0.0),
                     to_minor_units(record.amount_original or 0.0),
                     str(record.currency).upper(),
@@ -340,6 +346,7 @@ class SQLiteStorage(Storage):
                     date,
                     wallet_id,
                     transfer_id,
+                    related_debt_id,
                     amount_original,
                     amount_original_minor,
                     currency,
@@ -358,6 +365,7 @@ class SQLiteStorage(Storage):
                     self._date_as_text(record.date),
                     int(record.wallet_id),
                     int(record.transfer_id) if record.transfer_id is not None else None,
+                    int(record.related_debt_id) if record.related_debt_id is not None else None,
                     to_money_float(record.amount_original or 0.0),
                     to_minor_units(record.amount_original or 0.0),
                     str(record.currency).upper(),

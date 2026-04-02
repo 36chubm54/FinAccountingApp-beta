@@ -2,6 +2,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from domain.debt import DebtKind, DebtOperationType, DebtStatus
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
 from domain.records import ExpenseRecord, IncomeRecord
@@ -768,6 +769,79 @@ def test_import_service_bulk_replace_normalizes_mandatory_ids_from_one() -> None
         "mandatory_templates"
     ]
     assert [template.id for template in mandatory_templates] == [1, 2]
+
+
+def test_import_service_bulk_replace_passes_debts_and_debt_payments() -> None:
+    finance_service = _finance_mock()
+    finance_service.supports_bulk_import_replace = True
+    payload = ParsedImportData(
+        path="data.json",
+        file_type="json",
+        rows=[
+            {
+                "id": "10",
+                "date": "2026-03-02",
+                "type": "expense",
+                "wallet_id": "1",
+                "related_debt_id": "1",
+                "category": "Debt payment",
+                "amount_original": "25",
+                "currency": "KZT",
+                "rate_at_operation": "1",
+                "amount_kzt": "25",
+            }
+        ],
+        debts=[
+            {
+                "id": 1,
+                "contact_name": "Alex",
+                "kind": "debt",
+                "total_amount_minor": 10000,
+                "remaining_amount_minor": 7500,
+                "currency": "KZT",
+                "interest_rate": 0.0,
+                "status": "open",
+                "created_at": "2026-03-01",
+                "closed_at": None,
+            }
+        ],
+        debt_payments=[
+            {
+                "id": 5,
+                "debt_id": 1,
+                "record_id": 10,
+                "operation_type": "debt_repay",
+                "principal_paid_minor": 2500,
+                "is_write_off": False,
+                "payment_date": "2026-03-02",
+            }
+        ],
+        wallets=[
+            {
+                "id": 1,
+                "name": "Main",
+                "currency": "KZT",
+                "initial_balance": 0.0,
+                "system": True,
+                "allow_negative": False,
+                "is_active": True,
+            }
+        ],
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        summary = ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file(
+            "data.json"
+        )
+
+    assert summary == ImportResult(imported=1, skipped=0, errors=tuple())
+    kwargs = finance_service.replace_all_for_import.call_args.kwargs
+    assert len(kwargs["debts"]) == 1
+    assert kwargs["debts"][0].kind is DebtKind.DEBT
+    assert kwargs["debts"][0].status is DebtStatus.OPEN
+    assert len(kwargs["debt_payments"]) == 1
+    assert kwargs["debt_payments"][0].operation_type is DebtOperationType.DEBT_REPAY
+    assert kwargs["records"][0].related_debt_id == 1
 
 
 def test_import_service_passes_force_flag_to_parser() -> None:

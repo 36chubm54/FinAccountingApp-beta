@@ -7,6 +7,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from domain.debt import Debt
 from domain.import_policy import ImportPolicy
 from domain.records import MandatoryExpenseRecord, Record
 from domain.reports import Report
@@ -15,6 +16,7 @@ from utils.csv_utils import (
     _restore_missing_transfers,
     _validate_transfer_integrity,
 )
+from utils.debt_report_utils import debt_progress_percent, debts_for_report_period
 from utils.import_core import (
     ImportSummary,
     norm_key,
@@ -141,7 +143,49 @@ def _should_add_by_category_sheet(report: Report, groups: dict[str, Report]) -> 
     return len(list(only_subreport.records())) < len(list(report.records()))
 
 
-def report_to_xlsx(report: Report, filepath: str) -> None:
+def _append_debts_sheet(wb: Workbook, debts: list[Debt]) -> None:
+    if not debts:
+        return
+    ws = wb.create_sheet("Debts", index=2)
+    ws.append(
+        [
+            "Contact",
+            "Kind",
+            "Status",
+            "Opened",
+            "Closed",
+            "Currency",
+            "Total",
+            "Remaining",
+            "Settled",
+            "Progress %",
+        ]
+    )
+    _style_header_row(ws, 1)
+    ws.freeze_panes = "A2"
+    for debt in debts:
+        settled = (int(debt.total_amount_minor) - int(debt.remaining_amount_minor)) / 100.0
+        ws.append(
+            [
+                str(debt.contact_name),
+                str(debt.kind.value).title(),
+                str(debt.status.value).title(),
+                str(debt.created_at),
+                str(debt.closed_at or "-"),
+                str(debt.currency).upper(),
+                debt.total_amount_minor / 100.0,
+                debt.remaining_amount_minor / 100.0,
+                settled,
+                debt_progress_percent(debt),
+            ]
+        )
+        _style_data_row(ws, ws.max_row, amount_columns=(7, 8, 9, 10))
+        ws.cell(row=ws.max_row, column=10).number_format = "0.00"
+    ws.auto_filter.ref = f"A1:J{ws.max_row}"
+    _set_auto_width(ws)
+
+
+def report_to_xlsx(report: Report, filepath: str, *, debts: list[Debt] | None = None) -> None:
     """Export report view (fixed amounts) to XLSX. Read-only format."""
     wb = Workbook()
     ws = wb.active
@@ -246,6 +290,8 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
             bycat_ws.append([""])
         bycat_ws.freeze_panes = "A2"
         _set_auto_width(bycat_ws)
+
+    _append_debts_sheet(wb, debts_for_report_period(report, list(debts or [])))
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     wb.save(filepath)

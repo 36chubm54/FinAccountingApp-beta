@@ -22,14 +22,16 @@ from domain.transfers import Transfer
 from domain.wallets import Wallet
 from infrastructure.repositories import RecordRepository
 from services.audit_service import AuditService
-from utils.money import quantize_money, to_money_float, to_rate_float
+from utils.money import minor_to_money, quantize_money, to_money_float, to_rate_float
 
 from .services import CurrencyService
 
 if TYPE_CHECKING:
     from domain.budget import Budget
+    from domain.debt import Debt, DebtPayment
     from domain.distribution import DistributionItem, DistributionSubitem
     from services.budget_service import BudgetService
+    from services.debt_service import DebtService
     from services.distribution_service import DistributionService
     from services.metrics_service import MetricsService
     from services.timeline_service import TimelineService
@@ -261,7 +263,14 @@ class CalculateNetWorth:
     def execute_fixed(self) -> float:
         wallets = self._repository.load_active_wallets()
         records = self._repository.load_all()
-        return sum(wallet_balance_kzt(wallet, records, self._currency) for wallet in wallets)
+        total = sum(wallet_balance_kzt(wallet, records, self._currency) for wallet in wallets)
+        for debt in self._repository.load_debts():
+            remaining_kzt = minor_to_money(int(debt.remaining_amount_minor))
+            if str(debt.kind.value) == "loan":
+                total += remaining_kzt
+            else:
+                total -= remaining_kzt
+        return total
 
     def execute_current(self) -> float:
         wallets = self._repository.load_active_wallets()
@@ -276,6 +285,17 @@ class CalculateNetWorth:
                 )
                 sign = 1.0 if record.signed_amount_kzt() >= 0 else -1.0
                 total += converted if sign >= 0 else -abs(converted)
+        for debt in self._repository.load_debts():
+            converted = quantize_money(
+                self._currency.convert(
+                    minor_to_money(int(debt.remaining_amount_minor)),
+                    str(debt.currency or "KZT"),
+                )
+            )
+            if str(debt.kind.value) == "loan":
+                total += converted
+            else:
+                total -= abs(converted)
         return float(total)
 
 
@@ -909,6 +929,176 @@ class UpdateBudgetLimit:
 
     def execute(self, budget_id: int, new_limit_kzt: float) -> "Budget":
         return self._service.update_budget_limit(budget_id, new_limit_kzt)
+
+
+class CreateDebt:
+    def __init__(self, debt_service: "DebtService") -> None:
+        self._service = debt_service
+
+    def execute(
+        self,
+        *,
+        contact_name: str,
+        wallet_id: int,
+        amount_kzt: float,
+        created_at: str,
+        currency: str = "KZT",
+        interest_rate: float = 0.0,
+        description: str = "",
+    ) -> "Debt":
+        return self._service.create_debt(
+            contact_name=contact_name,
+            wallet_id=wallet_id,
+            amount_kzt=amount_kzt,
+            created_at=created_at,
+            currency=currency,
+            interest_rate=interest_rate,
+            description=description,
+        )
+
+
+class CreateLoan:
+    def __init__(self, debt_service: "DebtService") -> None:
+        self._service = debt_service
+
+    def execute(
+        self,
+        *,
+        contact_name: str,
+        wallet_id: int,
+        amount_kzt: float,
+        created_at: str,
+        currency: str = "KZT",
+        interest_rate: float = 0.0,
+        description: str = "",
+    ) -> "Debt":
+        return self._service.create_loan(
+            contact_name=contact_name,
+            wallet_id=wallet_id,
+            amount_kzt=amount_kzt,
+            created_at=created_at,
+            currency=currency,
+            interest_rate=interest_rate,
+            description=description,
+        )
+
+
+class RegisterDebtPayment:
+    def __init__(self, debt_service: "DebtService") -> None:
+        self._service = debt_service
+
+    def execute(
+        self,
+        *,
+        debt_id: int,
+        wallet_id: int,
+        amount_kzt: float,
+        payment_date: str,
+        description: str = "",
+    ) -> "DebtPayment":
+        return self._service.register_payment(
+            debt_id=debt_id,
+            wallet_id=wallet_id,
+            amount_kzt=amount_kzt,
+            payment_date=payment_date,
+            description=description,
+        )
+
+
+class RegisterDebtWriteOff:
+    def __init__(self, debt_service: "DebtService") -> None:
+        self._service = debt_service
+
+    def execute(
+        self,
+        *,
+        debt_id: int,
+        amount_kzt: float,
+        payment_date: str,
+    ) -> "DebtPayment":
+        return self._service.register_write_off(
+            debt_id=debt_id,
+            amount_kzt=amount_kzt,
+            payment_date=payment_date,
+        )
+
+
+class CloseDebt:
+    def __init__(self, debt_service: "DebtService") -> None:
+        self._service = debt_service
+
+    def execute(
+        self,
+        *,
+        debt_id: int,
+        payment_date: str,
+        wallet_id: int | None = None,
+        write_off: bool = False,
+        description: str = "",
+    ) -> "Debt":
+        return self._service.close_debt(
+            debt_id=debt_id,
+            payment_date=payment_date,
+            wallet_id=wallet_id,
+            write_off=write_off,
+            description=description,
+        )
+
+
+class DeleteDebt:
+    def __init__(self, debt_service: "DebtService") -> None:
+        self._service = debt_service
+
+    def execute(self, debt_id: int) -> None:
+        self._service.delete_debt(debt_id)
+
+
+class DeleteDebtPayment:
+    def __init__(self, debt_service: "DebtService") -> None:
+        self._service = debt_service
+
+    def execute(self, payment_id: int, *, delete_linked_record: bool = False) -> None:
+        self._service.delete_payment(payment_id, delete_linked_record=delete_linked_record)
+
+
+class RecalculateDebt:
+    def __init__(self, debt_service: "DebtService") -> None:
+        self._service = debt_service
+
+    def execute(self, debt_id: int) -> "Debt":
+        return self._service.recalculate_debt(debt_id)
+
+
+class GetDebts:
+    def __init__(self, debt_service: "DebtService") -> None:
+        self._service = debt_service
+
+    def execute(self) -> list["Debt"]:
+        return self._service.get_all_debts()
+
+
+class GetOpenDebts:
+    def __init__(self, debt_service: "DebtService") -> None:
+        self._service = debt_service
+
+    def execute(self) -> list["Debt"]:
+        return self._service.get_open_debts()
+
+
+class GetClosedDebts:
+    def __init__(self, debt_service: "DebtService") -> None:
+        self._service = debt_service
+
+    def execute(self) -> list["Debt"]:
+        return self._service.get_closed_debts()
+
+
+class GetDebtHistory:
+    def __init__(self, debt_service: "DebtService") -> None:
+        self._service = debt_service
+
+    def execute(self, debt_id: int) -> list["DebtPayment"]:
+        return self._service.get_debt_history(debt_id)
 
 
 class GetBudgets:

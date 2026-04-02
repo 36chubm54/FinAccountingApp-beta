@@ -85,6 +85,12 @@ def import_mandatory_expenses_from_xlsx(
 
 
 def import_full_backup(filepath: str, *, force: bool = False):
+    """Legacy compatibility wrapper.
+
+    Prefer FinancialController.import_data(...) / ImportService.import_file(...)
+    for application-level imports. This helper remains for tests, tools, and
+    low-level backup JSON parsing flows.
+    """
     try:
         from utils.backup_utils import import_full_backup_from_json
 

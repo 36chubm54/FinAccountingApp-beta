@@ -4,11 +4,13 @@ import logging
 import os
 import tempfile
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from datetime import date as dt_date
 from typing import Any
 
 from domain.budget import Budget
+from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
 from domain.distribution import DistributionItem, DistributionSubitem, FrozenDistributionRow
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
@@ -20,6 +22,37 @@ from version import __version__
 
 logger = logging.getLogger(__name__)
 SYSTEM_WALLET_ID = 1
+
+
+@dataclass(frozen=True)
+class ImportedBackupData:
+    wallets: list[Wallet]
+    records: list[Record]
+    mandatory_expenses: list[MandatoryExpenseRecord]
+    transfers: list[Transfer]
+    summary: ImportSummary
+    debts: list[Debt]
+    debt_payments: list[DebtPayment]
+
+    def __iter__(self):
+        yield self.wallets
+        yield self.records
+        yield self.mandatory_expenses
+        yield self.transfers
+        yield self.summary
+
+    def __len__(self) -> int:
+        return 5
+
+    def __getitem__(self, index: int):
+        legacy = (
+            self.wallets,
+            self.records,
+            self.mandatory_expenses,
+            self.transfers,
+            self.summary,
+        )
+        return legacy[index]
 
 
 class BackupFormatError(ValueError):
@@ -36,10 +69,12 @@ class BackupReadonlyError(PermissionError):
 
 def _record_to_payload(record: Record) -> dict:
     item = {
+        "id": int(record.id),
         "date": record.date.isoformat() if isinstance(record.date, dt_date) else record.date,
         "type": record_type_name(record),
         "wallet_id": int(getattr(record, "wallet_id", SYSTEM_WALLET_ID)),
         "transfer_id": getattr(record, "transfer_id", None),
+        "related_debt_id": getattr(record, "related_debt_id", None),
         "category": record.category,
         "amount_original": record.amount_original,
         "currency": record.currency,
@@ -123,6 +158,33 @@ def _distribution_subitem_to_payload(subitem: DistributionSubitem) -> dict[str, 
         "pct": float(subitem.pct),
         "pct_minor": int(subitem.pct_minor),
         "is_active": bool(subitem.is_active),
+    }
+
+
+def _debt_to_payload(debt: Debt) -> dict[str, Any]:
+    return {
+        "id": int(debt.id),
+        "contact_name": str(debt.contact_name),
+        "kind": debt.kind.value,
+        "total_amount_minor": int(debt.total_amount_minor),
+        "remaining_amount_minor": int(debt.remaining_amount_minor),
+        "currency": str(debt.currency).upper(),
+        "interest_rate": float(debt.interest_rate),
+        "status": debt.status.value,
+        "created_at": str(debt.created_at),
+        "closed_at": str(debt.closed_at) if debt.closed_at else None,
+    }
+
+
+def _debt_payment_to_payload(payment: DebtPayment) -> dict[str, Any]:
+    return {
+        "id": int(payment.id),
+        "debt_id": int(payment.debt_id),
+        "record_id": int(payment.record_id) if payment.record_id is not None else None,
+        "operation_type": payment.operation_type.value,
+        "principal_paid_minor": int(payment.principal_paid_minor),
+        "is_write_off": bool(payment.is_write_off),
+        "payment_date": str(payment.payment_date),
     }
 
 
@@ -286,6 +348,8 @@ def export_full_backup_to_json(
     records: Sequence[Record],
     mandatory_expenses: Sequence[MandatoryExpenseRecord],
     budgets: Sequence[Budget] = (),
+    debts: Sequence[Debt] = (),
+    debt_payments: Sequence[DebtPayment] = (),
     distribution_items: Sequence[DistributionItem] = (),
     distribution_subitems: Sequence[DistributionSubitem] = (),
     distribution_snapshots: Sequence[FrozenDistributionRow] = (),
@@ -312,6 +376,8 @@ def export_full_backup_to_json(
         "records": [_record_to_payload(record) for record in records],
         "mandatory_expenses": [_record_to_payload(expense) for expense in mandatory_expenses],
         "budgets": [_budget_to_payload(budget) for budget in budgets],
+        "debts": [_debt_to_payload(debt) for debt in debts],
+        "debt_payments": [_debt_payment_to_payload(payment) for payment in debt_payments],
         "distribution_items": [_distribution_item_to_payload(item) for item in distribution_items],
         "distribution_subitems": [
             _distribution_subitem_to_payload(subitem) for subitem in distribution_subitems
@@ -363,7 +429,13 @@ def import_full_backup_from_json(
     filepath: str,
     *,
     force: bool = False,
-) -> tuple[list[Wallet], list[Record], list[MandatoryExpenseRecord], list[Transfer], ImportSummary]:
+) -> ImportedBackupData:
+    """Legacy-compatible backup JSON parser.
+
+    Prefer ImportService.import_file(...) for application imports that should
+    validate and commit data transactionally. This helper stays available for
+    tests, migration tooling, and low-level snapshot inspection.
+    """
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"JSON file not found: {filepath}")
 
@@ -381,6 +453,8 @@ def import_full_backup_from_json(
     raw_mandatory = source_payload.get("mandatory_expenses", [])
     raw_wallets = source_payload.get("wallets", [])
     raw_transfers = source_payload.get("transfers", [])
+    raw_debts = source_payload.get("debts", [])
+    raw_debt_payments = source_payload.get("debt_payments", [])
 
     if not isinstance(raw_records, list) or not isinstance(raw_mandatory, list):
         raise BackupFormatError(
@@ -396,6 +470,10 @@ def import_full_backup_from_json(
     if not isinstance(raw_wallets, list) or not isinstance(raw_transfers, list):
         raise BackupFormatError(
             "Invalid backup JSON structure: wallets and transfers must be arrays"
+        )
+    if not isinstance(raw_debts, list) or not isinstance(raw_debt_payments, list):
+        raise BackupFormatError(
+            "Invalid backup JSON structure: debts and debt_payments must be arrays"
         )
 
     errors: list[str] = []
@@ -550,6 +628,85 @@ def import_full_backup_from_json(
         skipped += len(integrity_errors)
         errors.extend(integrity_errors)
 
+    debts: list[Debt] = []
+    for idx, item in enumerate(raw_debts, start=1):
+        if not isinstance(item, dict):
+            skipped += 1
+            errors.append(f"debts[{idx}]: invalid item type")
+            continue
+        try:
+            debt = Debt(
+                id=int(item.get("id", 0)),
+                contact_name=str(item.get("contact_name", "") or ""),
+                kind=DebtKind(str(item.get("kind", DebtKind.DEBT.value) or DebtKind.DEBT.value)),
+                total_amount_minor=int(item.get("total_amount_minor", 0)),
+                remaining_amount_minor=int(item.get("remaining_amount_minor", 0)),
+                currency=str(item.get("currency", "KZT") or "KZT").upper(),
+                interest_rate=float(item.get("interest_rate", 0.0) or 0.0),
+                status=DebtStatus(str(item.get("status", DebtStatus.OPEN.value) or DebtStatus.OPEN.value)),
+                created_at=str(item.get("created_at", "") or ""),
+                closed_at=(
+                    str(item.get("closed_at")) if item.get("closed_at") not in (None, "") else None
+                ),
+            )
+        except Exception as exc:
+            skipped += 1
+            errors.append(f"debts[{idx}]: invalid debt ({exc})")
+            continue
+        debts.append(debt)
+        imported += 1
+
+    debt_ids = {int(debt.id) for debt in debts}
+    record_ids = {int(record.id) for record in records}
+    debt_payments: list[DebtPayment] = []
+    for idx, item in enumerate(raw_debt_payments, start=1):
+        if not isinstance(item, dict):
+            skipped += 1
+            errors.append(f"debt_payments[{idx}]: invalid item type")
+            continue
+        try:
+            payment = DebtPayment(
+                id=int(item.get("id", 0)),
+                debt_id=int(item.get("debt_id", 0)),
+                record_id=(
+                    int(item.get("record_id"))
+                    if item.get("record_id") not in (None, "")
+                    else None
+                ),
+                operation_type=DebtOperationType(
+                    str(
+                        item.get(
+                            "operation_type",
+                            DebtOperationType.DEBT_FORGIVE.value
+                            if bool(item.get("is_write_off", False))
+                            else DebtOperationType.DEBT_REPAY.value,
+                        )
+                        or DebtOperationType.DEBT_REPAY.value
+                    )
+                ),
+                principal_paid_minor=int(item.get("principal_paid_minor", 0)),
+                is_write_off=bool(item.get("is_write_off", False)),
+                payment_date=str(item.get("payment_date", "") or ""),
+            )
+        except Exception as exc:
+            skipped += 1
+            errors.append(f"debt_payments[{idx}]: invalid debt payment ({exc})")
+            continue
+        if int(payment.debt_id) not in debt_ids:
+            skipped += 1
+            errors.append(
+                f"debt_payments[{idx}]: debt not found ({payment.debt_id})"
+            )
+            continue
+        if payment.record_id is not None and int(payment.record_id) not in record_ids:
+            skipped += 1
+            errors.append(
+                f"debt_payments[{idx}]: record not found ({payment.record_id})"
+            )
+            continue
+        debt_payments.append(payment)
+        imported += 1
+
     logger.info(
         "JSON backup import completed: imported=%s skipped=%s file=%s legacy=%s",
         imported,
@@ -557,7 +714,15 @@ def import_full_backup_from_json(
         filepath,
         migrated_legacy,
     )
-    return wallets, records, mandatory_expenses, transfers, (imported, skipped, errors)
+    return ImportedBackupData(
+        wallets=wallets,
+        records=records,
+        mandatory_expenses=mandatory_expenses,
+        transfers=transfers,
+        summary=(imported, skipped, errors),
+        debts=debts,
+        debt_payments=debt_payments,
+    )
 
 
 def create_backup(
@@ -566,6 +731,12 @@ def create_backup(
     wallets: Sequence[Wallet] | None = None,
     records: Sequence[Record],
     mandatory_expenses: Sequence[MandatoryExpenseRecord],
+    budgets: Sequence[Budget] = (),
+    debts: Sequence[Debt] = (),
+    debt_payments: Sequence[DebtPayment] = (),
+    distribution_items: Sequence[DistributionItem] = (),
+    distribution_subitems: Sequence[DistributionSubitem] = (),
+    distribution_snapshots: Sequence[FrozenDistributionRow] = (),
     transfers: Sequence[Transfer] = (),
     initial_balance: float = 0.0,
     readonly: bool = True,
@@ -576,6 +747,12 @@ def create_backup(
         wallets=wallets,
         records=records,
         mandatory_expenses=mandatory_expenses,
+        budgets=budgets,
+        debts=debts,
+        debt_payments=debt_payments,
+        distribution_items=distribution_items,
+        distribution_subitems=distribution_subitems,
+        distribution_snapshots=distribution_snapshots,
         transfers=transfers,
         initial_balance=initial_balance,
         readonly=readonly,
@@ -587,5 +764,5 @@ def import_backup(
     filepath: str,
     *,
     force: bool = False,
-) -> tuple[list[Wallet], list[Record], list[MandatoryExpenseRecord], list[Transfer], ImportSummary]:
+) -> ImportedBackupData:
     return import_full_backup_from_json(filepath, force=force)

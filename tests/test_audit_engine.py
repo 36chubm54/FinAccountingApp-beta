@@ -21,6 +21,8 @@ def build_test_db(
     records: list[dict],
     transfers: list[dict],
     mandatory_expenses: list[dict],
+    debts: list[dict] | None = None,
+    debt_payments: list[dict] | None = None,
 ) -> None:
     conn = sqlite3.connect(path)
     try:
@@ -71,9 +73,10 @@ def build_test_db(
             conn.execute(
                 """
                 INSERT INTO records (
-                    id, type, date, wallet_id, transfer_id, amount_original, currency,
-                    rate_at_operation, amount_kzt, category, description, period
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    id, type, date, wallet_id, transfer_id, related_debt_id,
+                    amount_original, currency, rate_at_operation, amount_kzt,
+                    category, description, period
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record["id"],
@@ -81,6 +84,7 @@ def build_test_db(
                     record["date"],
                     record["wallet_id"],
                     record.get("transfer_id"),
+                    record.get("related_debt_id"),
                     record["amount_original"],
                     record["currency"],
                     record["rate_at_operation"],
@@ -88,6 +92,47 @@ def build_test_db(
                     record.get("category", "General"),
                     record.get("description", ""),
                     record.get("period"),
+                ),
+            )
+
+        for debt in debts or []:
+            conn.execute(
+                """
+                INSERT INTO debts (
+                    id, contact_name, kind, total_amount_minor, remaining_amount_minor,
+                    currency, interest_rate, status, created_at, closed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    debt["id"],
+                    debt["contact_name"],
+                    debt["kind"],
+                    debt["total_amount_minor"],
+                    debt["remaining_amount_minor"],
+                    debt.get("currency", "KZT"),
+                    debt.get("interest_rate", 0.0),
+                    debt["status"],
+                    debt.get("created_at", "2026-03-01"),
+                    debt.get("closed_at"),
+                ),
+            )
+
+        for payment in debt_payments or []:
+            conn.execute(
+                """
+                INSERT INTO debt_payments (
+                    id, debt_id, record_id, operation_type,
+                    principal_paid_minor, is_write_off, payment_date
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    payment["id"],
+                    payment["debt_id"],
+                    payment.get("record_id"),
+                    payment["operation_type"],
+                    payment["principal_paid_minor"],
+                    payment.get("is_write_off", 0),
+                    payment.get("payment_date", "2026-03-01"),
                 ),
             )
 
@@ -237,6 +282,8 @@ def _run_audit(
     records: list[dict] | None = None,
     transfers: list[dict] | None = None,
     mandatory_expenses: list[dict] | None = None,
+    debts: list[dict] | None = None,
+    debt_payments: list[dict] | None = None,
 ):
     db_path = tmp_path / "audit.db"
     build_test_db(
@@ -247,6 +294,8 @@ def _run_audit(
         mandatory_expenses=(
             mandatory_expenses if mandatory_expenses is not None else _clean_mandatory_expenses()
         ),
+        debts=debts,
+        debt_payments=debt_payments,
     )
     repo, controller = _make_controller(db_path)
     return repo, controller.run_audit()
@@ -260,9 +309,61 @@ def test_clean_db_all_checks_pass(tmp_path: Path) -> None:
     repo, report = _run_audit(tmp_path)
     try:
         assert report.is_clean is True
-        assert len(report.findings) == 10
-        assert len(report.passed) == 10
+        assert len(report.findings) == 11
+        assert len(report.passed) == 11
         assert all(finding.severity == AuditSeverity.OK for finding in report.findings)
+    finally:
+        repo.close()
+
+
+def test_debt_balance_integrity_reports_error(tmp_path: Path) -> None:
+    records = _clean_records() + [
+        {
+            "id": 10,
+            "type": "expense",
+            "date": "2026-03-05",
+            "wallet_id": 1,
+            "related_debt_id": 1,
+            "amount_original": 25.0,
+            "currency": "KZT",
+            "rate_at_operation": 1.0,
+            "amount_kzt": 25.0,
+            "category": "Debt payment",
+        }
+    ]
+    debts = [
+        {
+            "id": 1,
+            "contact_name": "Alex",
+            "kind": "debt",
+            "total_amount_minor": 10000,
+            "remaining_amount_minor": 9000,
+            "currency": "KZT",
+            "interest_rate": 0.0,
+            "status": "open",
+            "created_at": "2026-03-01",
+        }
+    ]
+    debt_payments = [
+        {
+            "id": 1,
+            "debt_id": 1,
+            "record_id": 10,
+            "operation_type": "debt_repay",
+            "principal_paid_minor": 2500,
+            "is_write_off": 0,
+            "payment_date": "2026-03-05",
+        }
+    ]
+    repo, report = _run_audit(
+        tmp_path,
+        records=records,
+        debts=debts,
+        debt_payments=debt_payments,
+    )
+    try:
+        findings = _findings_by_check(report, "debt_balance_integrity")
+        assert any(finding.severity == AuditSeverity.ERROR for finding in findings)
     finally:
         repo.close()
 

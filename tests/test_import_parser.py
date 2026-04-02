@@ -217,6 +217,63 @@ def test_parse_import_file_reads_budgets_from_json(tmp_path: Path) -> None:
     assert parsed.budgets[0]["include_mandatory"] is True
 
 
+def test_parse_import_file_reads_debts_from_json(tmp_path: Path) -> None:
+    payload = {
+        "wallets": [],
+        "records": [
+            {
+                "id": 10,
+                "date": "2026-03-01",
+                "type": "expense",
+                "wallet_id": 1,
+                "related_debt_id": 1,
+                "category": "Debt payment",
+                "amount_original": 25.0,
+                "currency": "KZT",
+                "rate_at_operation": 1.0,
+                "amount_kzt": 25.0,
+            }
+        ],
+        "mandatory_expenses": [],
+        "debts": [
+            {
+                "id": 1,
+                "contact_name": "Alex",
+                "kind": "debt",
+                "total_amount_minor": 10000,
+                "remaining_amount_minor": 7500,
+                "currency": "KZT",
+                "interest_rate": 0.0,
+                "status": "open",
+                "created_at": "2026-03-01",
+                "closed_at": None,
+            }
+        ],
+        "debt_payments": [
+            {
+                "id": 3,
+                "debt_id": 1,
+                "record_id": 10,
+                "operation_type": "debt_repay",
+                "principal_paid_minor": 2500,
+                "is_write_off": False,
+                "payment_date": "2026-03-02",
+            }
+        ],
+        "transfers": [],
+    }
+    json_path = tmp_path / "payload.json"
+    json_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    parsed = import_parser.parse_import_file(str(json_path))
+
+    assert parsed.rows[0]["related_debt_id"] == 1
+    assert len(parsed.debts) == 1
+    assert parsed.debts[0]["contact_name"] == "Alex"
+    assert len(parsed.debt_payments) == 1
+    assert parsed.debt_payments[0]["operation_type"] == "debt_repay"
+
+
 def test_parse_transfer_row_supports_legacy_policy() -> None:
     records, transfer, next_transfer_id, error = import_parser.parse_transfer_row(
         {

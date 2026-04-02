@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import date
 
 from domain.reports import Report
-from domain.validation import parse_ymd
 from gui.controllers import FinancialController
 from services.report_service import (
     ReportFilters,
@@ -30,8 +29,7 @@ class ReportsController:
         operations = build_operations_rows(report)
         categories = extract_categories(operations)
 
-        summary_year, summary_up_to_month = _infer_summary_year_month(filters.period_start)
-        monthly = build_monthly_rows(report, year=summary_year, up_to_month=summary_up_to_month)
+        monthly = build_monthly_rows(report)
 
         if filters.wallet_id is None:
             net_worth_fixed = float(self._controller.net_worth_fixed())
@@ -73,26 +71,3 @@ class ReportsController:
             report = report.filter_by_category(filters.category)
 
         return report
-
-
-def _infer_summary_year_month(period_start: str) -> tuple[int | None, int | None]:
-    period_start = (period_start or "").strip()
-    if not period_start:
-        return None, None
-    try:
-        parts = period_start.split("-")
-        if parts and parts[0].isdigit():
-            year = int(parts[0])
-        else:
-            return None, None
-        month = None
-        if len(parts) > 1 and parts[1].isdigit():
-            month = int(parts[1])
-        # Validate year/month via parse_ymd when possible (day/month ranges).
-        if len(parts) == 1:
-            parse_ymd(f"{year}-01-01")
-        elif len(parts) == 2 and month is not None:
-            parse_ymd(f"{year}-{month:02d}-01")
-        return year, month
-    except Exception:
-        return None, None

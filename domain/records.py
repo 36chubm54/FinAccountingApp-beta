@@ -21,6 +21,7 @@ class Record(ABC):
     id: int = field(default_factory=_next_record_id, compare=False)
     wallet_id: int = 1
     transfer_id: int | None = None
+    related_debt_id: int | None = None
     amount_original: float | None = None
     currency: str = "KZT"
     rate_at_operation: float = 1.0
@@ -87,6 +88,15 @@ class Record(ABC):
             if transfer_id <= 0:
                 raise ValueError("transfer_id must be a positive integer")
             object.__setattr__(self, "transfer_id", transfer_id)
+
+        if self.related_debt_id is not None:
+            try:
+                related_debt_id = int(self.related_debt_id)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("related_debt_id must be an integer") from exc
+            if related_debt_id <= 0:
+                raise ValueError("related_debt_id must be a positive integer")
+            object.__setattr__(self, "related_debt_id", related_debt_id)
 
     def with_updated_amount_kzt(self, new_amount_kzt: float) -> "Record":
         amount_original = quantize_money(self.amount_original or 0.0)

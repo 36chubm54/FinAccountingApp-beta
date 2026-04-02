@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 from domain.budget import Budget
+from domain.debt import Debt, DebtPayment
 from domain.distribution import DistributionItem, DistributionSubitem, FrozenDistributionRow
 from domain.records import MandatoryExpenseRecord, Record
 from domain.wallets import Wallet
@@ -69,6 +70,8 @@ def _validate_source_integrity(
     transfers: list,
     mandatory_expenses: list[MandatoryExpenseRecord],
     budgets: list[Budget],
+    debts: list[Debt],
+    debt_payments: list[DebtPayment],
     distribution_items: list[DistributionItem],
     distribution_subitems: list[DistributionSubitem],
     distribution_snapshots: list[FrozenDistributionRow],
@@ -89,6 +92,9 @@ def _validate_source_integrity(
                 f"from={transfer.from_wallet_id} to={transfer.to_wallet_id}"
             )
 
+    debt_ids = {int(debt.id) for debt in debts}
+    record_ids = {int(record.id) for record in records}
+
     for record in records:
         _require_existing_wallet(wallets, int(record.wallet_id), f"Record #{record.id}")
         if record.transfer_id is not None:
@@ -97,6 +103,10 @@ def _validate_source_integrity(
                     f"Record #{record.id} references missing transfer_id={record.transfer_id}"
                 )
             linked_records_by_transfer.setdefault(record.transfer_id, []).append(record)
+        if record.related_debt_id is not None and int(record.related_debt_id) not in debt_ids:
+            raise ValueError(
+                f"Record #{record.id} references missing related_debt_id={record.related_debt_id}"
+            )
 
     for transfer_id, linked_records in linked_records_by_transfer.items():
         if len(linked_records) != 2:
@@ -118,6 +128,21 @@ def _validate_source_integrity(
 
     for expense in mandatory_expenses:
         _require_existing_wallet(wallets, int(expense.wallet_id), f"MandatoryExpense #{expense.id}")
+
+    payment_ids: set[int] = set()
+    for payment in debt_payments:
+        payment_id = int(payment.id)
+        if payment_id in payment_ids:
+            raise ValueError(f"Duplicate debt payment id: {payment_id}")
+        payment_ids.add(payment_id)
+        if int(payment.debt_id) not in debt_ids:
+            raise ValueError(
+                f"DebtPayment #{payment_id} references missing debt_id={payment.debt_id}"
+            )
+        if payment.record_id is not None and int(payment.record_id) not in record_ids:
+            raise ValueError(
+                f"DebtPayment #{payment_id} references missing record_id={payment.record_id}"
+            )
 
     seen_budget_ids: set[int] = set()
     for budget in budgets:
@@ -166,6 +191,8 @@ def _check_target_is_empty(sqlite_storage: SQLiteStorage) -> None:
         "distribution_subitems",
         "distribution_snapshots",
         "distribution_snapshot_values",
+        "debts",
+        "debt_payments",
     )
     for table in tables:
         count = int(sqlite_storage.query_one(f"SELECT COUNT(*) FROM {table}")[0])
@@ -186,6 +213,8 @@ def _has_any_data(sqlite_storage: SQLiteStorage) -> bool:
         "distribution_subitems",
         "distribution_snapshots",
         "distribution_snapshot_values",
+        "debts",
+        "debt_payments",
     ):
         if int(sqlite_storage.query_one(f"SELECT COUNT(*) FROM {table}")[0]) > 0:
             return True
@@ -394,6 +423,7 @@ def _record_row_payload(
         ),
         wallet_map[int(record.wallet_id)],
         transfer_id,
+        int(record.related_debt_id) if record.related_debt_id is not None else None,
         amount_original,
         amount_original_minor,
         str(record.currency).upper(),
@@ -422,7 +452,39 @@ def _insert_records(
             cursor = sqlite_storage.execute(
                 """
                 INSERT INTO records (
-                    id, type, date, wallet_id, transfer_id,
+                    id, type, date, wallet_id, transfer_id, related_debt_id,
+                    amount_original, amount_original_minor, currency,
+                    rate_at_operation, rate_at_operation_text,
+                    amount_kzt, amount_kzt_minor,
+                    category, description, period
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(record.id),
+                    payload[14],
+                    payload[0],
+                    payload[1],
+                    payload[2],
+                    payload[3],
+                    payload[4],
+                    payload[5],
+                    payload[6],
+                    payload[7],
+                    payload[8],
+                    payload[9],
+                    payload[10],
+                    payload[11],
+                    payload[12],
+                    payload[13],
+                ),
+            )
+            mapping[int(record.id)] = int(record.id)
+        else:
+            cursor = sqlite_storage.execute(
+                """
+                INSERT INTO records (
+                    type, date, wallet_id, transfer_id, related_debt_id,
                     amount_original, amount_original_minor, currency,
                     rate_at_operation, rate_at_operation_text,
                     amount_kzt, amount_kzt_minor,
@@ -431,8 +493,7 @@ def _insert_records(
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    int(record.id),
-                    payload[13],
+                    payload[14],
                     payload[0],
                     payload[1],
                     payload[2],
@@ -446,36 +507,7 @@ def _insert_records(
                     payload[10],
                     payload[11],
                     payload[12],
-                ),
-            )
-            mapping[int(record.id)] = int(record.id)
-        else:
-            cursor = sqlite_storage.execute(
-                """
-                INSERT INTO records (
-                    type, date, wallet_id, transfer_id,
-                    amount_original, amount_original_minor, currency,
-                    rate_at_operation, rate_at_operation_text,
-                    amount_kzt, amount_kzt_minor,
-                    category, description, period
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
                     payload[13],
-                    payload[0],
-                    payload[1],
-                    payload[2],
-                    payload[3],
-                    payload[4],
-                    payload[5],
-                    payload[6],
-                    payload[7],
-                    payload[8],
-                    payload[9],
-                    payload[10],
-                    payload[11],
-                    payload[12],
                 ),
             )
             lastrowid = cursor.lastrowid
@@ -611,6 +643,102 @@ def _insert_budgets(sqlite_storage: SQLiteStorage, budgets: list[Budget]) -> Non
         _set_sqlite_sequence(sqlite_storage, "budgets")
 
 
+def _insert_debts(sqlite_storage: SQLiteStorage, debts: list[Debt]) -> dict[int, int]:
+    mapping: dict[int, int] = {}
+    preserve_ids = _all_positive_unique_ids(debts, lambda debt: debt.id)
+    for debt in debts:
+        payload = (
+            str(debt.contact_name),
+            str(debt.kind.value),
+            int(debt.total_amount_minor),
+            int(debt.remaining_amount_minor),
+            str(debt.currency).upper(),
+            float(debt.interest_rate),
+            str(debt.status.value),
+            str(debt.created_at),
+            str(debt.closed_at) if debt.closed_at else None,
+        )
+        if preserve_ids:
+            sqlite_storage.execute(
+                """
+                INSERT INTO debts (
+                    id, contact_name, kind, total_amount_minor, remaining_amount_minor,
+                    currency, interest_rate, status, created_at, closed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (int(debt.id), *payload),
+            )
+            mapping[int(debt.id)] = int(debt.id)
+        else:
+            cursor = sqlite_storage.execute(
+                """
+                INSERT INTO debts (
+                    contact_name, kind, total_amount_minor, remaining_amount_minor,
+                    currency, interest_rate, status, created_at, closed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                payload,
+            )
+            lastrowid = cursor.lastrowid
+            if lastrowid is None:
+                raise RuntimeError("Failed to insert debt: no row ID returned")
+            mapping[int(debt.id)] = int(lastrowid)
+    if preserve_ids and debts:
+        _set_sqlite_sequence(sqlite_storage, "debts")
+    return mapping
+
+
+def _insert_debt_payments(
+    sqlite_storage: SQLiteStorage,
+    debt_payments: list[DebtPayment],
+    debt_map: dict[int, int],
+    record_map: dict[int, int],
+) -> dict[int, int]:
+    mapping: dict[int, int] = {}
+    preserve_ids = _all_positive_unique_ids(debt_payments, lambda payment: payment.id)
+    for payment in debt_payments:
+        payload = (
+            debt_map[int(payment.debt_id)],
+            record_map[int(payment.record_id)] if payment.record_id is not None else None,
+            str(payment.operation_type.value),
+            int(payment.principal_paid_minor),
+            int(bool(payment.is_write_off)),
+            str(payment.payment_date),
+        )
+        if preserve_ids:
+            sqlite_storage.execute(
+                """
+                INSERT INTO debt_payments (
+                    id, debt_id, record_id, operation_type,
+                    principal_paid_minor, is_write_off, payment_date
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (int(payment.id), *payload),
+            )
+            mapping[int(payment.id)] = int(payment.id)
+        else:
+            cursor = sqlite_storage.execute(
+                """
+                INSERT INTO debt_payments (
+                    debt_id, record_id, operation_type,
+                    principal_paid_minor, is_write_off, payment_date
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                payload,
+            )
+            lastrowid = cursor.lastrowid
+            if lastrowid is None:
+                raise RuntimeError("Failed to insert debt payment: no row ID returned")
+            mapping[int(payment.id)] = int(lastrowid)
+    if preserve_ids and debt_payments:
+        _set_sqlite_sequence(sqlite_storage, "debt_payments")
+    return mapping
+
+
 def _counts_from_sqlite(sqlite_storage: SQLiteStorage) -> dict[str, int]:
     return {
         "wallets": int(sqlite_storage.query_one("SELECT COUNT(*) FROM wallets")[0]),
@@ -620,6 +748,8 @@ def _counts_from_sqlite(sqlite_storage: SQLiteStorage) -> dict[str, int]:
             sqlite_storage.query_one("SELECT COUNT(*) FROM mandatory_expenses")[0]
         ),
         "budgets": int(sqlite_storage.query_one("SELECT COUNT(*) FROM budgets")[0]),
+        "debts": int(sqlite_storage.query_one("SELECT COUNT(*) FROM debts")[0]),
+        "debt_payments": int(sqlite_storage.query_one("SELECT COUNT(*) FROM debt_payments")[0]),
         "distribution_items": int(
             sqlite_storage.query_one("SELECT COUNT(*) FROM distribution_items")[0]
         ),
@@ -689,6 +819,8 @@ def validate_migration(
     transfers: list,
     mandatory_expenses: list[MandatoryExpenseRecord],
     budgets: list[Budget],
+    debts: list[Debt],
+    debt_payments: list[DebtPayment],
     distribution_items: list[DistributionItem],
     distribution_subitems: list[DistributionSubitem],
     distribution_snapshots: list[FrozenDistributionRow],
@@ -696,6 +828,8 @@ def validate_migration(
     record_map: dict[int, int],
     transfer_map: dict[int, int],
     mandatory_map: dict[int, int],
+    debt_map: dict[int, int],
+    debt_payment_map: dict[int, int],
 ) -> tuple[bool, list[str]]:
     errors: list[str] = []
 
@@ -705,6 +839,8 @@ def validate_migration(
         "records": len(records),
         "mandatory_expenses": len(mandatory_expenses),
         "budgets": len(budgets),
+        "debts": len(debts),
+        "debt_payments": len(debt_payments),
         "distribution_items": len(distribution_items),
         "distribution_subitems": len(distribution_subitems),
         "distribution_snapshots": len(distribution_snapshots),
@@ -749,8 +885,20 @@ def validate_migration(
         errors.append("Transfer id mapping is incomplete")
     if len(mandatory_map) != len(mandatory_expenses):
         errors.append("Mandatory expense id mapping is incomplete")
+    if len(debt_map) != len(debts):
+        errors.append("Debt id mapping is incomplete")
+    if len(debt_payment_map) != len(debt_payments):
+        errors.append("Debt payment id mapping is incomplete")
     if _budget_signatures_from_json(budgets) != _budget_signatures_from_sqlite(sqlite_storage):
         errors.append("Budget payload mismatch")
+    if _debt_signatures_from_json(debts) != _debt_signatures_from_sqlite(sqlite_storage):
+        errors.append("Debt payload mismatch")
+    if _debt_payment_signatures_from_json(
+        debt_payments,
+        debt_map=debt_map,
+        record_map=record_map,
+    ) != _debt_payment_signatures_from_sqlite(sqlite_storage):
+        errors.append("Debt payment payload mismatch")
     if _distribution_structure_signatures_from_json(
         distribution_items,
         distribution_subitems,
@@ -771,6 +919,8 @@ def _validate_existing_target_equivalence(
     transfers: list,
     mandatory_expenses: list[MandatoryExpenseRecord],
     budgets: list[Budget],
+    debts: list[Debt],
+    debt_payments: list[DebtPayment],
     distribution_items: list[DistributionItem],
     distribution_subitems: list[DistributionSubitem],
     distribution_snapshots: list[FrozenDistributionRow],
@@ -783,6 +933,8 @@ def _validate_existing_target_equivalence(
         transfers=transfers,
         mandatory_expenses=mandatory_expenses,
         budgets=budgets,
+        debts=debts,
+        debt_payments=debt_payments,
         distribution_items=distribution_items,
         distribution_subitems=distribution_subitems,
         distribution_snapshots=distribution_snapshots,
@@ -790,6 +942,8 @@ def _validate_existing_target_equivalence(
         record_map={int(record.id): int(record.id) for record in records},
         transfer_map={int(transfer.id): int(transfer.id) for transfer in transfers},
         mandatory_map={int(expense.id): int(expense.id) for expense in mandatory_expenses},
+        debt_map={int(debt.id): int(debt.id) for debt in debts},
+        debt_payment_map={int(payment.id): int(payment.id) for payment in debt_payments},
     )
 
 
@@ -825,6 +979,93 @@ def _budget_signatures_from_sqlite(sqlite_storage: SQLiteStorage) -> list[tuple]
             float(row[4]),
             int(row[5]),
             bool(row[6]),
+        )
+        for row in rows
+    ]
+
+
+def _debt_signatures_from_json(debts: list[Debt]) -> list[tuple]:
+    return sorted(
+        (
+            int(debt.id),
+            str(debt.contact_name),
+            str(debt.kind.value),
+            int(debt.total_amount_minor),
+            int(debt.remaining_amount_minor),
+            str(debt.currency).upper(),
+            float(debt.interest_rate),
+            str(debt.status.value),
+            str(debt.created_at),
+            str(debt.closed_at) if debt.closed_at else None,
+        )
+        for debt in debts
+    )
+
+
+def _debt_signatures_from_sqlite(sqlite_storage: SQLiteStorage) -> list[tuple]:
+    rows = sqlite_storage.query_all(
+        """
+        SELECT id, contact_name, kind, total_amount_minor, remaining_amount_minor,
+               currency, interest_rate, status, created_at, closed_at
+        FROM debts
+        ORDER BY id
+        """
+    )
+    return [
+        (
+            int(row[0]),
+            str(row[1]),
+            str(row[2]),
+            int(row[3]),
+            int(row[4]),
+            str(row[5]).upper(),
+            float(row[6]),
+            str(row[7]),
+            str(row[8]),
+            str(row[9]) if row[9] is not None else None,
+        )
+        for row in rows
+    ]
+
+
+def _debt_payment_signatures_from_json(
+    debt_payments: list[DebtPayment],
+    *,
+    debt_map: dict[int, int],
+    record_map: dict[int, int],
+) -> list[tuple]:
+    return sorted(
+        (
+            int(payment.id),
+            debt_map[int(payment.debt_id)],
+            record_map[int(payment.record_id)] if payment.record_id is not None else None,
+            str(payment.operation_type.value),
+            int(payment.principal_paid_minor),
+            bool(payment.is_write_off),
+            str(payment.payment_date),
+        )
+        for payment in debt_payments
+    )
+
+
+def _debt_payment_signatures_from_sqlite(sqlite_storage: SQLiteStorage) -> list[tuple]:
+    rows = sqlite_storage.query_all(
+        """
+        SELECT id, debt_id, record_id, operation_type,
+               principal_paid_minor, is_write_off, payment_date
+        FROM debt_payments
+        ORDER BY id
+        """
+    )
+    return [
+        (
+            int(row[0]),
+            int(row[1]),
+            int(row[2]) if row[2] is not None else None,
+            str(row[3]),
+            int(row[4]),
+            bool(row[5]),
+            str(row[6]),
         )
         for row in rows
     ]
@@ -1201,6 +1442,8 @@ def _load_source_dataset(
     list,
     list[MandatoryExpenseRecord],
     list[Budget],
+    list[Debt],
+    list[DebtPayment],
     list[DistributionItem],
     list[DistributionSubitem],
     list[FrozenDistributionRow],
@@ -1223,6 +1466,8 @@ def _load_source_dataset(
         transfers = json_storage.get_transfers()
         records = json_storage.get_records()
         mandatory_expenses = json_storage.get_mandatory_expenses()
+        debts = json_storage._repo.load_debts()
+        debt_payments = json_storage._repo.load_debt_payments()
     finally:
         os.unlink(temp_path)
 
@@ -1235,6 +1480,8 @@ def _load_source_dataset(
         transfers,
         mandatory_expenses,
         budgets,
+        debts,
+        debt_payments,
         distribution_items,
         distribution_subitems,
         distribution_snapshots,
@@ -1258,6 +1505,8 @@ def run_dry_run(args: argparse.Namespace) -> int:
             transfers,
             mandatory_expenses,
             budgets,
+            debts,
+            debt_payments,
             distribution_items,
             distribution_subitems,
             distribution_snapshots,
@@ -1269,6 +1518,8 @@ def run_dry_run(args: argparse.Namespace) -> int:
             transfers,
             mandatory_expenses,
             budgets,
+            debts,
+            debt_payments,
             distribution_items,
             distribution_subitems,
             distribution_snapshots,
@@ -1280,6 +1531,8 @@ def run_dry_run(args: argparse.Namespace) -> int:
         print(f"  records: {len(records)}")
         print(f"  mandatory_expenses: {len(mandatory_expenses)}")
         print(f"  budgets: {len(budgets)}")
+        print(f"  debts: {len(debts)}")
+        print(f"  debt_payments: {len(debt_payments)}")
         print(f"  distribution_items: {len(distribution_items)}")
         print(f"  distribution_subitems: {len(distribution_subitems)}")
         print(f"  distribution_snapshots: {len(distribution_snapshots)}")
@@ -1308,6 +1561,8 @@ def run_migration(args: argparse.Namespace) -> int:
             transfers,
             mandatory_expenses,
             budgets,
+            debts,
+            debt_payments,
             distribution_items,
             distribution_subitems,
             distribution_snapshots,
@@ -1319,6 +1574,8 @@ def run_migration(args: argparse.Namespace) -> int:
             transfers,
             mandatory_expenses,
             budgets,
+            debts,
+            debt_payments,
             distribution_items,
             distribution_subitems,
             distribution_snapshots,
@@ -1334,6 +1591,8 @@ def run_migration(args: argparse.Namespace) -> int:
                 transfers=transfers,
                 mandatory_expenses=mandatory_expenses,
                 budgets=budgets,
+                debts=debts,
+                debt_payments=debt_payments,
                 distribution_items=distribution_items,
                 distribution_subitems=distribution_subitems,
                 distribution_snapshots=distribution_snapshots,
@@ -1353,15 +1612,24 @@ def run_migration(args: argparse.Namespace) -> int:
         wallet_map = _insert_wallets(sqlite_storage, wallets)
         print("[2/7] Migrating transfers...")
         transfer_map = _insert_transfers(sqlite_storage, transfers, wallet_map)
-        print("[3/7] Migrating records...")
+        print("[3/9] Migrating debts...")
+        debt_map = _insert_debts(sqlite_storage, debts)
+        print("[4/9] Migrating records...")
         record_map = _insert_records(sqlite_storage, records, wallet_map, transfer_map)
-        print("[4/7] Migrating mandatory_expenses...")
+        print("[5/9] Migrating mandatory_expenses...")
         mandatory_map = _insert_mandatory_expenses(sqlite_storage, mandatory_expenses, wallet_map)
-        print("[5/7] Migrating budgets...")
+        print("[6/9] Migrating budgets...")
         _insert_budgets(sqlite_storage, budgets)
-        print("[6/7] Migrating distribution structure...")
+        print("[7/9] Migrating debt_payments...")
+        debt_payment_map = _insert_debt_payments(
+            sqlite_storage,
+            debt_payments,
+            debt_map,
+            record_map,
+        )
+        print("[8/9] Migrating distribution structure...")
         _insert_distribution_structure(sqlite_storage, distribution_items, distribution_subitems)
-        print("[7/7] Migrating distribution_snapshots...")
+        print("[9/9] Migrating distribution_snapshots...")
         _insert_distribution_snapshots(sqlite_storage, distribution_snapshots)
 
         valid, errors = validate_migration(
@@ -1371,6 +1639,8 @@ def run_migration(args: argparse.Namespace) -> int:
             transfers=transfers,
             mandatory_expenses=mandatory_expenses,
             budgets=budgets,
+            debts=debts,
+            debt_payments=debt_payments,
             distribution_items=distribution_items,
             distribution_subitems=distribution_subitems,
             distribution_snapshots=distribution_snapshots,
@@ -1378,6 +1648,8 @@ def run_migration(args: argparse.Namespace) -> int:
             record_map=record_map,
             transfer_map=transfer_map,
             mandatory_map=mandatory_map,
+            debt_map=debt_map,
+            debt_payment_map=debt_payment_map,
         )
         if not valid:
             print("[error] Validation failed, rollback started")

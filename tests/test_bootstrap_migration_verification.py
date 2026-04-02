@@ -166,3 +166,46 @@ def test_validate_sqlite_integrity_only_detects_wrong_transfer_types(tmp_path) -
             bootstrap._validate_sqlite_integrity_only(repo)
     finally:
         repo.close()
+
+
+def test_latest_sqlite_activity_mtime_prefers_newer_wal_file(tmp_path) -> None:
+    sqlite_path = tmp_path / "finance.db"
+    sqlite_path.write_text("", encoding="utf-8")
+    wal_path = tmp_path / "finance.db-wal"
+    wal_path.write_text("", encoding="utf-8")
+
+    sqlite_mtime = 1_700_000_000
+    wal_mtime = sqlite_mtime + 120
+    sqlite_path.touch()
+    wal_path.touch()
+    import os
+
+    os.utime(sqlite_path, (sqlite_mtime, sqlite_mtime))
+    os.utime(wal_path, (wal_mtime, wal_mtime))
+
+    assert bootstrap._latest_sqlite_activity_mtime(sqlite_path) == wal_mtime
+
+
+def test_should_export_json_when_wal_is_newer_than_json(tmp_path, monkeypatch) -> None:
+    sqlite_path = tmp_path / "finance.db"
+    json_path = tmp_path / "data.json"
+    wal_path = tmp_path / "finance.db-wal"
+
+    sqlite_path.write_text("", encoding="utf-8")
+    json_path.write_text("{}", encoding="utf-8")
+    wal_path.write_text("", encoding="utf-8")
+
+    db_mtime = 1_700_000_000
+    json_mtime = db_mtime + 60
+    wal_mtime = json_mtime + 60
+
+    import os
+
+    os.utime(sqlite_path, (db_mtime, db_mtime))
+    os.utime(json_path, (json_mtime, json_mtime))
+    os.utime(wal_path, (wal_mtime, wal_mtime))
+
+    monkeypatch.setattr(bootstrap, "SQLITE_PATH", str(sqlite_path))
+    monkeypatch.setattr(bootstrap, "JSON_PATH", str(json_path))
+
+    assert bootstrap._should_export_json() is True
