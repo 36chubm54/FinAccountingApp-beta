@@ -463,7 +463,12 @@ class ReportsFrame(ttk.Frame):
                 else:
                     from gui.exporters import export_report
 
-                    export_report(report_to_export, filepath, fmt)
+                    export_report(
+                        report_to_export,
+                        filepath,
+                        fmt,
+                        debts=self._context.controller.get_debts(result.filters.wallet_id),
+                    )
             messagebox.showinfo("Success", f"Exported to {filepath}")
             open_in_file_manager(os.path.dirname(filepath))
         except Exception as error:

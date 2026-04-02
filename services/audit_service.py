@@ -22,6 +22,8 @@ class AuditService:
         self._wallet_rows: list[dict[str, Any]] = []
         self._transfer_rows: list[dict[str, Any]] = []
         self._mandatory_expense_rows: list[dict[str, Any]] = []
+        self._debt_rows: list[dict[str, Any]] = []
+        self._debt_payment_rows: list[dict[str, Any]] = []
 
         # Derived data collected during a single DB scan.
         # This keeps memory usage bounded as the DB grows.
@@ -36,6 +38,8 @@ class AuditService:
         self._wallet_rows = self._read_wallet_rows()
         self._transfer_rows = self._read_transfer_rows()
         self._mandatory_expense_rows = self._read_mandatory_expense_rows()
+        self._debt_rows = self._read_debt_rows()
+        self._debt_payment_rows = self._read_debt_payment_rows()
         self._scan_record_rows()
 
         findings: list[AuditFinding] = []
@@ -49,6 +53,7 @@ class AuditService:
         findings += self._check_date_validity()
         findings += self._check_currency_codes()
         findings += self._check_mandatory_template_date_and_autopay()
+        findings += self._check_debt_balance_integrity()
         return AuditReport(findings=tuple(findings), db_path=self._repo.db_path)
 
     def _scan_record_rows(self) -> None:
@@ -67,6 +72,7 @@ class AuditService:
                 date,
                 wallet_id,
                 transfer_id,
+                related_debt_id,
                 amount_original,
                 currency,
                 rate_at_operation,
@@ -155,6 +161,11 @@ class AuditService:
                         "date": raw_date,
                         "wallet_id": int(row["wallet_id"]),
                         "transfer_id": transfer_id_int,
+                        "related_debt_id": (
+                            int(row["related_debt_id"])
+                            if row["related_debt_id"] is not None
+                            else None
+                        ),
                         "amount_original": amount_original,
                         "currency": str(row["currency"]),
                         "rate_at_operation": rate_at_operation,
@@ -545,6 +556,120 @@ class AuditService:
             )
         ]
 
+    def _check_debt_balance_integrity(self) -> list[AuditFinding]:
+        debts = {int(row["id"]): row for row in self._debt_rows}
+        record_debt_links = {
+            int(row["id"]): int(row["related_debt_id"])
+            for row in self._repo.query_all(
+                """
+                SELECT id, related_debt_id
+                FROM records
+                WHERE related_debt_id IS NOT NULL
+                """
+            )
+        }
+        payments_by_debt: dict[int, list[dict[str, Any]]] = {}
+        findings: list[AuditFinding] = []
+
+        for payment in self._debt_payment_rows:
+            debt_id = int(payment["debt_id"])
+            payment_id = int(payment["id"])
+            payments_by_debt.setdefault(debt_id, []).append(payment)
+            if debt_id not in debts:
+                findings.append(
+                    AuditFinding(
+                        check="debt_balance_integrity",
+                        severity=AuditSeverity.ERROR,
+                        message=f"Debt payment id={payment_id} references missing debt.",
+                        detail=f"debt_id={debt_id}",
+                    )
+                )
+                continue
+
+            operation_type = str(payment.get("operation_type", "") or "").strip().lower()
+            is_write_off = bool(payment.get("is_write_off"))
+            record_id = payment.get("record_id")
+            if is_write_off != (operation_type == "debt_forgive"):
+                findings.append(
+                    AuditFinding(
+                        check="debt_balance_integrity",
+                        severity=AuditSeverity.ERROR,
+                        message=f"Debt payment id={payment_id} has mismatched write-off flags.",
+                        detail=f"operation_type={operation_type}, is_write_off={int(is_write_off)}",
+                    )
+                )
+
+            if record_id is None:
+                if not is_write_off:
+                    findings.append(
+                        AuditFinding(
+                            check="debt_balance_integrity",
+                            severity=AuditSeverity.ERROR,
+                            message=f"Debt payment id={payment_id} is missing linked record.",
+                        )
+                    )
+            else:
+                linked_debt_id = record_debt_links.get(int(record_id))
+                if linked_debt_id != debt_id:
+                    findings.append(
+                        AuditFinding(
+                            check="debt_balance_integrity",
+                            severity=AuditSeverity.ERROR,
+                            message=f"Debt payment id={payment_id} is linked to wrong record.",
+                            detail=(
+                                f"record_id={int(record_id)}, "
+                                f"record.related_debt_id={linked_debt_id}, debt_id={debt_id}"
+                            ),
+                        )
+                    )
+
+        for debt_id, debt in sorted(debts.items()):
+            total_minor = int(debt["total_amount_minor"] or 0)
+            remaining_minor = int(debt["remaining_amount_minor"] or 0)
+            status = str(debt.get("status", "") or "").strip().lower()
+            paid_minor = sum(
+                int(payment.get("principal_paid_minor", 0) or 0)
+                for payment in payments_by_debt.get(debt_id, [])
+            )
+            if total_minor != remaining_minor + paid_minor:
+                findings.append(
+                    AuditFinding(
+                        check="debt_balance_integrity",
+                        severity=AuditSeverity.ERROR,
+                        message=f"Debt id={debt_id} has inconsistent balance decomposition.",
+                        detail=f"""
+                        total={total_minor}, remaining={remaining_minor}, paid={paid_minor}
+                        """,
+                    )
+                )
+            if status == "closed" and remaining_minor != 0:
+                findings.append(
+                    AuditFinding(
+                        check="debt_balance_integrity",
+                        severity=AuditSeverity.ERROR,
+                        message=f"Debt id={debt_id} is closed with non-zero remaining balance.",
+                        detail=f"remaining_amount_minor={remaining_minor}",
+                    )
+                )
+            if status == "open" and remaining_minor == 0:
+                findings.append(
+                    AuditFinding(
+                        check="debt_balance_integrity",
+                        severity=AuditSeverity.ERROR,
+                        message=f"Debt id={debt_id} is open with zero remaining balance.",
+                    )
+                )
+
+        if findings:
+            return findings
+        return [
+            AuditFinding(
+                check="debt_balance_integrity",
+                severity=AuditSeverity.OK,
+                message="Debt balances and linked payments are consistent.",
+            )
+        ]
+
     def _read_mandatory_expense_rows(self) -> list[dict[str, Any]]:
         rows = self._repo.query_all(
             """
@@ -572,6 +697,33 @@ class AuditService:
                 rate_at_operation,
                 amount_kzt
             FROM transfers
+            ORDER BY id
+            """
+        )
+        return [dict(row) for row in rows]
+
+    def _read_debt_rows(self) -> list[dict[str, Any]]:
+        rows = self._repo.query_all(
+            """
+            SELECT id, total_amount_minor, remaining_amount_minor, status
+            FROM debts
+            ORDER BY id
+            """
+        )
+        return [dict(row) for row in rows]
+
+    def _read_debt_payment_rows(self) -> list[dict[str, Any]]:
+        rows = self._repo.query_all(
+            """
+            SELECT
+                id,
+                debt_id,
+                record_id,
+                operation_type,
+                principal_paid_minor,
+                is_write_off,
+                payment_date
+            FROM debt_payments
             ORDER BY id
             """
         )

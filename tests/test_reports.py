@@ -2,6 +2,7 @@ from datetime import date
 
 import pytest
 
+import domain.reports as reports_module
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
 from domain.reports import Report
 
@@ -264,6 +265,30 @@ def test_filter_by_period_range_raises_when_end_before_start():
     report = _build_opening_balance_test_report()
     with pytest.raises(ValueError):
         report.filter_by_period_range("2024-03", "2024-01")
+
+
+def test_monthly_income_expense_rows_uses_current_month_when_period_end_is_implicit(
+    monkeypatch,
+):
+    class FakeDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 4, 15)
+
+    monkeypatch.setattr(reports_module, "dt_date", FakeDate)
+
+    report = Report(
+        [
+            IncomeRecord(date="2026-01-10", _amount_init=100.0, category="Salary"),
+        ]
+    ).filter_by_period_range("2026-01")
+
+    year, rows = report.monthly_income_expense_rows()
+
+    assert year == 2026
+    assert [row[0] for row in rows] == ["2026-01", "2026-02", "2026-03", "2026-04"]
+    assert rows[0][1] == 100.0
+    assert rows[-1][0] == "2026-04"
 
 
 def test_filter_by_year_includes_boundary_dates():

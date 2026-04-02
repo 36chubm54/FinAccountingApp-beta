@@ -1,9 +1,12 @@
 import os
 import tempfile
 import time
+from datetime import date as dt_date
 
 from openpyxl import load_workbook
 
+import domain.reports as reports_module
+from domain.debt import Debt, DebtKind, DebtStatus
 from domain.import_policy import ImportPolicy
 from domain.records import (
     ExpenseRecord,
@@ -61,6 +64,90 @@ def test_report_xlsx_roundtrip():
         assert len(imported.records()) == 2
         assert abs(imported._initial_balance - 50.0) < 1e-6
         assert abs(imported.total() - report.total()) < 1e-6
+    finally:
+        os.unlink(tmp_path)
+
+
+def test_report_xlsx_includes_debts_sheet_when_provided():
+    records = [
+        IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+        ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food"),
+    ]
+    report = Report(records, initial_balance=50.0)
+    debts = [
+        Debt(
+            id=1,
+            contact_name="Alex",
+            kind=DebtKind.DEBT,
+            total_amount_minor=10000,
+            remaining_amount_minor=7500,
+            currency="KZT",
+            interest_rate=0.0,
+            status=DebtStatus.OPEN,
+            created_at="2026-03-01",
+        )
+    ]
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        tmp_path = tmp.name
+    try:
+        report_to_xlsx(report, tmp_path, debts=debts)
+        wb = load_workbook(tmp_path, data_only=True)
+        try:
+            assert "Debts" in wb.sheetnames
+            ws = wb["Debts"]
+            assert ws.cell(1, 1).value == "Contact"
+            assert ws.cell(2, 1).value == "Alex"
+            assert ws.cell(1, 4).value == "Opened"
+            assert ws.cell(1, 9).value == "Settled"
+            assert ws.cell(1, 10).value == "Progress %"
+            assert ws.cell(2, 4).value == "2026-03-01"
+            assert ws.cell(2, 7).value == 100.0
+            assert ws.cell(2, 8).value == 75.0
+            assert ws.cell(2, 9).value == 25.0
+            assert ws.cell(2, 10).value == 25.0
+        finally:
+            wb.close()
+    finally:
+        os.unlink(tmp_path)
+
+
+def test_report_xlsx_skips_debts_sheet_when_no_debt_overlaps_report_period(monkeypatch):
+    class FakeDate(dt_date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 4, 15)
+
+    monkeypatch.setattr(reports_module, "dt_date", FakeDate)
+
+    report = Report(
+        [IncomeRecord(date="2026-01-01", _amount_init=100.0, category="Salary")],
+        initial_balance=50.0,
+    ).filter_by_period_range("2026-04")
+    debts = [
+        Debt(
+            id=1,
+            contact_name="Alex",
+            kind=DebtKind.DEBT,
+            total_amount_minor=10000,
+            remaining_amount_minor=7500,
+            currency="KZT",
+            interest_rate=0.0,
+            status=DebtStatus.OPEN,
+            created_at="2026-01-10",
+            closed_at="2026-02-05",
+        )
+    ]
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        tmp_path = tmp.name
+    try:
+        report_to_xlsx(report, tmp_path, debts=debts)
+        wb = load_workbook(tmp_path, data_only=True)
+        try:
+            assert "Debts" not in wb.sheetnames
+        finally:
+            wb.close()
     finally:
         os.unlink(tmp_path)
 
