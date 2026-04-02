@@ -7,6 +7,45 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.9.0] - 2026-04-02
+
+### Added
+
+- Added the `Debts` tab with debt/loan creation, payment registration, write-off, close, delete, history, and progress visualization
+- Added debt domain models, SQLite tables, repository/service/use-case/controller flows, and dedicated GUI/runtime test coverage
+- Full backup/import/migration pipelines now support `debts` and `debt_payments`
+- Audit engine now includes `debt_balance_integrity`
+- XLSX/PDF report export now includes debt summary sections when debts overlap the report period
+
+### Changed
+
+- Net worth calculations now account for open debts and loans
+- Reports monthly summary now correctly extends from `Period` start to the current month when `Period end` is empty
+- Debt report export is wallet-aware for wallet-filtered reports
+- Legacy backup JSON import helpers remain available, but `ImportService.import_file(...)` is now the documented primary app-level import path
+- Debt deletion in the GUI now explicitly warns that linked cashflow records and wallet balances are preserved
+
+### Fixed
+
+- Fixed several debt-flow data integrity issues around ID renormalization and linked record deletion
+- Fixed GUI full-backup export so user-triggered backups include `debts` and `debt_payments`
+- Fixed startup JSON/technical backup sync to account for SQLite WAL/SHM activity and avoid stale empty exports
+- Fixed Settings tab initialization crash caused by invalid `Treeview` anchor configuration
+- Fixed debt progress bar rendering for small or evenly split paid/write-off states
+
+### Tests
+
+- Added/updated regression coverage for debt domain, debt service, debt controller, debts tab, report controller, backup/import/export, audit, and runtime storage paths
+
+### Docs
+
+- Updated `README.md` and `README_EN.md` for the `Debts` tab, debt-aware reports/net worth, backup/import semantics, and import API roles
+- Clarified import API roles: `ImportService.import_file(...)` is the primary app-level import path, while `gui.importers` / `import_full_backup_from_json(...)` remain legacy-compatible helpers
+
+No breaking changes.
+
+---
+
 ## [1.8.2] - 2026-03-29
 
 ### Added

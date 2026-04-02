@@ -2,6 +2,8 @@
 
 Graphical application for personal financial accounting with multicurrency, categories and reports.
 
+The current `v1.9.0` release adds built-in debt and loan tracking: a dedicated `Debts` tab, repayment/write-off history, debt-aware backup/import/export, and inclusion of open obligations in `net worth` plus audit/report flows.
+
 ## 📋 Contents
 
 - [Quick start](#-quick-start)
@@ -71,6 +73,7 @@ Tabs and actions:
 - `Reports` — report generation, export.
 - `Analytics` — financial analytics for an arbitrary period (dashboard, categories, monthly report).
 - `Budget` — category budgets with arbitrary date ranges, pace tracking, and live progress.
+- `Debts` — debt and loan tracking: create, repay, write off, close, review history, and view progress.
 - `Distribution` — monthly net-income distribution structure with fixed rows and snapshot history.
 - `Settings` — management of mandatory expenses and wallets.
 
@@ -120,6 +123,17 @@ Monthly net-income allocation structure and month-by-month history view.
 - `Fix Row` freezes or unfreezes a month row; auto-fixed closed months are protected from manual unfix.
 - When frozen rows are requested, the service auto-freezes closed past months.
 - Validation requires top-level items to total `100%`, and subitems within an item to total `100%` when present.
+
+### Debts tab
+
+Tracks liabilities (`Debt`) and issued loans (`Loan`) with dedicated history and payoff progress.
+
+- `New Debt / Loan` form: `Kind`, `Contact`, `Amount`, `Date`, `Wallet`, `Description`.
+- The table shows `Contact`, `Kind`, `Total`, `Remaining`, `Status`, `Created`.
+- Actions for the selected debt: `Pay`, `Write off`, `Close`, `Delete`, `Refresh`.
+- `Write off` reduces the remaining balance without changing wallet balance.
+- `Delete` removes the debt card and debt-payment history, but does not roll back linked income/expense records or historical wallet balances.
+- The progress bar and `History` block show paid, written-off, and remaining portions of the debt.
 
 ### Adding income/expense
 
@@ -283,7 +297,7 @@ Available methods:
 
 - `get_wallet_balance(wallet_id, date=None)` — wallet balance (optionally at a given date)
 - `get_wallet_balances(date=None)` — balances of all active wallets
-- `get_total_balance(date=None)` — total system net worth
+- `get_total_balance(date=None)` — total system net worth including open debts/loans
 - `get_cashflow(start_date, end_date)` — income, expenses, and net cashflow for a period
 - `get_income(start_date, end_date)` — income for a period
 - `get_expenses(start_date, end_date)` — expenses for a period
@@ -462,7 +476,7 @@ A dedicated `storage/` layer is used for data access:
 - `storage/base.py` — `Storage` contract (data-access operations only).
 - `storage/json_storage.py` — JSON adapter for import/export/backup only.
 - `storage/sqlite_storage.py` — `SQLiteStorage` based on standard `sqlite3`.
-- `db/schema.sql` — SQL schema for `wallets`, `records`, `transfers`, `mandatory_expenses`, `budgets`, and `distribution_*`.
+- `db/schema.sql` — SQL schema for `wallets`, `records`, `transfers`, `mandatory_expenses`, `budgets`, `debts`, `debt_payments`, and `distribution_*`.
 
 ### JSON -> SQLite migration
 
@@ -482,7 +496,7 @@ What the script does:
 
 - loads source data via `JsonStorage`;
 - writes to SQLite in one explicit transaction with strict order:
-  `wallets -> budgets -> distribution_items -> distribution_subitems -> transfers -> records -> mandatory_expenses -> distribution_snapshots`;
+  `wallets -> transfers -> debts -> records -> mandatory_expenses -> budgets -> debt_payments -> distribution_items -> distribution_subitems -> distribution_snapshots`;
 - preserves existing `id` values (or builds `old_id -> new_id` mapping when ids are auto-generated);
 - populates precision fields `*_minor` and `rate_at_operation_text` while writing;
 - for full backup, strictly validates `distribution_items` / `distribution_subitems` and aborts migration on malformed payloads;
@@ -535,15 +549,15 @@ SQLite behavior for money fields:
 
 The project follows a layered architecture:
 
-- `domain/` — business models and rules (records, budgets, reports, data audit, date/period validation, currencies, wallets, transfers).
+- `domain/` — business models and rules (records, budgets, debts/loans, reports, data audit, date/period validation, currencies, wallets, transfers).
 - `app/` — use cases, including audit execution, and the currency service adapter.
-- `infrastructure/` — JSON and SQLite `RecordRepository` implementations.
+- `infrastructure/` — JSON and SQLite `RecordRepository` implementations, including debt/debt-payment persistence.
 - `storage/` — storage abstraction and JSON/SQLite adapters.
 - `db/` — SQLite SQL schema.
 - `bootstrap.py` — SQLite initialization and startup validation.
-- `backup.py` — JSON backup and SQLite -> JSON export.
+- `backup.py` — JSON backup and SQLite -> JSON export, including `budgets`, `debts`, `debt_payments`, and distribution payloads.
 - `config.py` — runtime SQLite and JSON import/export paths.
-- `services/` — service layer for import orchestration, read-only SQLite audit, budgets, and analytics.
+- `services/` — service layer for import orchestration, read-only SQLite audit, budgets, debts/loans, and analytics.
 - `utils/` — import/export and preparation of data for graphs.
 - `gui/` — GUI layer (Tkinter).
 
@@ -613,6 +627,12 @@ Below are the key classes and functions synchronized with the actual code.
 - `BudgetStatus` — `future` / `active` / `expired`.
 - `PaceStatus` — `on_track` / `overpace` / `overspent`.
 - `compute_pace_status(...)` — derives the pace state from spent/limit/time inputs.
+
+`domain/debt.py`
+
+- `DebtKind`, `DebtStatus`, `DebtOperationType` — enums for obligation kinds, states, and debt operations.
+- `Debt` — immutable debt/loan card with `total_amount_minor`, `remaining_amount_minor`, `created_at`, `closed_at`.
+- `DebtPayment` — immutable repayment/write-off entry with `record_id`, `operation_type`, `principal_paid_minor`, `is_write_off`.
 
 `domain/reports.py`
 
@@ -740,9 +760,10 @@ Below are the key classes and functions synchronized with the actual code.
 
 `db/schema.sql`
 
-- Database schema with tables `wallets`, `records`, `transfers`, `mandatory_expenses`, `budgets`, constraints, and indexes.
+- Database schema with tables `wallets`, `records`, `transfers`, `mandatory_expenses`, `budgets`, `debts`, `debt_payments`, constraints, and indexes.
 - Monetary columns have exact integer `*_minor` companions; FX rates have `rate_at_operation_text`.
 - Budgets include `limit_kzt_minor`, `include_mandatory`, and indexes for category/date lookups.
+- Debt flows add `records.related_debt_id`, dedicated `debts` / `debt_payments` tables, and indexes on `status`, `contact_name`, `debt_id`, and `record_id`.
 
 ### GUI
 
@@ -767,6 +788,12 @@ Below are the key classes and functions synchronized with the actual code.
 
 - `BudgetTabBindings` — widget bindings for the `Budget` tab.
 - `build_budget_tab(parent, context)` — builds the `Budget` tab with the creation form, budget table, progress canvas, and a `refresh` callback.
+
+`gui/tabs/debts_tab.py`
+
+- `DebtsTabBindings` — widget bindings for the `Debts` tab.
+- `build_debts_tab(parent, context)` — builds the `Debts` tab with the creation form, debts table, history block, and progress canvas.
+- `refresh_debts_views(context)` — shared list/charts/wallets/all refresh after debt operations.
 
 `gui/tabs/distribution_tab.py`
 
@@ -844,20 +871,23 @@ Below are the key classes and functions synchronized with the actual code.
 - `get_average_monthly_income(start_date, end_date)` — average monthly income over a range.
 - `get_average_monthly_expenses(start_date, end_date)` — average monthly expenses over a range.
 - `create_budget(...)`, `get_budgets()`, `get_budget_results()`, `delete_budget(...)`, `update_budget_limit(...)`, `replace_budgets(...)` — Budget System API surface.
+- `create_debt(...)`, `create_loan(...)`, `get_debts(wallet_id=None)`, `get_open_debts()`, `get_closed_debts()`, `get_debt_history(debt_id)` — Debt System API surface.
+- `register_debt_payment(...)`, `register_debt_write_off(...)`, `close_debt(...)`, `delete_debt(...)`, `delete_debt_payment(...)`, `recalculate_debt(...)` — debt/loan lifecycle operations.
 - `create_distribution_item(...)`, `create_distribution_subitem(...)`, `update_distribution_item_pct(...)`, `update_distribution_subitem_pct(...)`, `delete_distribution_item(...)`, `delete_distribution_subitem(...)` — Distribution System CRUD API.
 - `validate_distribution()`, `get_distribution_history(start_month, end_month)`, `get_frozen_distribution_rows(...)`, `toggle_distribution_month_fixed(month)` — frozen-row lifecycle and monthly distribution calculations.
 
 `gui/exporters.py`
 
-- `export_report(report, filepath, fmt)`.
+- `export_report(report, filepath, fmt, debts=None)` — report export; `XLSX`/`PDF` can include debt summary sections.
 - `export_grouped_report(statement_title, grouped_rows, filepath, fmt)` — exports grouped report summaries.
 - `export_mandatory_expenses(expenses, filepath, fmt)`.
 - `export_records(records, filepath, fmt, initial_balance=0.0, transfers=None)`.
-- `export_full_backup(filepath, wallets, records, mandatory_expenses, distribution_items=(), distribution_subitems=(), distribution_snapshots=(), transfers=None, initial_balance=0.0, readonly=True, storage_mode="unknown")`.
+- `export_full_backup(filepath, wallets, records, mandatory_expenses, budgets=(), debts=(), debt_payments=(), distribution_items=(), distribution_subitems=(), distribution_snapshots=(), transfers=None, initial_balance=0.0, readonly=True, storage_mode="unknown")`.
 
 `gui/importers.py`
 
 - Legacy wrappers over `utils/*` kept for backward compatibility and tests.
+- For real application import flows, prefer `FinancialController.import_records(...)` / `ImportService.import_file(...)`.
 
 `gui/helpers.py`
 
@@ -873,28 +903,30 @@ Below are the key classes and functions synchronized with the actual code.
 
 - `parse_import_file(path, force=False)` -> `ParsedImportData` (DTO/dict parsing layer, no storage writes).
 - Enforces safety limits: file size, row count, CSV field size.
-- For `JSON`, it also reads `budgets`, `distribution_items`, `distribution_subitems`, and `distribution_snapshots`.
+- For `JSON`, it also reads `budgets`, `debts`, `debt_payments`, `distribution_items`, `distribution_subitems`, and `distribution_snapshots`.
 - `parse_transfer_row(...)` handles legacy transfer rows as well as current-rate/full-backup parsing.
 
 `services/import_service.py`
 
 - `ImportService.import_file(path, force=False, dry_run=False)` — dry-run or real operation import; returns `ImportResult`.
 - `ImportService.import_mandatory_file(path)` — imports mandatory templates and returns `ImportResult`.
+- This is the primary app-level import API for GUI/controller flows.
 - Dry-run uses the same parse/validation pipeline but performs no SQLite writes.
 - `Full Backup` keeps fixed `amount_kzt/rate_at_operation`; `Current Rate` recalculates values.
-- For `JSON` full backup, it can also restore budgets, distribution structure, and frozen snapshots through `replace_budgets(...)`, `replace_distribution_structure(...)`, and `replace_distribution_snapshots(...)`.
+- For `JSON` full backup, it can also restore budgets, debts, debt payments, distribution structure, and frozen snapshots through the main import pipeline plus distribution/budget hooks.
 - Malformed distribution structure in a `JSON` full backup is now treated as an import error instead of being skipped silently.
 
 `services/audit_service.py`
 
 - `AuditService(repository)` — read-only diagnostic service for SQLite data.
-- `run()` — scans SQLite data and executes 10 integrity/consistency checks.
+- `run()` — scans SQLite data and executes 11 integrity/consistency checks.
 - Each check returns `AuditFinding` entries and emits one `OK` finding when no violations are found.
 
 `services/report_service.py`
 
 - DTOs and helpers for the reports UI: `ReportFilters`, `ReportSummary`, `ReportsResult`,
   `build_operations_rows(report)`, `build_monthly_rows(report)`, `extract_categories(rows)`.
+- Debt summary for `XLSX`/`PDF` exports is prepared separately and period/wallet-filtered via `utils/debt_report_utils.py`.
 
 `services/balance_service.py`
 
@@ -905,7 +937,7 @@ Below are the key classes and functions synchronized with the actual code.
 - SQL aggregates use `*_minor` when available to avoid accumulated float drift.
 - `get_wallet_balance(wallet_id, date=None)` — wallet balance at a date or over full history.
 - `get_wallet_balances(date=None)` — balances of all active wallets.
-- `get_total_balance(date=None)` — total system balance.
+- `get_total_balance(date=None)` — total system balance including open debts/loans.
 - `get_cashflow(start_date, end_date)` — income, expenses, and net cashflow without transfer double-counting.
 - `get_income(start_date, end_date)` — income for a period without transfers.
 - `get_expenses(start_date, end_date)` — expenses for a period, including `mandatory_expense`.
@@ -949,6 +981,14 @@ Below are the key classes and functions synchronized with the actual code.
 - `get_budget_result(budget, today)` — budget results for the specified date.
 - `get_all_results(today)` — batch calculation of all budget results for the specified date.
 
+`services/debt_service.py`
+
+- `DebtService(repository)` — debt and loan lifecycle service on top of SQLite.
+- `create_debt(...)` / `create_loan(...)` — create an obligation and the linked starting cashflow record.
+- `register_payment(...)` / `register_write_off(...)` — settle through a wallet-linked record or write off without wallet movement.
+- `close_debt(...)`, `delete_debt(...)`, `delete_payment(...)`, `recalculate_debt(...)` — close, delete, and restore a consistent remaining balance.
+- `get_all_debts()`, `get_open_debts()`, `get_closed_debts()`, `get_debt_history(debt_id)` — list and history helpers.
+
 `services/distribution_service.py`
 
 - `DistributionService(repository)` — Distribution System CRUD and monthly allocation service for SQLite.
@@ -970,10 +1010,15 @@ Below are the key classes and functions synchronized with the actual code.
 `utils/backup_utils.py`
 
 - `compute_checksum(data)` — SHA256 checksum for `data`.
-- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, budgets=(), distribution_items=(), distribution_subitems=(), distribution_snapshots=(), transfers=(), initial_balance=0.0, readonly=True, storage_mode="unknown")`.
-- `import_full_backup_from_json(filepath, force=False)`.
+- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, budgets=(), debts=(), debt_payments=(), distribution_items=(), distribution_subitems=(), distribution_snapshots=(), transfers=(), initial_balance=0.0, readonly=True, storage_mode="unknown")`.
+- `import_full_backup_from_json(filepath, force=False)` — legacy-compatible helper for backup JSON parsing; it also reads `debts` / `debt_payments`, but prefer `ImportService.import_file(...)` for real application imports.
 - Backup/import normalizes money values and FX rates via `utils.money`.
 - JSON export writes atomically via a temporary file + `os.replace`.
+
+`utils/debt_report_utils.py`
+
+- `debts_for_report_period(report, debts)` — selects debts/loans that overlap the report period.
+- `debt_progress_percent(debt)` — computes obligation completion percent for export summaries.
 
 `utils/money.py`
 
@@ -1064,6 +1109,7 @@ project/
 │   ├── __init__.py
 │   ├── audit.py                      # Audit models and logic
 │   ├── budget.py                     # Budgets, pace/status, and live tracking DTOs
+│   ├── debt.py                       # Debt, loan, and debt-payment models
 │   ├── distribution.py               # DTOs and frozen snapshot models for the Distribution System
 │   ├── records.py                    # Records
 │   ├── reports.py                    # Reports
@@ -1094,6 +1140,7 @@ project/
 │   ├── balance_service.py            # Read-only balance and cashflow service
 │   ├── budget_service.py             # Budget CRUD and live spend tracking
 │   ├── currency_support.py           # Converting money amounts to KZT for services
+│   ├── debt_service.py               # Debt/loan lifecycle service
 │   ├── distribution_service.py       # Distribution structure CRUD and frozen month snapshots
 │   ├── import_parser.py              # CSV/XLSX/JSON parser -> DTO
 │   ├── import_service.py             # Import orchestration via FinanceService
@@ -1105,6 +1152,7 @@ project/
 ├── utils/                            # Import/export and graphs
 │   ├── __init__.py
 │   ├── backup_utils.py               # Backup of data
+│   ├── debt_report_utils.py          # Debt summary helpers for report export
 │   ├── import_core.py                # Import validator
 │   ├── charting.py                   # Graphs and Aggregations
 │   ├── csv_utils.py
@@ -1122,6 +1170,7 @@ project/
 │   │   ├── reports_controller.py     # Reports tab controller (UI adapter)
 │   │   ├── analytics_tab.py          # Analytics tab (dashboard, categories, report)
 │   │   ├── budget_tab.py             # Budget tab and progress canvas
+│   │   ├── debts_tab.py              # Debts and loans tab
 │   │   ├── distribution_tab.py       # Net-income distribution tab by month
 │   │   ├── settings_support.py       # Shared helpers for the Settings tab
 │   │   └── settings_tab.py           # Tab with wallets and mandatory expenses
@@ -1149,6 +1198,10 @@ project/
     ├── test_charting.py
     ├── test_csv.py
     ├── test_currency.py
+    ├── test_debt_controller.py
+    ├── test_debt_domain.py
+    ├── test_debt_service.py
+    ├── test_debts_tab.py
     ├── test_distribution_service.py
     ├── test_excel.py
     ├── test_gui_exporters_importers.py
@@ -1166,6 +1219,7 @@ project/
     ├── test_pdf.py
     ├── test_records.py
     ├── test_reports.py
+    ├── test_reports_controller.py
     ├── test_repositories.py
     ├── test_schema_contracts.py
     ├── test_services.py
