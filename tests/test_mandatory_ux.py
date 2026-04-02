@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import tkinter as tk
 from datetime import date
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -10,6 +12,7 @@ from app.services import CurrencyService
 from app.use_cases import ApplyMandatoryAutoPayments, CreateMandatoryExpense
 from domain.records import MandatoryExpenseRecord
 from gui.controllers import FinancialController
+from gui.tabs.settings_tab import SettingsTabContext, build_settings_tab
 from infrastructure.sqlite_repository import SQLiteRecordRepository
 
 
@@ -217,15 +220,53 @@ def test_update_mandatory_wallet_and_period_persist(tmp_path: Path) -> None:
         repo.close()
 
 
-def test_audit_reports_10_checks_on_clean_db(tmp_path: Path) -> None:
+def test_audit_reports_11_checks_on_clean_db(tmp_path: Path) -> None:
     db_path = tmp_path / "mandatory_audit.db"
     repo = SQLiteRecordRepository(str(db_path), schema_path=_schema_path())
     try:
         controller = FinancialController(repo, CurrencyService(use_online=False))
         report = controller.run_audit()
-        assert len(report.findings) == 10
-        assert len(report.passed) == 9
+        assert len(report.findings) == 11
+        assert len(report.passed) == 10
     finally:
+        repo.close()
+
+
+def test_settings_tab_builds_with_current_treeview_anchors(tmp_path: Path) -> None:
+    db_path = tmp_path / "settings_build.db"
+    repo = SQLiteRecordRepository(str(db_path), schema_path=_schema_path())
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        controller = FinancialController(repo, CurrencyService(use_online=False))
+        parent = tk.Frame(root)
+        parent.pack()
+        context = cast(
+            SettingsTabContext,
+            type(
+                "Ctx",
+                (),
+                {
+                    "controller": controller,
+                    "repository": repo,
+                    "refresh_operation_wallet_menu": None,
+                    "refresh_transfer_wallet_menus": None,
+                    "refresh_wallets": None,
+                    "_refresh_list": lambda self: None,
+                    "_refresh_charts": lambda self: None,
+                    "_refresh_budgets": lambda self: None,
+                    "_refresh_all": lambda self: None,
+                    "_run_background": lambda self, task, **kwargs: kwargs.get(
+                        "on_success", lambda *_: None
+                    )(task()),
+                },
+            )(),
+        )
+
+        build_settings_tab(parent, context, {"CSV": {"ext": ".csv", "desc": "CSV"}})
+        root.update_idletasks()
+    finally:
+        root.destroy()
         repo.close()
 
 

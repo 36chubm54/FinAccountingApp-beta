@@ -144,6 +144,14 @@ def _validate_sqlite_integrity_only(sqlite_repo: SQLiteRecordRepository) -> None
     logging.info("[bootstrap] SQLite integrity check passed")
 
 
+def _latest_sqlite_activity_mtime(sqlite_path: Path) -> float:
+    candidates = [sqlite_path]
+    for suffix in ("-wal", "-shm"):
+        candidates.append(sqlite_path.with_name(f"{sqlite_path.name}{suffix}"))
+    existing = [path.stat().st_mtime for path in candidates if path.exists()]
+    return max(existing, default=0.0)
+
+
 def _should_export_json() -> bool:
     """Return True if JSON export is needed (data.json missing or outdated)."""
     json_path = Path(JSON_PATH)
@@ -158,7 +166,7 @@ def _should_export_json() -> bool:
         return False
 
     json_mtime = json_path.stat().st_mtime
-    sqlite_mtime = sqlite_path.stat().st_mtime
+    sqlite_mtime = _latest_sqlite_activity_mtime(sqlite_path)
 
     if sqlite_mtime > json_mtime:
         logging.info("[bootstrap] SQLite database newer than JSON, export required")
