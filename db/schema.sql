@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS records (
     date TEXT NOT NULL CHECK(date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
     wallet_id INTEGER NOT NULL,
     transfer_id INTEGER,
+    related_debt_id INTEGER DEFAULT NULL,
     amount_original REAL NOT NULL CHECK(amount_original >= 0),
     amount_original_minor INTEGER DEFAULT NULL CHECK(amount_original_minor >= 0 OR amount_original_minor IS NULL),
     currency TEXT NOT NULL CHECK(length(trim(currency)) = 3 AND upper(trim(currency)) = trim(currency)),
@@ -51,7 +52,50 @@ CREATE TABLE IF NOT EXISTS records (
     description TEXT NOT NULL DEFAULT '',
     period TEXT CHECK(period IN ('daily', 'weekly', 'monthly', 'yearly') OR period IS NULL),
     FOREIGN KEY(wallet_id) REFERENCES wallets(id) ON UPDATE CASCADE ON DELETE RESTRICT,
-    FOREIGN KEY(transfer_id) REFERENCES transfers(id) ON UPDATE CASCADE ON DELETE CASCADE
+    FOREIGN KEY(transfer_id) REFERENCES transfers(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    FOREIGN KEY(related_debt_id) REFERENCES debts(id) ON UPDATE CASCADE ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS debts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contact_name TEXT NOT NULL CHECK(length(trim(contact_name)) > 0),
+    kind TEXT NOT NULL CHECK(kind IN ('debt', 'loan')),
+    total_amount_minor INTEGER NOT NULL CHECK(total_amount_minor > 0),
+    remaining_amount_minor INTEGER NOT NULL CHECK(
+        remaining_amount_minor >= 0 AND remaining_amount_minor <= total_amount_minor
+    ),
+    currency TEXT NOT NULL CHECK(length(trim(currency)) = 3 AND upper(trim(currency)) = trim(currency)),
+    interest_rate REAL NOT NULL DEFAULT 0 CHECK(interest_rate >= 0),
+    status TEXT NOT NULL CHECK(status IN ('open', 'closed')),
+    created_at TEXT NOT NULL CHECK(created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+    closed_at TEXT DEFAULT NULL CHECK(
+        closed_at IS NULL OR closed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+    ),
+    CHECK(status = 'open' OR remaining_amount_minor = 0)
+);
+
+CREATE TABLE IF NOT EXISTS debt_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    debt_id INTEGER NOT NULL,
+    record_id INTEGER DEFAULT NULL,
+    operation_type TEXT NOT NULL CHECK(
+        operation_type IN (
+            'debt_take',
+            'debt_repay',
+            'loan_give',
+            'loan_collect',
+            'debt_forgive'
+        )
+    ),
+    principal_paid_minor INTEGER NOT NULL CHECK(principal_paid_minor > 0),
+    is_write_off INTEGER NOT NULL DEFAULT 0 CHECK(is_write_off IN (0, 1)),
+    payment_date TEXT NOT NULL CHECK(payment_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+    FOREIGN KEY(debt_id) REFERENCES debts(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    FOREIGN KEY(record_id) REFERENCES records(id) ON UPDATE CASCADE ON DELETE SET NULL,
+    CHECK(
+        (is_write_off = 1 AND operation_type = 'debt_forgive')
+        OR (is_write_off = 0 AND operation_type <> 'debt_forgive')
+    )
 );
 
 CREATE TABLE IF NOT EXISTS mandatory_expenses (
@@ -131,6 +175,7 @@ CREATE TABLE IF NOT EXISTS distribution_snapshot_values (
 -- ALTER TABLE records ADD COLUMN amount_original_minor INTEGER DEFAULT NULL;
 -- ALTER TABLE records ADD COLUMN rate_at_operation_text TEXT DEFAULT NULL;
 -- ALTER TABLE records ADD COLUMN amount_kzt_minor INTEGER DEFAULT NULL;
+-- ALTER TABLE records ADD COLUMN related_debt_id INTEGER DEFAULT NULL;
 -- ALTER TABLE mandatory_expenses ADD COLUMN amount_original_minor INTEGER DEFAULT NULL;
 -- ALTER TABLE mandatory_expenses ADD COLUMN rate_at_operation_text TEXT DEFAULT NULL;
 -- ALTER TABLE mandatory_expenses ADD COLUMN amount_kzt_minor INTEGER DEFAULT NULL;
@@ -141,12 +186,17 @@ CREATE TABLE IF NOT EXISTS distribution_snapshot_values (
 CREATE INDEX IF NOT EXISTS idx_records_date ON records(date);
 CREATE INDEX IF NOT EXISTS idx_records_wallet_id ON records(wallet_id);
 CREATE INDEX IF NOT EXISTS idx_records_wallet_date ON records(wallet_id, date);
+CREATE INDEX IF NOT EXISTS idx_records_related_debt_id ON records(related_debt_id);
 CREATE INDEX IF NOT EXISTS idx_transfers_date ON transfers(date);
 CREATE INDEX IF NOT EXISTS idx_transfers_wallet_from ON transfers(from_wallet_id);
 CREATE INDEX IF NOT EXISTS idx_transfers_wallet_to ON transfers(to_wallet_id);
 CREATE INDEX IF NOT EXISTS idx_mandatory_expenses_wallet_id ON mandatory_expenses(wallet_id);
 CREATE INDEX IF NOT EXISTS idx_budgets_category ON budgets(category);
 CREATE INDEX IF NOT EXISTS idx_budgets_dates ON budgets(start_date, end_date);
+CREATE INDEX IF NOT EXISTS idx_debts_contact_name ON debts(contact_name);
+CREATE INDEX IF NOT EXISTS idx_debts_status ON debts(status);
+CREATE INDEX IF NOT EXISTS idx_debt_payments_debt_id ON debt_payments(debt_id);
+CREATE INDEX IF NOT EXISTS idx_debt_payments_record_id ON debt_payments(record_id);
 CREATE INDEX IF NOT EXISTS idx_dist_items_order ON distribution_items(sort_order);
 CREATE INDEX IF NOT EXISTS idx_dist_subitems_item ON distribution_subitems(item_id);
 CREATE INDEX IF NOT EXISTS idx_dist_snapshot_values_month_order

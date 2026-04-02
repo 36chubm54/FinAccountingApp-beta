@@ -6,12 +6,24 @@ from unittest.mock import Mock, patch
 import pytest
 
 from app.use_cases import (
+    CloseDebt,
+    CreateDebt,
     CreateExpense,
     CreateIncome,
+    CreateLoan,
     DeleteAllRecords,
+    DeleteDebt,
+    DeleteDebtPayment,
     DeleteRecord,
     GenerateReport,
+    GetClosedDebts,
+    GetDebtHistory,
+    GetDebts,
+    GetOpenDebts,
     ImportFromCSV,
+    RecalculateDebt,
+    RegisterDebtPayment,
+    RegisterDebtWriteOff,
 )
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, Record
@@ -255,6 +267,111 @@ class TestImportFromCSV:
             )
             mock_repo.replace_records_and_transfers.assert_called_once_with(test_records, [])
             assert result == 3
+
+
+class TestDebtUseCases:
+    def test_create_debt_delegates_to_service(self):
+        service = Mock()
+        expected = Mock()
+        service.create_debt.return_value = expected
+
+        result = CreateDebt(service).execute(
+            contact_name="Alice",
+            wallet_id=2,
+            amount_kzt=500.0,
+            created_at="2026-03-01",
+        )
+
+        service.create_debt.assert_called_once_with(
+            contact_name="Alice",
+            wallet_id=2,
+            amount_kzt=500.0,
+            created_at="2026-03-01",
+            currency="KZT",
+            interest_rate=0.0,
+            description="",
+        )
+        assert result is expected
+
+    def test_register_payment_delegates_to_service(self):
+        service = Mock()
+        expected = Mock()
+        service.register_payment.return_value = expected
+
+        result = RegisterDebtPayment(service).execute(
+            debt_id=1,
+            wallet_id=2,
+            amount_kzt=100.0,
+            payment_date="2026-03-05",
+            description="Partially paid",
+        )
+
+        service.register_payment.assert_called_once_with(
+            debt_id=1,
+            wallet_id=2,
+            amount_kzt=100.0,
+            payment_date="2026-03-05",
+            description="Partially paid",
+        )
+        assert result is expected
+
+    def test_query_and_delete_use_cases_delegate_to_service(self):
+        service = Mock()
+
+        GetDebts(service).execute()
+        GetOpenDebts(service).execute()
+        GetClosedDebts(service).execute()
+        GetDebtHistory(service).execute(3)
+        DeleteDebt(service).execute(4)
+        DeleteDebtPayment(service).execute(5, delete_linked_record=True)
+        RecalculateDebt(service).execute(6)
+        CloseDebt(service).execute(
+            debt_id=7,
+            payment_date="2026-03-10",
+            wallet_id=2,
+            write_off=False,
+            description="Close",
+        )
+        CreateLoan(service).execute(
+            contact_name="Bob",
+            wallet_id=2,
+            amount_kzt=250.0,
+            created_at="2026-03-01",
+        )
+        RegisterDebtWriteOff(service).execute(
+            debt_id=8,
+            amount_kzt=50.0,
+            payment_date="2026-03-11",
+        )
+
+        service.get_all_debts.assert_called_once()
+        service.get_open_debts.assert_called_once()
+        service.get_closed_debts.assert_called_once()
+        service.get_debt_history.assert_called_once_with(3)
+        service.delete_debt.assert_called_once_with(4)
+        service.delete_payment.assert_called_once_with(5, delete_linked_record=True)
+        service.recalculate_debt.assert_called_once_with(6)
+        service.close_debt.assert_called_once_with(
+            debt_id=7,
+            payment_date="2026-03-10",
+            wallet_id=2,
+            write_off=False,
+            description="Close",
+        )
+        service.create_loan.assert_called_once_with(
+            contact_name="Bob",
+            wallet_id=2,
+            amount_kzt=250.0,
+            created_at="2026-03-01",
+            currency="KZT",
+            interest_rate=0.0,
+            description="",
+        )
+        service.register_write_off.assert_called_once_with(
+            debt_id=8,
+            amount_kzt=50.0,
+            payment_date="2026-03-11",
+        )
 
     def test_execute_saves_initial_balance(self):
         mock_repo = Mock(spec=RecordRepository)

@@ -10,11 +10,14 @@ from app.use_cases import (
     ApplyMandatoryAutoPayments,
     CalculateNetWorth,
     CalculateWalletBalance,
+    CloseDebt,
     CreateBudget,
+    CreateDebt,
     CreateDistributionItem,
     CreateDistributionSubitem,
     CreateExpense,
     CreateIncome,
+    CreateLoan,
     CreateMandatoryExpense,
     CreateMandatoryExpenseRecord,
     CreateTransfer,
@@ -22,6 +25,8 @@ from app.use_cases import (
     DeleteAllMandatoryExpenses,
     DeleteAllRecords,
     DeleteBudget,
+    DeleteDebt,
+    DeleteDebtPayment,
     DeleteDistributionItem,
     DeleteDistributionSubitem,
     DeleteMandatoryExpense,
@@ -31,10 +36,17 @@ from app.use_cases import (
     GetActiveWallets,
     GetBudgetResults,
     GetBudgets,
+    GetClosedDebts,
+    GetDebtHistory,
+    GetDebts,
     GetDistributionItems,
     GetMandatoryExpenses,
     GetMonthlyDistribution,
+    GetOpenDebts,
     GetWallets,
+    RecalculateDebt,
+    RegisterDebtPayment,
+    RegisterDebtWriteOff,
     RunAudit,
     SoftDeleteWallet,
     UpdateBudgetLimit,
@@ -43,6 +55,7 @@ from app.use_cases import (
 )
 from domain.audit import AuditReport
 from domain.budget import Budget
+from domain.debt import Debt, DebtPayment
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
 from domain.records import MandatoryExpenseRecord, Record
@@ -66,6 +79,7 @@ from infrastructure.sqlite_repository import SQLiteRecordRepository
 from services.audit_service import AuditService
 from services.balance_service import BalanceService, CashflowResult, WalletBalance
 from services.budget_service import BudgetService
+from services.debt_service import DebtService
 from services.distribution_service import DistributionService
 from services.metrics_service import MetricsService
 from services.timeline_service import TimelineService
@@ -79,6 +93,7 @@ class FinancialController:
         self._repository = repository
         self._currency = currency_service
         self._record_service = RecordService(repository)
+        self._debt_service_instance: DebtService | None = None
         self._distribution_service_instance: DistributionService | None = None
         self.supports_bulk_import_replace = True
 
@@ -426,6 +441,8 @@ class FinancialController:
         records: list[Record],
         transfers: list[Transfer],
         mandatory_templates: list[MandatoryExpenseRecord],
+        debts: list[Debt] | None = None,
+        debt_payments: list[DebtPayment] | None = None,
         preserve_existing_mandatory: bool,
     ) -> None:
         target_wallets = list(wallets) if wallets else list(self._repository.load_wallets())
@@ -443,6 +460,8 @@ class FinancialController:
             records=records,
             mandatory_expenses=mandatory_payload,
             transfers=transfers,
+            debts=list(debts or []),
+            debt_payments=list(debt_payments or []),
         )
 
     def replace_budgets(self, budgets: list[Budget]) -> None:
@@ -516,6 +535,134 @@ class FinancialController:
 
     def update_budget_limit(self, budget_id: int, new_limit_kzt: float):
         return UpdateBudgetLimit(self._budget_service()).execute(budget_id, new_limit_kzt)
+
+    def _debt_service(self) -> DebtService:
+        if not isinstance(self._repository, SQLiteRecordRepository):
+            raise TypeError("Debt System is supported only for SQLite repository")
+        if self._debt_service_instance is None:
+            self._debt_service_instance = DebtService(self._repository)
+        return self._debt_service_instance
+
+    def create_debt(
+        self,
+        *,
+        contact_name: str,
+        wallet_id: int,
+        amount_kzt: float,
+        created_at: str,
+        currency: str = "KZT",
+        interest_rate: float = 0.0,
+        description: str = "",
+    ) -> Debt:
+        return CreateDebt(self._debt_service()).execute(
+            contact_name=contact_name,
+            wallet_id=wallet_id,
+            amount_kzt=amount_kzt,
+            created_at=created_at,
+            currency=currency,
+            interest_rate=interest_rate,
+            description=description,
+        )
+
+    def create_loan(
+        self,
+        *,
+        contact_name: str,
+        wallet_id: int,
+        amount_kzt: float,
+        created_at: str,
+        currency: str = "KZT",
+        interest_rate: float = 0.0,
+        description: str = "",
+    ) -> Debt:
+        return CreateLoan(self._debt_service()).execute(
+            contact_name=contact_name,
+            wallet_id=wallet_id,
+            amount_kzt=amount_kzt,
+            created_at=created_at,
+            currency=currency,
+            interest_rate=interest_rate,
+            description=description,
+        )
+
+    def get_debts(self, wallet_id: int | None = None) -> list[Debt]:
+        debts = GetDebts(self._debt_service()).execute()
+        if wallet_id is None:
+            return debts
+        linked_debt_ids = {
+            int(record.related_debt_id)
+            for record in self._repository.load_all()
+            if record.related_debt_id is not None and int(record.wallet_id) == int(wallet_id)
+        }
+        return [debt for debt in debts if int(debt.id) in linked_debt_ids]
+
+    def get_open_debts(self) -> list[Debt]:
+        return GetOpenDebts(self._debt_service()).execute()
+
+    def get_closed_debts(self) -> list[Debt]:
+        return GetClosedDebts(self._debt_service()).execute()
+
+    def get_debt_history(self, debt_id: int) -> list[DebtPayment]:
+        return GetDebtHistory(self._debt_service()).execute(debt_id)
+
+    def register_debt_payment(
+        self,
+        *,
+        debt_id: int,
+        wallet_id: int,
+        amount_kzt: float,
+        payment_date: str,
+        description: str = "",
+    ) -> DebtPayment:
+        return RegisterDebtPayment(self._debt_service()).execute(
+            debt_id=debt_id,
+            wallet_id=wallet_id,
+            amount_kzt=amount_kzt,
+            payment_date=payment_date,
+            description=description,
+        )
+
+    def register_debt_write_off(
+        self,
+        *,
+        debt_id: int,
+        amount_kzt: float,
+        payment_date: str,
+    ) -> DebtPayment:
+        return RegisterDebtWriteOff(self._debt_service()).execute(
+            debt_id=debt_id,
+            amount_kzt=amount_kzt,
+            payment_date=payment_date,
+        )
+
+    def close_debt(
+        self,
+        *,
+        debt_id: int,
+        payment_date: str,
+        wallet_id: int | None = None,
+        write_off: bool = False,
+        description: str = "",
+    ) -> Debt:
+        return CloseDebt(self._debt_service()).execute(
+            debt_id=debt_id,
+            payment_date=payment_date,
+            wallet_id=wallet_id,
+            write_off=write_off,
+            description=description,
+        )
+
+    def delete_debt(self, debt_id: int) -> None:
+        DeleteDebt(self._debt_service()).execute(debt_id)
+
+    def delete_debt_payment(self, payment_id: int, *, delete_linked_record: bool = False) -> None:
+        DeleteDebtPayment(self._debt_service()).execute(
+            payment_id,
+            delete_linked_record=delete_linked_record,
+        )
+
+    def recalculate_debt(self, debt_id: int) -> Debt:
+        return RecalculateDebt(self._debt_service()).execute(debt_id)
 
     def _distribution_service(self) -> DistributionService:
         if not isinstance(self._repository, SQLiteRecordRepository):

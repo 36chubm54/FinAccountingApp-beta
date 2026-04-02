@@ -91,3 +91,49 @@ def test_schema_contains_distribution_tables_with_expected_columns() -> None:
         in schema
     )
     assert "CREATE INDEX IF NOT EXISTS idx_dist_snapshot_values_month_order" in schema
+
+
+def test_schema_contains_debt_tables_with_expected_columns() -> None:
+    schema = _schema_sql()
+
+    assert "CREATE TABLE IF NOT EXISTS debts" in schema
+    assert "contact_name TEXT NOT NULL" in schema
+    assert "kind TEXT NOT NULL CHECK(kind IN ('debt', 'loan'))" in schema
+    assert "total_amount_minor INTEGER NOT NULL CHECK(total_amount_minor > 0)" in schema
+    assert "remaining_amount_minor INTEGER NOT NULL CHECK(" in schema
+    assert "interest_rate REAL NOT NULL DEFAULT 0 CHECK(interest_rate >= 0)" in schema
+    assert "status TEXT NOT NULL CHECK(status IN ('open', 'closed'))" in schema
+    assert "created_at TEXT NOT NULL CHECK(created_at GLOB" in schema
+    assert "CHECK(status = 'open' OR remaining_amount_minor = 0)" in schema
+
+    assert "CREATE TABLE IF NOT EXISTS debt_payments" in schema
+    assert "debt_id INTEGER NOT NULL" in schema
+    assert "record_id INTEGER DEFAULT NULL" in schema
+    assert "operation_type TEXT NOT NULL CHECK(" in schema
+    assert "principal_paid_minor INTEGER NOT NULL CHECK(principal_paid_minor > 0)" in schema
+    assert "is_write_off INTEGER NOT NULL DEFAULT 0 CHECK(is_write_off IN (0, 1))" in schema
+    assert "payment_date TEXT NOT NULL CHECK(payment_date GLOB" in schema
+    assert "FOREIGN KEY(debt_id) REFERENCES debts(id) ON UPDATE CASCADE ON DELETE CASCADE" in schema
+    assert (
+        "FOREIGN KEY(record_id) REFERENCES records(id) ON UPDATE CASCADE ON DELETE SET NULL"
+        in schema
+    )
+
+    assert "related_debt_id INTEGER DEFAULT NULL" in schema
+    assert (
+        "FOREIGN KEY(related_debt_id) REFERENCES debts(id) ON UPDATE CASCADE ON DELETE SET NULL"
+        in schema
+    )
+    assert (
+        "CREATE INDEX IF NOT EXISTS idx_records_related_debt_id ON records(related_debt_id);"
+        in schema
+    )
+    assert "CREATE INDEX IF NOT EXISTS idx_debts_contact_name ON debts(contact_name);" in schema
+    assert "CREATE INDEX IF NOT EXISTS idx_debts_status ON debts(status);" in schema
+    assert (
+        "CREATE INDEX IF NOT EXISTS idx_debt_payments_debt_id ON debt_payments(debt_id);" in schema
+    )
+    assert (
+        "CREATE INDEX IF NOT EXISTS idx_debt_payments_record_id ON debt_payments(record_id);"
+        in schema
+    )

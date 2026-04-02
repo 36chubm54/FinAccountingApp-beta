@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import date as dt_date
 
+from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 from domain.transfers import Transfer
 from domain.wallets import Wallet
@@ -158,6 +159,29 @@ class SQLiteRecordRepository(RecordRepository):
                     f"Transfer integrity violated for #{transfer.id}: invalid record types"
                 )
 
+    @staticmethod
+    def _validate_debt_integrity(
+        records: list[Record],
+        debts: list[Debt],
+        payments: list[DebtPayment],
+    ) -> None:
+        debt_ids = {int(debt.id) for debt in debts}
+        record_ids = {int(record.id) for record in records}
+        for record in records:
+            if record.related_debt_id is not None and int(record.related_debt_id) not in debt_ids:
+                raise ValueError(
+                    f"Record #{record.id} references missing debt #{record.related_debt_id}"
+                )
+        for payment in payments:
+            if int(payment.debt_id) not in debt_ids:
+                raise ValueError(
+                    f"Debt payment #{payment.id} references missing debt #{payment.debt_id}"
+                )
+            if payment.record_id is not None and int(payment.record_id) not in record_ids:
+                raise ValueError(
+                    f"Debt payment #{payment.id} references missing record #{payment.record_id}"
+                )
+
     def _reset_autoincrement(self, table: str) -> None:
         self._conn.execute("DELETE FROM sqlite_sequence WHERE name = ?", (table,))
 
@@ -170,18 +194,25 @@ class SQLiteRecordRepository(RecordRepository):
         return all(int(row[0]) == index for index, row in enumerate(rows, start=1))
 
     def _normalize_existing_ids_from_one_if_needed(self) -> None:
-        tables = ("wallets", "records", "transfers", "mandatory_expenses")
+        tables = ("wallets", "records", "transfers", "mandatory_expenses", "debts", "debt_payments")
         if all(self._ids_are_normalized_from_one(table) for table in tables):
             return
+        self._renormalize_current_ids()
+
+    def _renormalize_current_ids(self) -> None:
         wallets = self._storage.get_wallets()
         records = self._storage.get_records()
         transfers = self._storage.get_transfers()
         mandatory_expenses = self._storage.get_mandatory_expenses()
+        debts = self.load_debts()
+        debt_payments = self.load_debt_payments()
         self.replace_all_data(
             wallets=wallets,
             records=records,
             mandatory_expenses=mandatory_expenses,
             transfers=transfers,
+            debts=debts,
+            debt_payments=debt_payments,
         )
 
     def _record_from_row(self, row) -> Record:
@@ -190,6 +221,9 @@ class SQLiteRecordRepository(RecordRepository):
             "date": str(row["date"]),
             "wallet_id": int(row["wallet_id"]),
             "transfer_id": int(row["transfer_id"]) if row["transfer_id"] is not None else None,
+            "related_debt_id": (
+                int(row["related_debt_id"]) if row["related_debt_id"] is not None else None
+            ),
             "amount_original": self._storage._money_from_row(
                 row, "amount_original", "amount_original_minor"
             ),
@@ -207,6 +241,33 @@ class SQLiteRecordRepository(RecordRepository):
                 period=str(row["period"] or "monthly"),  # type: ignore[arg-type]
             )
         return ExpenseRecord(**payload)
+
+    @staticmethod
+    def _debt_from_row(row) -> Debt:
+        return Debt(
+            id=int(row["id"]),
+            contact_name=str(row["contact_name"]),
+            kind=DebtKind(str(row["kind"])),
+            total_amount_minor=int(row["total_amount_minor"]),
+            remaining_amount_minor=int(row["remaining_amount_minor"]),
+            currency=str(row["currency"]).upper(),
+            interest_rate=float(row["interest_rate"]),
+            status=DebtStatus(str(row["status"])),
+            created_at=str(row["created_at"]),
+            closed_at=str(row["closed_at"]) if row["closed_at"] is not None else None,
+        )
+
+    @staticmethod
+    def _debt_payment_from_row(row) -> DebtPayment:
+        return DebtPayment(
+            id=int(row["id"]),
+            debt_id=int(row["debt_id"]),
+            record_id=int(row["record_id"]) if row["record_id"] is not None else None,
+            operation_type=DebtOperationType(str(row["operation_type"])),
+            principal_paid_minor=int(row["principal_paid_minor"]),
+            is_write_off=bool(row["is_write_off"]),
+            payment_date=str(row["payment_date"]),
+        )
 
     def _mandatory_from_row(self, row) -> MandatoryExpenseRecord:
         return MandatoryExpenseRecord(
@@ -388,12 +449,138 @@ class SQLiteRecordRepository(RecordRepository):
             ),
         )
 
+    def _insert_debt_row(self, debt: Debt) -> int:
+        cursor = self._conn.execute(
+            """
+            INSERT INTO debts (
+                contact_name,
+                kind,
+                total_amount_minor,
+                remaining_amount_minor,
+                currency,
+                interest_rate,
+                status,
+                created_at,
+                closed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(debt.contact_name),
+                str(debt.kind.value),
+                int(debt.total_amount_minor),
+                int(debt.remaining_amount_minor),
+                str(debt.currency).upper(),
+                float(debt.interest_rate),
+                str(debt.status.value),
+                str(debt.created_at),
+                str(debt.closed_at) if debt.closed_at else None,
+            ),
+        )
+        return self._require_lastrowid(cursor.lastrowid, "debts")
+
+    def _update_debt_row(self, debt_id: int, debt: Debt) -> None:
+        self._conn.execute(
+            """
+            UPDATE debts
+            SET
+                contact_name = ?,
+                kind = ?,
+                total_amount_minor = ?,
+                remaining_amount_minor = ?,
+                currency = ?,
+                interest_rate = ?,
+                status = ?,
+                created_at = ?,
+                closed_at = ?
+            WHERE id = ?
+            """,
+            (
+                str(debt.contact_name),
+                str(debt.kind.value),
+                int(debt.total_amount_minor),
+                int(debt.remaining_amount_minor),
+                str(debt.currency).upper(),
+                float(debt.interest_rate),
+                str(debt.status.value),
+                str(debt.created_at),
+                str(debt.closed_at) if debt.closed_at else None,
+                int(debt_id),
+            ),
+        )
+
+    def _insert_debt_payment_row(
+        self,
+        payment: DebtPayment,
+        *,
+        debt_id: int | None = None,
+        record_id: int | None = None,
+    ) -> int:
+        cursor = self._conn.execute(
+            """
+            INSERT INTO debt_payments (
+                debt_id,
+                record_id,
+                operation_type,
+                principal_paid_minor,
+                is_write_off,
+                payment_date
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(debt_id if debt_id is not None else payment.debt_id),
+                int(record_id)
+                if record_id is not None
+                else (int(payment.record_id) if payment.record_id is not None else None),
+                str(payment.operation_type.value),
+                int(payment.principal_paid_minor),
+                int(bool(payment.is_write_off)),
+                str(payment.payment_date),
+            ),
+        )
+        return self._require_lastrowid(cursor.lastrowid, "debt_payments")
+
+    def _update_debt_payment_row(
+        self,
+        payment_id: int,
+        payment: DebtPayment,
+        *,
+        debt_id: int | None = None,
+        record_id: int | None = None,
+    ) -> None:
+        self._conn.execute(
+            """
+            UPDATE debt_payments
+            SET
+                debt_id = ?,
+                record_id = ?,
+                operation_type = ?,
+                principal_paid_minor = ?,
+                is_write_off = ?,
+                payment_date = ?
+            WHERE id = ?
+            """,
+            (
+                int(debt_id if debt_id is not None else payment.debt_id),
+                int(record_id)
+                if record_id is not None
+                else (int(payment.record_id) if payment.record_id is not None else None),
+                str(payment.operation_type.value),
+                int(payment.principal_paid_minor),
+                int(bool(payment.is_write_off)),
+                str(payment.payment_date),
+                int(payment_id),
+            ),
+        )
+
     def _insert_record_row(
         self,
         record: Record,
         *,
         wallet_id: int | None = None,
         transfer_id: int | None = None,
+        related_debt_id: int | None = None,
     ) -> int:
         period = record.period if isinstance(record, MandatoryExpenseRecord) else None
         (
@@ -415,6 +602,7 @@ class SQLiteRecordRepository(RecordRepository):
                 date,
                 wallet_id,
                 transfer_id,
+                related_debt_id,
                 amount_original,
                 amount_original_minor,
                 currency,
@@ -426,13 +614,16 @@ class SQLiteRecordRepository(RecordRepository):
                 description,
                 period
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 self._record_type(record),
                 self._date_as_text(record.date),
                 int(wallet_id if wallet_id is not None else record.wallet_id),
                 int(transfer_id) if transfer_id is not None else None,
+                int(related_debt_id)
+                if related_debt_id is not None
+                else (int(record.related_debt_id) if record.related_debt_id is not None else None),
                 amount_original,
                 amount_original_minor,
                 str(record.currency).upper(),
@@ -454,6 +645,7 @@ class SQLiteRecordRepository(RecordRepository):
         *,
         wallet_id: int | None = None,
         transfer_id: int | None = None,
+        related_debt_id: int | None = None,
     ) -> None:
         period = record.period if isinstance(record, MandatoryExpenseRecord) else None
         (
@@ -476,6 +668,7 @@ class SQLiteRecordRepository(RecordRepository):
                 date = ?,
                 wallet_id = ?,
                 transfer_id = ?,
+                related_debt_id = ?,
                 amount_original = ?,
                 amount_original_minor = ?,
                 currency = ?,
@@ -493,6 +686,9 @@ class SQLiteRecordRepository(RecordRepository):
                 self._date_as_text(record.date),
                 int(wallet_id if wallet_id is not None else record.wallet_id),
                 int(transfer_id) if transfer_id is not None else None,
+                int(related_debt_id)
+                if related_debt_id is not None
+                else (int(record.related_debt_id) if record.related_debt_id is not None else None),
                 amount_original,
                 amount_original_minor,
                 str(record.currency).upper(),
@@ -663,6 +859,170 @@ class SQLiteRecordRepository(RecordRepository):
                 is_active=draft.is_active,
             )
 
+    def save_debt(self, debt: Debt) -> None:
+        with self._conn:
+            row = self._conn.execute("SELECT 1 FROM debts WHERE id = ?", (int(debt.id),)).fetchone()
+            if row is not None:
+                self._update_debt_row(int(debt.id), debt)
+            else:
+                self._insert_debt_row(debt)
+
+    def load_debts(self) -> list[Debt]:
+        rows = self._conn.execute(
+            """
+            SELECT
+                id,
+                contact_name,
+                kind,
+                total_amount_minor,
+                remaining_amount_minor,
+                currency,
+                interest_rate,
+                status,
+                created_at,
+                closed_at
+            FROM debts
+            ORDER BY id
+            """
+        ).fetchall()
+        return [self._debt_from_row(row) for row in rows]
+
+    def get_debt_by_id(self, debt_id: int) -> Debt:
+        row = self._conn.execute(
+            """
+            SELECT
+                id,
+                contact_name,
+                kind,
+                total_amount_minor,
+                remaining_amount_minor,
+                currency,
+                interest_rate,
+                status,
+                created_at,
+                closed_at
+            FROM debts
+            WHERE id = ?
+            """,
+            (int(debt_id),),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Debt not found: {debt_id}")
+        return self._debt_from_row(row)
+
+    def delete_debt(self, debt_id: int) -> bool:
+        with self._conn:
+            cursor = self._conn.execute("DELETE FROM debts WHERE id = ?", (int(debt_id),))
+        deleted = int(cursor.rowcount or 0) > 0
+        if deleted:
+            self._renormalize_current_ids()
+        return deleted
+
+    def replace_debts(self, debts: list[Debt], payments: list[DebtPayment] | None = None) -> None:
+        normalized_payments = list(payments or [])
+        self._validate_debt_integrity(self.load_all(), debts, normalized_payments)
+        with self._conn:
+            self._conn.execute("DELETE FROM debt_payments")
+            self._conn.execute("DELETE FROM debts")
+            self._reset_autoincrement_many(("debt_payments", "debts"))
+
+            debt_id_map: dict[int, int] = {}
+            for debt in sorted(debts, key=lambda item: item.id):
+                debt_id_map[int(debt.id)] = self._insert_debt_row(debt)
+
+            record_id_map = {int(record.id): int(record.id) for record in self.load_all()}
+            for payment in sorted(normalized_payments, key=lambda item: item.id):
+                mapped_debt_id = debt_id_map.get(int(payment.debt_id))
+                if mapped_debt_id is None:
+                    raise ValueError(f"Debt payment #{payment.id} references missing debt")
+                mapped_record_id = None
+                if payment.record_id is not None:
+                    mapped_record_id = record_id_map.get(int(payment.record_id))
+                    if mapped_record_id is None:
+                        raise ValueError(f"Debt payment #{payment.id} references missing record")
+                self._insert_debt_payment_row(
+                    payment,
+                    debt_id=mapped_debt_id,
+                    record_id=mapped_record_id,
+                )
+
+    def save_debt_payment(self, payment: DebtPayment) -> None:
+        with self._conn:
+            row = self._conn.execute(
+                "SELECT 1 FROM debt_payments WHERE id = ?",
+                (int(payment.id),),
+            ).fetchone()
+            if row is not None:
+                self._update_debt_payment_row(int(payment.id), payment)
+            else:
+                self._insert_debt_payment_row(payment)
+
+    def load_debt_payments(self, debt_id: int | None = None) -> list[DebtPayment]:
+        if debt_id is None:
+            rows = self._conn.execute(
+                """
+                SELECT
+                    id,
+                    debt_id,
+                    record_id,
+                    operation_type,
+                    principal_paid_minor,
+                    is_write_off,
+                    payment_date
+                FROM debt_payments
+                ORDER BY id
+                """
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """
+                SELECT
+                    id,
+                    debt_id,
+                    record_id,
+                    operation_type,
+                    principal_paid_minor,
+                    is_write_off,
+                    payment_date
+                FROM debt_payments
+                WHERE debt_id = ?
+                ORDER BY id
+                """,
+                (int(debt_id),),
+            ).fetchall()
+        return [self._debt_payment_from_row(row) for row in rows]
+
+    def get_debt_payment_by_id(self, payment_id: int) -> DebtPayment:
+        row = self._conn.execute(
+            """
+            SELECT
+                id,
+                debt_id,
+                record_id,
+                operation_type,
+                principal_paid_minor,
+                is_write_off,
+                payment_date
+            FROM debt_payments
+            WHERE id = ?
+            """,
+            (int(payment_id),),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Debt payment not found: {payment_id}")
+        return self._debt_payment_from_row(row)
+
+    def delete_debt_payment(self, payment_id: int) -> bool:
+        with self._conn:
+            cursor = self._conn.execute(
+                "DELETE FROM debt_payments WHERE id = ?",
+                (int(payment_id),),
+            )
+        deleted = int(cursor.rowcount or 0) > 0
+        if deleted:
+            self._renormalize_current_ids()
+        return deleted
+
     def save_wallet(self, wallet: Wallet) -> None:
         with self._conn:
             row = self._conn.execute(
@@ -767,6 +1127,7 @@ class SQLiteRecordRepository(RecordRepository):
                 date,
                 wallet_id,
                 transfer_id,
+                related_debt_id,
                 amount_original,
                 amount_original_minor,
                 currency,
@@ -810,7 +1171,15 @@ class SQLiteRecordRepository(RecordRepository):
             raise ValueError(f"Record not found: {record_id}")
         with self._conn:
             transfer_id = int(record.transfer_id) if record.transfer_id is not None else None
-            self._update_record_row(record_id, record, transfer_id=transfer_id)
+            related_debt_id = (
+                int(record.related_debt_id) if record.related_debt_id is not None else None
+            )
+            self._update_record_row(
+                record_id,
+                record,
+                transfer_id=transfer_id,
+                related_debt_id=related_debt_id,
+            )
 
     def delete_by_index(self, index: int) -> bool:
         if int(index) < 0:
@@ -828,6 +1197,7 @@ class SQLiteRecordRepository(RecordRepository):
             return False
         with self._conn:
             self._conn.execute("DELETE FROM records WHERE id = ?", (int(row["id"]),))
+        self._renormalize_current_ids()
         return True
 
     def delete_all(self) -> None:
@@ -954,6 +1324,7 @@ class SQLiteRecordRepository(RecordRepository):
             return False
         with self._conn:
             self._conn.execute("DELETE FROM mandatory_expenses WHERE id = ?", (int(row["id"]),))
+        self._renormalize_current_ids()
         return True
 
     def delete_all_mandatory_expenses(self) -> None:
@@ -968,7 +1339,14 @@ class SQLiteRecordRepository(RecordRepository):
             self._reset_autoincrement("records")
             for record in sorted(records, key=lambda item: item.id):
                 transfer_id = int(record.transfer_id) if record.transfer_id is not None else None
-                self._insert_record_row(record, transfer_id=transfer_id)
+                related_debt_id = (
+                    int(record.related_debt_id) if record.related_debt_id is not None else None
+                )
+                self._insert_record_row(
+                    record,
+                    transfer_id=transfer_id,
+                    related_debt_id=related_debt_id,
+                )
 
     def replace_mandatory_expenses(self, expenses: list[MandatoryExpenseRecord]) -> None:
         with self._conn:
@@ -985,6 +1363,8 @@ class SQLiteRecordRepository(RecordRepository):
         records: list[Record],
         mandatory_expenses: list[MandatoryExpenseRecord],
         transfers: list[Transfer] | None = None,
+        debts: list[Debt] | None = None,
+        debt_payments: list[DebtPayment] | None = None,
     ) -> None:
         normalized_wallets = list(wallets or [])
         if not normalized_wallets:
@@ -1000,15 +1380,20 @@ class SQLiteRecordRepository(RecordRepository):
                 )
             ]
         normalized_transfers = list(transfers or [])
+        normalized_debts = list(debts or [])
+        normalized_debt_payments = list(debt_payments or [])
         self._validate_transfer_integrity(records, normalized_transfers)
+        self._validate_debt_integrity(records, normalized_debts, normalized_debt_payments)
 
         with self._conn:
+            self._conn.execute("DELETE FROM debt_payments")
+            self._conn.execute("DELETE FROM debts")
             self._conn.execute("DELETE FROM records")
             self._conn.execute("DELETE FROM mandatory_expenses")
             self._conn.execute("DELETE FROM transfers")
             self._conn.execute("DELETE FROM wallets")
             self._reset_autoincrement_many(
-                ("records", "mandatory_expenses", "transfers", "wallets")
+                ("debt_payments", "debts", "records", "mandatory_expenses", "transfers", "wallets")
             )
 
             wallet_id_map: dict[int, int] = {}
@@ -1029,6 +1414,12 @@ class SQLiteRecordRepository(RecordRepository):
                 )
                 transfer_id_map[int(transfer.id)] = new_transfer_id
 
+            debt_id_map: dict[int, int] = {}
+            for debt in sorted(normalized_debts, key=lambda item: item.id):
+                debt_id_map[int(debt.id)] = self._insert_debt_row(debt)
+
+            record_id_map: dict[int, int] = {}
+
             for record in sorted(records, key=lambda item: item.id):
                 wallet_id = wallet_id_map.get(int(record.wallet_id))
                 if wallet_id is None:
@@ -1040,10 +1431,43 @@ class SQLiteRecordRepository(RecordRepository):
                         raise ValueError(
                             f"Record #{record.id} references missing transfer #{record.transfer_id}"
                         )
-                self._insert_record_row(record, wallet_id=wallet_id, transfer_id=transfer_id)
+                related_debt_id = None
+                if record.related_debt_id is not None:
+                    related_debt_id = debt_id_map.get(int(record.related_debt_id))
+                    if related_debt_id is None:
+                        raise ValueError(
+                            f"Record #{record.id} references missing debt #{record.related_debt_id}"
+                        )
+                new_record_id = self._insert_record_row(
+                    record,
+                    wallet_id=wallet_id,
+                    transfer_id=transfer_id,
+                    related_debt_id=related_debt_id,
+                )
+                record_id_map[int(record.id)] = new_record_id
 
             for expense in sorted(mandatory_expenses, key=lambda item: item.id):
                 wallet_id = wallet_id_map.get(int(expense.wallet_id))
                 if wallet_id is None:
                     raise ValueError(f"Mandatory expense #{expense.id} references missing wallet")
                 self._insert_mandatory_row(expense, wallet_id=wallet_id)
+
+            for payment in sorted(normalized_debt_payments, key=lambda item: item.id):
+                mapped_debt_id = debt_id_map.get(int(payment.debt_id))
+                if mapped_debt_id is None:
+                    raise ValueError(
+                        f"Debt payment #{payment.id} references missing debt #{payment.debt_id}"
+                    )
+                mapped_record_id = None
+                if payment.record_id is not None:
+                    mapped_record_id = record_id_map.get(int(payment.record_id))
+                    if mapped_record_id is None:
+                        raise ValueError(
+                            f"Debt payment #{payment.id} references "
+                            f"missing record #{payment.record_id}"
+                        )
+                self._insert_debt_payment_row(
+                    payment,
+                    debt_id=mapped_debt_id,
+                    record_id=mapped_record_id,
+                )

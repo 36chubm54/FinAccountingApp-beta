@@ -10,6 +10,7 @@ from dataclasses import replace as dc_replace
 from datetime import date as dt_date
 from typing import TypeVar, cast
 
+from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
 from domain.errors import DomainError
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 from domain.transfers import Transfer
@@ -22,6 +23,51 @@ SYSTEM_WALLET_ID = 1
 
 
 class RecordRepository(ABC):
+    @abstractmethod
+    def save_debt(self, debt: Debt) -> None:
+        """Save debt aggregate."""
+        pass
+
+    @abstractmethod
+    def load_debts(self) -> list[Debt]:
+        """Load all debts."""
+        pass
+
+    @abstractmethod
+    def get_debt_by_id(self, debt_id: int) -> Debt:
+        """Return debt by id or raise ValueError."""
+        pass
+
+    @abstractmethod
+    def delete_debt(self, debt_id: int) -> bool:
+        """Delete debt by id. Returns True if deleted."""
+        pass
+
+    @abstractmethod
+    def replace_debts(self, debts: list[Debt], payments: list[DebtPayment] | None = None) -> None:
+        """Atomically replace all debts and optionally debt payments."""
+        pass
+
+    @abstractmethod
+    def save_debt_payment(self, payment: DebtPayment) -> None:
+        """Save debt payment."""
+        pass
+
+    @abstractmethod
+    def load_debt_payments(self, debt_id: int | None = None) -> list[DebtPayment]:
+        """Load debt payments, optionally filtered by debt_id."""
+        pass
+
+    @abstractmethod
+    def get_debt_payment_by_id(self, payment_id: int) -> DebtPayment:
+        """Return debt payment by id or raise ValueError."""
+        pass
+
+    @abstractmethod
+    def delete_debt_payment(self, payment_id: int) -> bool:
+        """Delete debt payment by id. Returns True if deleted."""
+        pass
+
     @abstractmethod
     def load_active_wallets(self) -> list[Wallet]:
         """Load active wallets only."""
@@ -169,6 +215,8 @@ class RecordRepository(ABC):
         records: list[Record],
         mandatory_expenses: list[MandatoryExpenseRecord],
         transfers: list[Transfer] | None = None,
+        debts: list[Debt] | None = None,
+        debt_payments: list[DebtPayment] | None = None,
     ) -> None:
         """Atomically replace full repository dataset."""
         pass
@@ -287,6 +335,8 @@ class JsonFileRecordRepository(RecordRepository):
                     "records": [],
                     "mandatory_expenses": [],
                     "transfers": [],
+                    "debts": [],
+                    "debt_payments": [],
                 }
         if isinstance(data, list):
             # Migrate old format
@@ -299,6 +349,8 @@ class JsonFileRecordRepository(RecordRepository):
                 "records": [],
                 "mandatory_expenses": [],
                 "transfers": [],
+                "debts": [],
+                "debt_payments": [],
             }
 
         migrated = False
@@ -310,6 +362,12 @@ class JsonFileRecordRepository(RecordRepository):
             migrated = True
         if "transfers" not in data or not isinstance(data.get("transfers"), list):
             data["transfers"] = []
+            migrated = True
+        if "debts" not in data or not isinstance(data.get("debts"), list):
+            data["debts"] = []
+            migrated = True
+        if "debt_payments" not in data or not isinstance(data.get("debt_payments"), list):
+            data["debt_payments"] = []
             migrated = True
 
         legacy_initial_balance = float(self._as_float(data.get("initial_balance"), 0.0))
@@ -547,6 +605,7 @@ class JsonFileRecordRepository(RecordRepository):
             "date": record_date,
             "wallet_id": int(getattr(record, "wallet_id", SYSTEM_WALLET_ID)),
             "transfer_id": getattr(record, "transfer_id", None),
+            "related_debt_id": getattr(record, "related_debt_id", None),
             "amount_original": record.amount_original,
             "currency": record.currency,
             "rate_at_operation": record.rate_at_operation,
@@ -581,6 +640,11 @@ class JsonFileRecordRepository(RecordRepository):
             "transfer_id": (
                 self._require_strict_int(item.get("transfer_id"), "record.transfer_id")
                 if item.get("transfer_id") not in (None, "")
+                else None
+            ),
+            "related_debt_id": (
+                self._require_strict_int(item.get("related_debt_id"), "record.related_debt_id")
+                if item.get("related_debt_id") not in (None, "")
                 else None
             ),
             "amount_original": amount_original,
@@ -619,6 +683,33 @@ class JsonFileRecordRepository(RecordRepository):
 
     def load_active_wallets(self) -> list[Wallet]:
         return [wallet for wallet in self.load_wallets() if wallet.is_active]
+
+    @staticmethod
+    def _debt_to_dict(debt: Debt) -> dict:
+        return {
+            "id": int(debt.id),
+            "contact_name": str(debt.contact_name),
+            "kind": str(debt.kind.value),
+            "total_amount_minor": int(debt.total_amount_minor),
+            "remaining_amount_minor": int(debt.remaining_amount_minor),
+            "currency": str(debt.currency).upper(),
+            "interest_rate": float(debt.interest_rate),
+            "status": str(debt.status.value),
+            "created_at": str(debt.created_at),
+            "closed_at": str(debt.closed_at) if debt.closed_at else None,
+        }
+
+    @staticmethod
+    def _debt_payment_to_dict(payment: DebtPayment) -> dict:
+        return {
+            "id": int(payment.id),
+            "debt_id": int(payment.debt_id),
+            "record_id": int(payment.record_id) if payment.record_id is not None else None,
+            "operation_type": str(payment.operation_type.value),
+            "principal_paid_minor": int(payment.principal_paid_minor),
+            "is_write_off": bool(payment.is_write_off),
+            "payment_date": str(payment.payment_date),
+        }
 
     def create_wallet(
         self,
@@ -678,6 +769,170 @@ class JsonFileRecordRepository(RecordRepository):
                     self._save_data(data)
                     return True
             return False
+
+    def save_debt(self, debt: Debt) -> None:
+        with self._lock:
+            data = self._load_data()
+            debts = data.get("debts", [])
+            replaced = False
+            for index, item in enumerate(debts):
+                if isinstance(item, dict) and int(item.get("id", 0)) == debt.id:
+                    debts[index] = self._debt_to_dict(debt)
+                    replaced = True
+                    break
+            if not replaced:
+                debts.append(self._debt_to_dict(debt))
+            data["debts"] = debts
+            self._save_data(data)
+
+    def load_debts(self) -> list[Debt]:
+        data = self._load_data()
+        debts: list[Debt] = []
+        for index, item in enumerate(data.get("debts", [])):
+            if not isinstance(item, dict):
+                logger.warning("Skipping non-dict debt at index %s", index)
+                continue
+            try:
+                debts.append(
+                    Debt(
+                        id=self._require_strict_int(item.get("id"), "debt.id"),
+                        contact_name=str(item.get("contact_name", "") or ""),
+                        kind=DebtKind(str(item.get("kind", "debt") or "debt")),
+                        total_amount_minor=self._require_strict_int(
+                            item.get("total_amount_minor"), "debt.total_amount_minor"
+                        ),
+                        remaining_amount_minor=self._require_strict_int(
+                            item.get("remaining_amount_minor"), "debt.remaining_amount_minor"
+                        ),
+                        currency=str(item.get("currency", "KZT") or "KZT").upper(),
+                        interest_rate=self._as_float(item.get("interest_rate"), 0.0),
+                        status=DebtStatus(str(item.get("status", "open") or "open")),
+                        created_at=str(item.get("created_at", "") or ""),
+                        closed_at=(
+                            str(item.get("closed_at"))
+                            if item.get("closed_at") not in (None, "")
+                            else None
+                        ),
+                    )
+                )
+            except Exception:
+                logger.exception("Skipping invalid debt at index %s", index)
+        return debts
+
+    def get_debt_by_id(self, debt_id: int) -> Debt:
+        target_id = int(debt_id)
+        for debt in self.load_debts():
+            if int(debt.id) == target_id:
+                return debt
+        raise ValueError(f"Debt not found: {debt_id}")
+
+    def delete_debt(self, debt_id: int) -> bool:
+        target_id = int(debt_id)
+        with self._lock:
+            data = self._load_data()
+            debts = data.get("debts", [])
+            filtered_debts = [
+                item
+                for item in debts
+                if not (isinstance(item, dict) and self._as_int(item.get("id"), 0) == target_id)
+            ]
+            if len(filtered_debts) == len(debts):
+                return False
+            data["debts"] = filtered_debts
+            data["debt_payments"] = [
+                item
+                for item in data.get("debt_payments", [])
+                if not (
+                    isinstance(item, dict) and self._as_int(item.get("debt_id"), 0) == target_id
+                )
+            ]
+            for record in data.get("records", []):
+                if (
+                    isinstance(record, dict)
+                    and self._as_int(record.get("related_debt_id"), 0) == target_id
+                ):
+                    record["related_debt_id"] = None
+            self._save_data(data)
+            return True
+
+    def replace_debts(self, debts: list[Debt], payments: list[DebtPayment] | None = None) -> None:
+        with self._lock:
+            data = self._load_data()
+            data["debts"] = [self._debt_to_dict(debt) for debt in debts]
+            data["debt_payments"] = [
+                self._debt_payment_to_dict(payment) for payment in (payments or [])
+            ]
+            self._save_data(data)
+
+    def save_debt_payment(self, payment: DebtPayment) -> None:
+        with self._lock:
+            data = self._load_data()
+            payments = data.get("debt_payments", [])
+            replaced = False
+            for index, item in enumerate(payments):
+                if isinstance(item, dict) and int(item.get("id", 0)) == payment.id:
+                    payments[index] = self._debt_payment_to_dict(payment)
+                    replaced = True
+                    break
+            if not replaced:
+                payments.append(self._debt_payment_to_dict(payment))
+            data["debt_payments"] = payments
+            self._save_data(data)
+
+    def load_debt_payments(self, debt_id: int | None = None) -> list[DebtPayment]:
+        data = self._load_data()
+        target_debt_id = int(debt_id) if debt_id is not None else None
+        payments: list[DebtPayment] = []
+        for index, item in enumerate(data.get("debt_payments", [])):
+            if not isinstance(item, dict):
+                logger.warning("Skipping non-dict debt payment at index %s", index)
+                continue
+            try:
+                payment = DebtPayment(
+                    id=self._require_strict_int(item.get("id"), "debt_payment.id"),
+                    debt_id=self._require_strict_int(item.get("debt_id"), "debt_payment.debt_id"),
+                    record_id=(
+                        self._require_strict_int(item.get("record_id"), "debt_payment.record_id")
+                        if item.get("record_id") not in (None, "")
+                        else None
+                    ),
+                    operation_type=DebtOperationType(
+                        str(item.get("operation_type", "debt_repay") or "debt_repay")
+                    ),
+                    principal_paid_minor=self._require_strict_int(
+                        item.get("principal_paid_minor"), "debt_payment.principal_paid_minor"
+                    ),
+                    is_write_off=bool(item.get("is_write_off", False)),
+                    payment_date=str(item.get("payment_date", "") or ""),
+                )
+                if target_debt_id is None or int(payment.debt_id) == target_debt_id:
+                    payments.append(payment)
+            except Exception:
+                logger.exception("Skipping invalid debt payment at index %s", index)
+        return payments
+
+    def get_debt_payment_by_id(self, payment_id: int) -> DebtPayment:
+        target_id = int(payment_id)
+        for payment in self.load_debt_payments():
+            if int(payment.id) == target_id:
+                return payment
+        raise ValueError(f"Debt payment not found: {payment_id}")
+
+    def delete_debt_payment(self, payment_id: int) -> bool:
+        target_id = int(payment_id)
+        with self._lock:
+            data = self._load_data()
+            payments = data.get("debt_payments", [])
+            filtered = [
+                item
+                for item in payments
+                if not (isinstance(item, dict) and self._as_int(item.get("id"), 0) == target_id)
+            ]
+            if len(filtered) == len(payments):
+                return False
+            data["debt_payments"] = filtered
+            self._save_data(data)
+            return True
 
     def get_system_wallet(self) -> Wallet:
         wallets = self.load_wallets()
@@ -1013,6 +1268,8 @@ class JsonFileRecordRepository(RecordRepository):
         records: list[Record],
         mandatory_expenses: list[MandatoryExpenseRecord],
         transfers: list[Transfer] | None = None,
+        debts: list[Debt] | None = None,
+        debt_payments: list[DebtPayment] | None = None,
     ) -> None:
         with self._lock:
             normalized_wallets = list(wallets or [])
@@ -1039,6 +1296,10 @@ class JsonFileRecordRepository(RecordRepository):
                 "records": [],
                 "mandatory_expenses": [],
                 "transfers": [self._transfer_to_dict(transfer) for transfer in (transfers or [])],
+                "debts": [self._debt_to_dict(debt) for debt in (debts or [])],
+                "debt_payments": [
+                    self._debt_payment_to_dict(payment) for payment in (debt_payments or [])
+                ],
             }
             for record in records:
                 if isinstance(record, MandatoryExpenseRecord):
