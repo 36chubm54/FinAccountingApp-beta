@@ -28,7 +28,9 @@ def wallet_initial_balance_kzt(wallet: Wallet, currency_service=None) -> float:
     if currency_service is None:
         return float(quantize_money(wallet.initial_balance))
     return float(
-        quantize_money(currency_service.convert(float(wallet.initial_balance), str(wallet.currency)))
+        quantize_money(
+            currency_service.convert(float(wallet.initial_balance), str(wallet.currency))
+        )
     )
 
 

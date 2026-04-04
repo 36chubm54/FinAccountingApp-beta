@@ -7,6 +7,32 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.9.1] - 2026-04-03
+
+### Changed
+
+- `ImportService.import_file(...)` now allows bulk replace for `JSON` imports even under `ImportPolicy.CURRENT_RATE`, preserving debt-linked restore flows through the fast SQLite replace path
+- `import_full_backup_from_json(...)` remains the primary low-level backup parser and now returns the structured `ImportedBackupData` object explicitly in tests/docs
+- `import_backup(...)` remains available only as a deprecated compatibility wrapper over `import_full_backup_from_json(...)`
+
+### Fixed
+
+- `SQLiteStorage.initialize_schema()` now pre-adds `records.related_debt_id` for pre-`1.9.0` databases before applying the full schema, preventing startup/migration failures when debt indexes are created
+- Backup JSON debt-payment parsing now handles empty `record_id` values more cleanly during import validation
+
+### Tests
+
+- Added regression coverage for pre-`1.9.0` SQLite schema bootstrap compatibility, deprecated backup-wrapper behavior, structured backup import results, and `CURRENT_RATE` JSON bulk replace with debts/debt payments
+
+### Docs
+
+- Updated `README.md` and `README_EN.md` for `v1.9.1`, the legacy/deprecated backup helper split, `ImportedBackupData`, and pre-schema compatibility for `related_debt_id`
+- Documented that PDF export dependencies are now optional: base install uses `requirements.txt`, while PDF support can be added via `requirements-pdf.txt` or `pip install .[pdf]`
+
+No breaking changes.
+
+---
+
 ## [1.9.0] - 2026-04-02
 
 ### Added

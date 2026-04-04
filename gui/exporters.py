@@ -5,6 +5,15 @@ from collections.abc import Iterable
 logger = logging.getLogger(__name__)
 
 
+def _raise_missing_pdf_dependency(exc: ModuleNotFoundError) -> None:
+    if exc.name and exc.name.startswith("reportlab"):
+        raise RuntimeError(
+            "PDF export requires the optional 'pdf' dependency. "
+            "Install it with `pip install .[pdf]` or add `reportlab==4.0.0` manually."
+        ) from exc
+    raise exc
+
+
 def export_report(report, filepath: str, fmt: str, *, debts=None) -> None:
     fmt = (fmt or "csv").lower()
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
@@ -18,8 +27,15 @@ def export_report(report, filepath: str, fmt: str, *, debts=None) -> None:
 
             report_to_xlsx(report, filepath, debts=list(debts or []))
         elif fmt == "pdf":
-            from utils.pdf_utils import report_to_pdf
+            report_to_pdf = None
+            try:
+                from utils.pdf_utils import report_to_pdf as pdf_func
 
+                report_to_pdf = pdf_func
+            except ModuleNotFoundError as exc:
+                _raise_missing_pdf_dependency(exc)
+
+            assert report_to_pdf is not None
             report_to_pdf(report, filepath, debts=list(debts or []))
         else:
             raise ValueError(f"Unsupported export format: {fmt}")
@@ -46,8 +62,15 @@ def export_grouped_report(
 
             grouped_report_to_xlsx(statement_title, grouped_rows, filepath)
         elif fmt == "pdf":
-            from utils.pdf_utils import grouped_report_to_pdf
+            grouped_report_to_pdf = None
+            try:
+                from utils.pdf_utils import grouped_report_to_pdf as pdf_func
 
+                grouped_report_to_pdf = pdf_func
+            except ModuleNotFoundError as exc:
+                _raise_missing_pdf_dependency(exc)
+
+            assert grouped_report_to_pdf is not None
             grouped_report_to_pdf(statement_title, grouped_rows, filepath)
         else:
             raise ValueError(f"Unsupported export format: {fmt}")

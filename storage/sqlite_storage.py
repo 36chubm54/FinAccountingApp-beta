@@ -30,10 +30,25 @@ class SQLiteStorage(Storage):
     def initialize_schema(self, schema_path: str | None = None) -> None:
         if schema_path is None:
             schema_path = str(Path(__file__).resolve().parents[1] / "db" / "schema.sql")
+        self._ensure_pre_schema_compatibility()
         schema = Path(schema_path).read_text(encoding="utf-8")
         self._conn.executescript(schema)
         self._ensure_money_precision_columns()
         self._conn.commit()
+
+    def _table_exists(self, table: str) -> bool:
+        row = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (str(table),),
+        ).fetchone()
+        return row is not None
+
+    def _ensure_pre_schema_compatibility(self) -> None:
+        # Existing pre-1.9 databases may already have a `records` table without
+        # `related_debt_id`. Add it before executing the full schema so
+        # CREATE INDEX ... ON records(related_debt_id) does not fail.
+        if self._table_exists("records"):
+            self._add_column_if_missing("records", "related_debt_id", "INTEGER DEFAULT NULL")
 
     def _column_names(self, table: str) -> set[str]:
         return {

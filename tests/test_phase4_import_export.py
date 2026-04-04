@@ -85,7 +85,12 @@ def test_json_import_new_structure():
         json.dump(payload, fp)
         path = fp.name
     try:
-        wallets, records, mandatory, transfers, summary = import_full_backup_from_json(path)
+        result = import_full_backup_from_json(path)
+        wallets = result.wallets
+        records = result.records
+        mandatory = result.mandatory_expenses
+        transfers = result.transfers
+        summary = result.summary
         assert len(wallets) == 2
         assert len(records) == 2
         assert mandatory == []
@@ -304,7 +309,11 @@ def test_json_import_old_format_migrates_global_balance_to_main_wallet():
         json.dump(legacy_payload, fp)
         path = fp.name
     try:
-        wallets, records, _, transfers, summary = import_full_backup_from_json(path)
+        result = import_full_backup_from_json(path)
+        wallets = result.wallets
+        records = result.records
+        transfers = result.transfers
+        summary = result.summary
         assert summary[1] == 0
         assert wallets[0].id == 1
         assert wallets[0].initial_balance == 200.0

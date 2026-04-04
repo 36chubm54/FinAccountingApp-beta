@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import tempfile
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -643,7 +644,9 @@ def import_full_backup_from_json(
                 remaining_amount_minor=int(item.get("remaining_amount_minor", 0)),
                 currency=str(item.get("currency", "KZT") or "KZT").upper(),
                 interest_rate=float(item.get("interest_rate", 0.0) or 0.0),
-                status=DebtStatus(str(item.get("status", DebtStatus.OPEN.value) or DebtStatus.OPEN.value)),
+                status=DebtStatus(
+                    str(item.get("status", DebtStatus.OPEN.value) or DebtStatus.OPEN.value)
+                ),
                 created_at=str(item.get("created_at", "") or ""),
                 closed_at=(
                     str(item.get("closed_at")) if item.get("closed_at") not in (None, "") else None
@@ -665,14 +668,12 @@ def import_full_backup_from_json(
             errors.append(f"debt_payments[{idx}]: invalid item type")
             continue
         try:
+            record_id_val = item.get("record_id")
+            record_id = int(record_id_val) if record_id_val not in (None, "") else None
             payment = DebtPayment(
                 id=int(item.get("id", 0)),
                 debt_id=int(item.get("debt_id", 0)),
-                record_id=(
-                    int(item.get("record_id"))
-                    if item.get("record_id") not in (None, "")
-                    else None
-                ),
+                record_id=record_id,
                 operation_type=DebtOperationType(
                     str(
                         item.get(
@@ -694,15 +695,11 @@ def import_full_backup_from_json(
             continue
         if int(payment.debt_id) not in debt_ids:
             skipped += 1
-            errors.append(
-                f"debt_payments[{idx}]: debt not found ({payment.debt_id})"
-            )
+            errors.append(f"debt_payments[{idx}]: debt not found ({payment.debt_id})")
             continue
         if payment.record_id is not None and int(payment.record_id) not in record_ids:
             skipped += 1
-            errors.append(
-                f"debt_payments[{idx}]: record not found ({payment.record_id})"
-            )
+            errors.append(f"debt_payments[{idx}]: record not found ({payment.record_id})")
             continue
         debt_payments.append(payment)
         imported += 1
@@ -765,4 +762,11 @@ def import_backup(
     *,
     force: bool = False,
 ) -> ImportedBackupData:
+    warnings.warn(
+        "import_backup(...) is deprecated; use import_full_backup_from_json(...) "
+        "for low-level snapshot parsing or ImportService.import_file(...) for "
+        "application imports.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return import_full_backup_from_json(filepath, force=force)

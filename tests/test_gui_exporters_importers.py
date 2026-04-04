@@ -2,8 +2,10 @@ import json
 import os
 import tempfile
 import time
+from builtins import __import__ as builtin_import
 from pathlib import Path
 
+import pytest
 from openpyxl import load_workbook
 
 from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
@@ -56,6 +58,21 @@ def test_export_report_csv_xlsx_pdf():
         for p in (csv_path, xlsx_path, pdf_path):
             if p.exists():
                 os.unlink(p)
+
+
+def test_export_report_pdf_requires_optional_reportlab_dependency(monkeypatch):
+    report = make_sample_report()
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name.startswith("reportlab"):
+            raise ModuleNotFoundError("No module named 'reportlab'", name="reportlab")
+        return builtin_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.delitem(__import__("sys").modules, "utils.pdf_utils", raising=False)
+    monkeypatch.setattr("builtins.__import__", fake_import)
+
+    with pytest.raises(RuntimeError, match="optional 'pdf' dependency"):
+        exporters.export_report(report, "ignored.pdf", "pdf")
 
 
 def test_export_and_import_mandatory_expenses_csv_xlsx():

@@ -2,7 +2,7 @@
 
 Graphical application for personal financial accounting with multicurrency, categories and reports.
 
-The current `v1.9.0` release adds built-in debt and loan tracking: a dedicated `Debts` tab, repayment/write-off history, debt-aware backup/import/export, and inclusion of open obligations in `net worth` plus audit/report flows.
+The current `v1.9.1` release hardens the debt-aware backup/import flow: it adds compatibility for pre-`1.9.0` SQLite schemas, formalizes `ImportedBackupData` for low-level backup parsing, and keeps `import_backup(...)` only as a deprecated compatibility wrapper.
 
 ## 📋 Contents
 
@@ -43,6 +43,11 @@ source .venv/bin/activate
 
 # Install runtime dependencies
 pip install -r requirements.txt
+
+# Optional: install PDF export support (reportlab + pillow)
+pip install -r requirements-pdf.txt
+# or, when installing as a package:
+# pip install .[pdf]
 
 # Install dev dependencies (tests, coverage)
 pip install -r requirements-dev.txt
@@ -363,7 +368,7 @@ Formats:
 - Import pipeline: `parser -> dry-run validation -> user confirmation -> SQLite transaction`.
 - For `CSV/XLSX`, the real import replaces runtime data with valid rows from the file; invalid rows remain only in the import report.
 - For readonly `JSON` snapshots, `force=True` is required; readonly/checksum validation happens before the commit stage.
-- `JSON` full backup can now include `budgets`, `distribution_items`, `distribution_subitems`, and `distribution_snapshots`; on import they are restored into SQLite when the corresponding subsystems are supported.
+- `JSON` full backup can now include `budgets`, `debts`, `debt_payments`, `distribution_items`, `distribution_subitems`, and `distribution_snapshots`; on import they are restored into SQLite when the corresponding subsystems are supported.
 - For `JSON` full backup, distribution structure is validated strictly: malformed item/subitem payloads now fail the import instead of being skipped silently.
 
 Data format:
@@ -477,6 +482,7 @@ A dedicated `storage/` layer is used for data access:
 - `storage/json_storage.py` — JSON adapter for import/export/backup only.
 - `storage/sqlite_storage.py` — `SQLiteStorage` based on standard `sqlite3`.
 - `db/schema.sql` — SQL schema for `wallets`, `records`, `transfers`, `mandatory_expenses`, `budgets`, `debts`, `debt_payments`, and `distribution_*`.
+- For pre-`1.9.0` SQLite databases, bootstrap first adds `records.related_debt_id` and only then applies the full schema with debt indexes.
 
 ### JSON -> SQLite migration
 
@@ -914,6 +920,7 @@ Below are the key classes and functions synchronized with the actual code.
 - Dry-run uses the same parse/validation pipeline but performs no SQLite writes.
 - `Full Backup` keeps fixed `amount_kzt/rate_at_operation`; `Current Rate` recalculates values.
 - For `JSON` full backup, it can also restore budgets, debts, debt payments, distribution structure, and frozen snapshots through the main import pipeline plus distribution/budget hooks.
+- For `JSON` under `ImportPolicy.CURRENT_RATE`, the bulk replace path is now still allowed when the repository supports fast replace so debt/debt-payment links stay intact.
 - Malformed distribution structure in a `JSON` full backup is now treated as an import error instead of being skipped silently.
 
 `services/audit_service.py`
@@ -1011,7 +1018,9 @@ Below are the key classes and functions synchronized with the actual code.
 
 - `compute_checksum(data)` — SHA256 checksum for `data`.
 - `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, budgets=(), debts=(), debt_payments=(), distribution_items=(), distribution_subitems=(), distribution_snapshots=(), transfers=(), initial_balance=0.0, readonly=True, storage_mode="unknown")`.
-- `import_full_backup_from_json(filepath, force=False)` — legacy-compatible helper for backup JSON parsing; it also reads `debts` / `debt_payments`, but prefer `ImportService.import_file(...)` for real application imports.
+- `ImportedBackupData` — structured low-level backup parsing result (`wallets`, `records`, `mandatory_expenses`, `transfers`, extra payloads, and `summary`).
+- `import_full_backup_from_json(filepath, force=False)` — primary low-level helper for backup JSON parsing; it also reads `debts` / `debt_payments` and returns `ImportedBackupData`.
+- `import_backup(filepath, force=False)` — deprecated compatibility wrapper over `import_full_backup_from_json(...)`.
 - Backup/import normalizes money values and FX rates via `utils.money`.
 - JSON export writes atomically via a temporary file + `os.replace`.
 
@@ -1088,7 +1097,8 @@ project/
 ├── version.py                        # Application version for snapshot metadata
 ├── data.json                         # Optional JSON import/export/backup file
 ├── currency_rates.json               # Currency rate cache for online mode
-├── requirements.txt                  # Runtime dependencies
+├── requirements.txt                  # Base runtime dependencies
+├── requirements-pdf.txt              # Optional PDF dependencies (`reportlab` + transitive `pillow`)
 ├── requirements-dev.txt              # Dev dependencies (tests, coverage)
 ├── pytest.ini                        # pytest settings
 ├── pyproject.toml                    # Project configuration

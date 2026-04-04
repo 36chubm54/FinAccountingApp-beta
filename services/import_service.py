@@ -273,10 +273,11 @@ class ImportService:
         fast_replace_enabled = (
             getattr(self._finance_service, "supports_bulk_import_replace", False) is True
         )
+        json_bulk_replace_allowed = parsed.file_type == "json"
         if (
             fast_replace_enabled
             and callable(replace_all_for_import)
-            and self._policy != ImportPolicy.CURRENT_RATE
+            and (self._policy != ImportPolicy.CURRENT_RATE or json_bulk_replace_allowed)
         ):
             target_wallets = wallets if wallets else None
             if target_wallets:

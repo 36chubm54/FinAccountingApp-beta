@@ -14,7 +14,9 @@ from utils.backup_utils import (
     BackupFormatError,
     BackupIntegrityError,
     BackupReadonlyError,
+    ImportedBackupData,
     export_full_backup_to_json,
+    import_backup,
     import_full_backup_from_json,
 )
 from utils.csv_utils import import_records_from_csv
@@ -161,9 +163,12 @@ def test_full_backup_roundtrip():
             records=records,
             mandatory_expenses=mandatory,
         )
-        wallets, imported_records, imported_mandatory, transfers, summary = (
-            import_full_backup_from_json(path, force=True)
-        )
+        result: ImportedBackupData = import_full_backup_from_json(path, force=True)
+        wallets = result.wallets
+        imported_records = result.records
+        imported_mandatory = result.mandatory_expenses
+        transfers = result.transfers
+        summary = result.summary
         assert wallets[0].initial_balance == 123.0
         assert len(imported_records) == 1
         assert len(imported_mandatory) == 1
@@ -204,9 +209,12 @@ def test_technical_backup_preserves_mandatory_date() -> None:
             readonly=False,
             storage_mode="sqlite",
         )
-        wallets, records, imported_mandatory, transfers, summary = import_full_backup_from_json(
-            path
-        )
+        result: ImportedBackupData = import_full_backup_from_json(path)
+        wallets = result.wallets
+        records = result.records
+        imported_mandatory = result.mandatory_expenses
+        transfers = result.transfers
+        summary = result.summary
         assert len(wallets) == 1
         assert records == []
         assert transfers == []
@@ -289,12 +297,42 @@ def test_snapshot_readonly_force_import_succeeds() -> None:
             transfers=[],
             readonly=True,
         )
-        wallets, records, mandatory, transfers, summary = import_full_backup_from_json(
-            path,
-            force=True,
-        )
+        result: ImportedBackupData = import_full_backup_from_json(path, force=True)
+        wallets = result.wallets
+        records = result.records
+        mandatory = result.mandatory_expenses
+        transfers = result.transfers
+        summary = result.summary
         assert len(wallets) == 1
         assert wallets[0].initial_balance == 42.0
+        assert records == []
+        assert mandatory == []
+        assert transfers == []
+        assert summary[1] == 0
+    finally:
+        os.unlink(path)
+
+
+def test_import_backup_warns_and_delegates_to_full_backup_helper() -> None:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
+        path = tmp.name
+    try:
+        export_full_backup_to_json(
+            path,
+            wallets=[
+                Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=42.0, system=True)
+            ],
+            records=[],
+            mandatory_expenses=[],
+            transfers=[],
+            readonly=False,
+        )
+
+        with pytest.deprecated_call(match="import_backup\\(\\.\\.\\.\\) is deprecated"):
+            imported = import_backup(path, force=True)
+
+        wallets, records, mandatory, transfers, summary = imported
+        assert len(wallets) == 1
         assert records == []
         assert mandatory == []
         assert transfers == []
@@ -504,7 +542,9 @@ def test_legacy_json_without_meta_imports_normally() -> None:
         json.dump(payload, tmp, ensure_ascii=False)
         path = tmp.name
     try:
-        wallets, _, _, _, summary = import_full_backup_from_json(path)
+        result: ImportedBackupData = import_full_backup_from_json(path)
+        wallets = result.wallets
+        summary = result.summary
         assert wallets[0].initial_balance == 5.0
         assert summary[1] == 0
     finally:

@@ -209,3 +209,34 @@ def test_should_export_json_when_wal_is_newer_than_json(tmp_path, monkeypatch) -
     monkeypatch.setattr(bootstrap, "JSON_PATH", str(json_path))
 
     assert bootstrap._should_export_json() is True
+
+
+def test_initialize_schema_adds_related_debt_id_for_pre_19_records_table(tmp_path) -> None:
+    sqlite_path = tmp_path / "legacy_records.db"
+    storage = SQLiteStorage(str(sqlite_path))
+    try:
+        storage.execute(
+            """
+            CREATE TABLE records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                type TEXT NOT NULL,
+                date TEXT NOT NULL,
+                wallet_id INTEGER NOT NULL,
+                transfer_id INTEGER,
+                amount_original REAL NOT NULL,
+                currency TEXT NOT NULL,
+                rate_at_operation REAL NOT NULL,
+                amount_kzt REAL NOT NULL,
+                category TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                period TEXT
+            )
+            """
+        )
+        storage.commit()
+        storage.initialize_schema(_schema_path())
+
+        columns = {str(row["name"]) for row in storage.query_all("PRAGMA table_info(records)")}
+        assert "related_debt_id" in columns
+    finally:
+        storage.close()
