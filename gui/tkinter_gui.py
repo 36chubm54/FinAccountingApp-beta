@@ -51,6 +51,7 @@ class FinancialApp(tk.Tk):
         self._chart_refresh_suspended = False
         self._built_tabs: set[str] = set()
         self._analytics_bindings: Any | None = None
+        self._dashboard_bindings: Any | None = None
         self._budget_bindings: Any | None = None
         self._debt_bindings: Any | None = None
         self._distribution_bindings: Any | None = None
@@ -90,6 +91,7 @@ class FinancialApp(tk.Tk):
         self.tab_operations = ttk.Frame(notebook)
         self.tab_reports = ttk.Frame(notebook)
         self.tab_analytics = ttk.Frame(notebook)
+        self.tab_dashboard = ttk.Frame(notebook)
         self.tab_budget = ttk.Frame(notebook)
         self.tab_debts = ttk.Frame(notebook)
         self.tab_distribution = ttk.Frame(notebook)
@@ -99,6 +101,7 @@ class FinancialApp(tk.Tk):
         notebook.add(self.tab_operations, text="Operations")
         notebook.add(self.tab_reports, text="Reports")
         notebook.add(self.tab_analytics, text="Analytics")
+        notebook.add(self.tab_dashboard, text="Dashboard")
         notebook.add(self.tab_budget, text="Budget")
         notebook.add(self.tab_debts, text="Debts")
         notebook.add(self.tab_distribution, text="Distribution")
@@ -108,6 +111,7 @@ class FinancialApp(tk.Tk):
             str(self.tab_operations): "operations",
             str(self.tab_reports): "reports",
             str(self.tab_analytics): "analytics",
+            str(self.tab_dashboard): "dashboard",
             str(self.tab_budget): "budget",
             str(self.tab_debts): "debts",
             str(self.tab_distribution): "distribution",
@@ -405,6 +409,10 @@ class FinancialApp(tk.Tk):
             from gui.tabs.analytics_tab import build_analytics_tab
 
             self._analytics_bindings = build_analytics_tab(self.tab_analytics, context=self)
+        elif tab_key == "dashboard":
+            from gui.tabs.dashboard_tab import build_dashboard_tab
+
+            self._dashboard_bindings = build_dashboard_tab(self.tab_dashboard, context=self)
         elif tab_key == "budget":
             from gui.tabs.budget_tab import build_budget_tab
 
