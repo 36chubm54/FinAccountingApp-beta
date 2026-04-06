@@ -7,6 +7,43 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.10.0] - 2026-04-06
+
+### Added
+
+- Added strategic wealth-management domains: `assets`, `asset_snapshots`, and `goals`
+- Added services, use cases, controller flows, and SQLite persistence for manual asset registry, snapshot history, and strategic goals
+- Added a dedicated `Dashboard` tab with net worth trend, asset allocation, goals overview, quick actions, and bulk asset snapshot update
+- Added Dashboard goal-management UI flows: create, complete, reopen, and delete
+- Added Dashboard asset-management UI flows: create, edit, deactivate, and bulk snapshot save
+- Full backup/import/JSON->SQLite migration now support `assets`, `asset_snapshots`, and `goals`
+- Audit engine now includes integrity checks for assets, asset snapshots, and goals
+
+### Changed
+
+- Net worth now includes the latest active asset snapshots in addition to wallets, debts, and loans
+- Goal progress is now derived dynamically from current asset aggregates through the asset service
+- Dashboard forms now use inline validation and clearer warnings for asset currency changes and invalid goal timelines
+
+### Fixed
+
+- Fixed asset edit flow so `created_at` is handled correctly end-to-end in controller/use-case/service paths
+- Fixed bulk asset snapshot UX issues around cramped layout and unclear validation feedback
+- Hardened asset/goal UI validation for invalid dates, currencies, amounts, and edge-case form states
+
+### Tests
+
+- Added regression coverage for asset/goal domain models, asset service/controller flows, dashboard service/tab behavior, backup/import/migration, runtime SQLite storage, and the expanded audit engine
+
+### Docs
+
+- Updated `README.md` and `README_EN.md` for `v1.10.0`, the new `Dashboard` tab, strategic asset/goal flows, asset-aware net worth, and expanded audit coverage
+- Compacted README structure and moved detailed technical mapping into `docs/architecture.md`
+
+No breaking changes.
+
+---
+
 ## [1.9.1] - 2026-04-03
 
 ### Changed
