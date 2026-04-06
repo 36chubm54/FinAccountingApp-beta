@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 from backup import create_backup, export_to_json
 from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
@@ -248,3 +251,19 @@ def test_create_backup_skips_creation_when_keep_zero(tmp_path):
 
     assert backup_path is None
     assert not (tmp_path / "backups").exists()
+
+
+def test_create_backup_cleans_temp_file_when_replace_fails(tmp_path):
+    import backup
+
+    src = tmp_path / "data.json"
+    src.write_text('{"records": []}', encoding="utf-8")
+
+    with patch.object(backup.os, "replace", side_effect=OSError("disk busy")):
+        with pytest.raises(OSError, match="disk busy"):
+            create_backup(str(src))
+
+    backup_dir = tmp_path / "backups"
+    assert backup_dir.exists()
+    assert list(backup_dir.glob("data_backup_*.json")) == []
+    assert list(backup_dir.glob(".data_backup_*.json")) == []

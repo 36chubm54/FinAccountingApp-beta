@@ -202,6 +202,33 @@ def test_migration_is_safe_to_rerun_on_equivalent_dataset(tmp_path) -> None:
     sqlite_storage.close()
 
 
+def test_migration_rerun_rejects_payload_mismatch_in_existing_sqlite(tmp_path) -> None:
+    json_path = tmp_path / "records.json"
+    sqlite_path = tmp_path / "records.db"
+    schema_path = Path(__file__).resolve().parents[1] / "db" / "schema.sql"
+    _build_json_fixture(str(json_path))
+
+    args = Namespace(
+        json_path=str(json_path),
+        sqlite_path=str(sqlite_path),
+        schema_path=str(schema_path),
+        dry_run=False,
+    )
+
+    first_code = run_migration(args)
+    assert first_code == 0
+
+    sqlite_storage = SQLiteStorage(str(sqlite_path))
+    try:
+        sqlite_storage.execute("UPDATE records SET category = 'Broken category' WHERE id = 1")
+        sqlite_storage.commit()
+    finally:
+        sqlite_storage.close()
+
+    second_code = run_migration(args)
+    assert second_code == 1
+
+
 def test_migration_moves_distribution_snapshots_from_full_backup_json(tmp_path) -> None:
     json_path = tmp_path / "backup.json"
     sqlite_path = tmp_path / "records.db"

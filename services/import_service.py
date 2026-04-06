@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, replace
+from datetime import datetime
 from typing import Any
 
 from app.finance_service import FinanceService
@@ -125,12 +126,6 @@ class ImportService:
         )
         budgets = self._budgets_from_payload(parsed.budgets, strict=strict_distribution)
         debts = self._debts_from_payload(parsed.debts, strict=strict_distribution)
-        debt_payments = self._debt_payments_from_payload(
-            parsed.debt_payments,
-            debts=debts,
-            records=parsed.rows,
-            strict=strict_distribution,
-        )
         assets = self._assets_from_payload(parsed.assets, strict=strict_distribution)
         asset_snapshots = self._asset_snapshots_from_payload(
             parsed.asset_snapshots,
@@ -138,7 +133,10 @@ class ImportService:
             strict=strict_distribution,
         )
         goals = self._goals_from_payload(parsed.goals, strict=strict_distribution)
-        frozen_distribution_rows = self._frozen_rows_from_payload(parsed.distribution_snapshots)
+        frozen_distribution_rows = self._frozen_rows_from_payload(
+            parsed.distribution_snapshots,
+            strict=strict_distribution,
+        )
         errors: list[str] = []
         skipped = 0
         imported = 0
@@ -228,6 +226,18 @@ class ImportService:
             if isinstance(record, MandatoryExpenseRecord):
                 parsed_mandatory_templates.append(record)
                 imported += 1
+
+        parsed_records = self._normalize_record_debt_links(
+            parsed_records,
+            debts=debts,
+            strict=strict_distribution,
+        )
+        debt_payments = self._debt_payments_from_payload(
+            parsed.debt_payments,
+            debts=debts,
+            records=parsed_records,
+            strict=strict_distribution,
+        )
 
         return PreparedImportPayload(
             parsed=parsed,
@@ -326,8 +336,6 @@ class ImportService:
                 goals=goals,
                 preserve_existing_mandatory=not bool(target_wallets),
             )
-            self._replace_assets_if_supported(parsed.file_type, assets, asset_snapshots)
-            self._replace_goals_if_supported(parsed.file_type, goals)
             self._replace_distribution_structure_if_supported(
                 parsed.file_type,
                 distribution_items,
@@ -598,15 +606,35 @@ class ImportService:
         return normalized
 
     def _frozen_rows_from_payload(
-        self, payloads: list[dict[str, Any]]
+        self,
+        payloads: list[dict[str, Any]],
+        *,
+        strict: bool = False,
     ) -> list[FrozenDistributionRow]:
         frozen_rows: list[FrozenDistributionRow] = []
+        seen_months: set[str] = set()
         for index, item in enumerate(payloads):
             if not isinstance(item, dict):
+                if strict:
+                    raise ValueError("Invalid distribution snapshot payload: expected object")
                 continue
             month = str(item.get("month", "") or "").strip()
             if not month:
+                if strict:
+                    raise ValueError(f"Distribution snapshot at index {index} is missing month")
                 logger.warning("Skipping distribution snapshot without month at index %s", index)
+                continue
+            try:
+                datetime.strptime(month, "%Y-%m")
+            except ValueError as exc:
+                if strict:
+                    raise ValueError(f"Distribution snapshot has invalid month: {month}") from exc
+                logger.warning("Skipping distribution snapshot with invalid month '%s'", month)
+                continue
+            if month in seen_months:
+                if strict:
+                    raise ValueError(f"Duplicate distribution snapshot month: {month}")
+                logger.warning("Skipping duplicate distribution snapshot month '%s'", month)
                 continue
             column_order_raw = item.get("column_order", [])
             headings_raw = item.get("headings_by_column", {})
@@ -627,6 +655,7 @@ class ImportService:
                     auto_fixed=bool(item.get("auto_fixed", False)),
                 )
             )
+            seen_months.add(month)
         return frozen_rows
 
     def _budgets_from_payload(
@@ -838,10 +867,12 @@ class ImportService:
                 if strict:
                     raise ValueError(f"Duplicate asset snapshot id: {snapshot_id}")
                 continue
-            if strict and asset_id not in asset_ids:
-                raise ValueError(
-                    f"Asset snapshot #{snapshot_id} references missing asset_id={asset_id}"
-                )
+            if asset_id not in asset_ids:
+                if strict:
+                    raise ValueError(
+                        f"Asset snapshot #{snapshot_id} references missing asset_id={asset_id}"
+                    )
+                continue
             try:
                 snapshot = AssetSnapshot(
                     id=snapshot_id,
@@ -950,18 +981,16 @@ class ImportService:
         raw_payments: list[dict[str, Any]],
         *,
         debts: list[Debt],
-        records: list[dict[str, Any]],
+        records: list[Record],
         strict: bool = False,
     ) -> list[DebtPayment]:
         payments: list[DebtPayment] = []
         seen_ids: set[int] = set()
         debt_ids = {int(debt.id) for debt in debts}
         record_ids = {
-            int(record_id)
-            for row in records
-            if isinstance(row, dict)
-            and (record_id := parse_optional_strict_int(row.get("id"))) is not None
-            and record_id > 0
+            int(record.id)
+            for record in records
+            if getattr(record, "id", None) is not None and int(record.id) > 0
         }
         for item in raw_payments:
             if not isinstance(item, dict):
@@ -979,12 +1008,18 @@ class ImportService:
                 if strict:
                     raise ValueError(f"Duplicate debt payment id: {payment_id}")
                 continue
-            if strict and debt_id not in debt_ids:
-                raise ValueError(f"Debt payment #{payment_id} references missing debt_id={debt_id}")
-            if strict and record_id is not None and record_id not in record_ids:
-                raise ValueError(
-                    f"Debt payment #{payment_id} references missing record_id={record_id}"
-                )
+            if debt_id not in debt_ids:
+                if strict:
+                    raise ValueError(
+                        f"Debt payment #{payment_id} references missing debt_id={debt_id}"
+                    )
+                continue
+            if record_id is not None and record_id not in record_ids:
+                if strict:
+                    raise ValueError(
+                        f"Debt payment #{payment_id} references missing record_id={record_id}"
+                    )
+                continue
             try:
                 payment = DebtPayment(
                     id=payment_id,
@@ -1006,6 +1041,26 @@ class ImportService:
             seen_ids.add(payment_id)
             payments.append(payment)
         return payments
+
+    @staticmethod
+    def _normalize_record_debt_links(
+        records: list[Record],
+        *,
+        debts: list[Debt],
+        strict: bool = False,
+    ) -> list[Record]:
+        debt_ids = {int(debt.id) for debt in debts}
+        normalized_records: list[Record] = []
+        for record in records:
+            if record.related_debt_id is None or int(record.related_debt_id) in debt_ids:
+                normalized_records.append(record)
+                continue
+            if strict:
+                raise ValueError(
+                    f"Record #{record.id} references missing debt #{record.related_debt_id}"
+                )
+            normalized_records.append(replace(record, related_debt_id=None))
+        return normalized_records
 
     def _apply_operations_with_relaxed_wallet_limits(
         self,
@@ -1259,6 +1314,8 @@ class ImportService:
     @staticmethod
     def _wallets_from_payload(raw_wallets: list[dict[str, Any]]) -> list[Wallet]:
         wallets: list[Wallet] = []
+        seen_ids: set[int] = set()
+        system_wallet_ids: set[int] = set()
         for item in raw_wallets:
             wallet_id = parse_optional_strict_int(item.get("id"))
             if item.get("id") not in (None, "") and wallet_id is None:
@@ -1266,6 +1323,12 @@ class ImportService:
             wallet_id = wallet_id or 0
             if wallet_id <= 0:
                 continue
+            if wallet_id in seen_ids:
+                raise ValueError(f"Duplicate wallet id in import payload: {wallet_id}")
+            seen_ids.add(wallet_id)
+            is_system = bool(item.get("system", wallet_id == 1))
+            if is_system:
+                system_wallet_ids.add(wallet_id)
             wallets.append(
                 Wallet(
                     id=wallet_id,
@@ -1274,11 +1337,14 @@ class ImportService:
                     initial_balance=to_money_float(
                         as_float(item.get("initial_balance"), 0.0) or 0.0
                     ),
-                    system=bool(item.get("system", wallet_id == 1)),
+                    system=is_system,
                     allow_negative=bool(item.get("allow_negative", False)),
                     is_active=bool(item.get("is_active", True)),
                 )
             )
+        if len(system_wallet_ids) > 1:
+            duplicates = ", ".join(str(wallet_id) for wallet_id in sorted(system_wallet_ids))
+            raise ValueError(f"Multiple system wallets in import payload: {duplicates}")
         if not wallets:
             wallets = [
                 Wallet(

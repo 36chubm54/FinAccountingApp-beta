@@ -1,5 +1,8 @@
+import json
 from datetime import datetime
+from pathlib import Path
 
+import app.services as app_services
 from app.services import CurrencyService
 
 
@@ -79,3 +82,24 @@ def test_refresh_rates_updates_timestamp_when_online(monkeypatch):
     assert svc.refresh_rates() is True
     assert isinstance(svc.last_fetched_at, datetime)
     assert svc.last_fetched_at >= old_fetched
+
+
+def test_save_cache_is_atomic_when_replace_fails(tmp_path, monkeypatch):
+    cache_path = tmp_path / "currency_rates.json"
+    cache_path.write_text(json.dumps({"USD": 500.0}), encoding="utf-8")
+    monkeypatch.setattr(CurrencyService, "CACHE_FILE", cache_path)
+
+    original_replace = app_services.os.replace
+
+    def failing_replace(src, dst):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(app_services.os, "replace", failing_replace)
+
+    svc = CurrencyService()
+    svc._save_cache({"USD": 600.0})
+
+    assert json.loads(cache_path.read_text(encoding="utf-8")) == {"USD": 500.0}
+    temp_files = list(Path(tmp_path).glob(".currency_rates_*.json"))
+    assert temp_files == []
+    monkeypatch.setattr(app_services.os, "replace", original_replace)
