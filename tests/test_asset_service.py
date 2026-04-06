@@ -162,3 +162,42 @@ def test_goal_service_rejects_target_date_earlier_than_created_at(tmp_path: Path
             raise AssertionError("Expected ValueError")
     finally:
         repo.close()
+
+
+def test_bulk_snapshot_upsert_rolls_back_on_late_validation_error(tmp_path: Path) -> None:
+    repo = _build_repo(tmp_path, "asset_bulk_atomic.db")
+    currency = CurrencyService(rates={"USD": 500.0}, use_online=False)
+    service = AssetService(repo, currency)
+    try:
+        asset = service.create_asset(
+            name="Deposit",
+            category="bank",
+            currency="KZT",
+            created_at="2026-04-01",
+        )
+
+        try:
+            service.bulk_upsert_snapshots(
+                [
+                    {
+                        "asset_id": asset.id,
+                        "snapshot_date": "2026-04-05",
+                        "value": 1000.0,
+                        "currency": "KZT",
+                    },
+                    {
+                        "asset_id": asset.id,
+                        "snapshot_date": "2099-01-01",
+                        "value": 2000.0,
+                        "currency": "KZT",
+                    },
+                ]
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Expected ValueError")
+
+        assert service.get_asset_history(asset.id) == []
+    finally:
+        repo.close()

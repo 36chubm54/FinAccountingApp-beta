@@ -1,18 +1,42 @@
+import logging
+import sqlite3
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
 
-from domain.asset import AssetCategory
-from domain.debt import DebtKind, DebtOperationType, DebtStatus
+from app.services import CurrencyService
+from domain.asset import Asset, AssetCategory, AssetSnapshot
+from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
 from domain.records import ExpenseRecord, IncomeRecord
 from domain.transfers import Transfer
 from domain.wallets import Wallet
 from gui.controller_import_support import normalize_operation_ids_for_import
+from gui.controller_import_support import run_import_transaction
 from gui.controller_support import build_list_items
+from gui.controllers import FinancialController
+from infrastructure.repositories import JsonFileRecordRepository
+from infrastructure.sqlite_repository import SQLiteRecordRepository
 from services.import_parser import ParsedImportData
 from services.import_service import ImportService
+
+
+def _schema_path() -> str:
+    return str(Path(__file__).resolve().parents[1] / "db" / "schema.sql")
+
+
+def _make_sqlite_controller(tmp_path: Path, name: str) -> tuple[SQLiteRecordRepository, FinancialController]:
+    db_path = tmp_path / name
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(Path(_schema_path()).read_text(encoding="utf-8"))
+        conn.commit()
+    finally:
+        conn.close()
+    repo = SQLiteRecordRepository(str(db_path), schema_path=_schema_path())
+    return repo, FinancialController(repo, CurrencyService(use_online=False))
 
 
 def _finance_mock() -> Mock:
@@ -654,6 +678,375 @@ def test_import_service_json_backup_restores_assets_and_goals() -> None:
     assert goals_arg[0].title == "Emergency Fund"
 
 
+def test_import_service_bulk_replace_does_not_apply_assets_and_goals_twice() -> None:
+    finance_service = _finance_mock()
+    finance_service.supports_bulk_import_replace = True
+    finance_service.replace_all_for_import = Mock()
+    payload = ParsedImportData(
+        path="data_backup.json",
+        file_type="json",
+        rows=[],
+        assets=[
+            {
+                "id": 1,
+                "name": "Deposit",
+                "category": "bank",
+                "currency": "KZT",
+                "is_active": True,
+                "created_at": "2026-04-05",
+            }
+        ],
+        asset_snapshots=[
+            {
+                "id": 1,
+                "asset_id": 1,
+                "snapshot_date": "2026-04-05",
+                "value_minor": 500000,
+                "currency": "KZT",
+            }
+        ],
+        goals=[
+            {
+                "id": 1,
+                "title": "Emergency Fund",
+                "target_amount_minor": 1000000,
+                "currency": "KZT",
+                "created_at": "2026-04-05",
+            }
+        ],
+        wallets=[
+            {
+                "id": 1,
+                "name": "Main",
+                "currency": "KZT",
+                "initial_balance": 10.0,
+                "system": True,
+                "allow_negative": False,
+                "is_active": True,
+            }
+        ],
+        initial_balance=10.0,
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        summary = ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file(
+            "data_backup.json"
+        )
+
+    assert summary == ImportResult(imported=0, skipped=0, errors=tuple())
+    finance_service.replace_all_for_import.assert_called_once()
+    kwargs = finance_service.replace_all_for_import.call_args.kwargs
+    assert len(kwargs["assets"]) == 1
+    assert len(kwargs["asset_snapshots"]) == 1
+    assert len(kwargs["goals"]) == 1
+    finance_service.replace_assets.assert_not_called()
+    finance_service.replace_goals.assert_not_called()
+
+
+def test_import_service_current_rate_json_skips_orphan_asset_snapshots() -> None:
+    finance_service = _finance_mock()
+    finance_service.supports_bulk_import_replace = True
+    finance_service.replace_all_for_import = Mock()
+    payload = ParsedImportData(
+        path="data_backup.json",
+        file_type="json",
+        rows=[],
+        assets=[
+            {
+                "id": 1,
+                "name": "Broken asset",
+                "category": "invalid",
+                "currency": "KZT",
+                "is_active": True,
+                "created_at": "2026-04-05",
+            }
+        ],
+        asset_snapshots=[
+            {
+                "id": 1,
+                "asset_id": 1,
+                "snapshot_date": "2026-04-05",
+                "value_minor": 500000,
+                "currency": "KZT",
+                "note": "Initial",
+            }
+        ],
+        wallets=[
+            {
+                "id": 1,
+                "name": "Main",
+                "currency": "KZT",
+                "initial_balance": 10.0,
+                "system": True,
+                "allow_negative": False,
+                "is_active": True,
+            }
+        ],
+        initial_balance=10.0,
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        summary = ImportService(finance_service, policy=ImportPolicy.CURRENT_RATE).import_file(
+            "data_backup.json"
+        )
+
+    assert summary == ImportResult(imported=0, skipped=0, errors=tuple())
+    finance_service.replace_all_for_import.assert_called_once()
+    kwargs = finance_service.replace_all_for_import.call_args.kwargs
+    assets_arg = kwargs["assets"]
+    snapshots_arg = kwargs["asset_snapshots"]
+    assert assets_arg == []
+    assert snapshots_arg == []
+
+
+def test_import_service_current_rate_json_skips_orphan_debt_payments() -> None:
+    finance_service = _finance_mock()
+    finance_service.supports_bulk_import_replace = True
+    finance_service.replace_all_for_import = Mock()
+    payload = ParsedImportData(
+        path="data_backup.json",
+        file_type="json",
+        rows=[
+            {
+                "id": "10",
+                "date": "2026-03-02",
+                "type": "expense",
+                "wallet_id": "1",
+                "category": "Food",
+                "amount_original": "25",
+                "currency": "USD",
+                "description": "Expense",
+            }
+        ],
+        debt_payments=[
+            {
+                "id": 5,
+                "debt_id": 99,
+                "record_id": 10,
+                "operation_type": "debt_repay",
+                "principal_paid_minor": 2500,
+                "is_write_off": False,
+                "payment_date": "2026-03-02",
+            }
+        ],
+        wallets=[
+            {
+                "id": 1,
+                "name": "Main",
+                "currency": "KZT",
+                "initial_balance": 0.0,
+                "system": True,
+                "allow_negative": False,
+                "is_active": True,
+            }
+        ],
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        summary = ImportService(finance_service, policy=ImportPolicy.CURRENT_RATE).import_file(
+            "data_backup.json"
+        )
+
+    assert summary == ImportResult(imported=1, skipped=0, errors=tuple())
+    kwargs = finance_service.replace_all_for_import.call_args.kwargs
+    assert kwargs["debts"] == []
+    assert kwargs["debt_payments"] == []
+
+
+def test_import_service_current_rate_json_clears_orphan_record_debt_link() -> None:
+    finance_service = _finance_mock()
+    finance_service.supports_bulk_import_replace = True
+    finance_service.replace_all_for_import = Mock()
+    payload = ParsedImportData(
+        path="data_backup.json",
+        file_type="json",
+        rows=[
+            {
+                "id": "10",
+                "date": "2026-03-02",
+                "type": "expense",
+                "wallet_id": "1",
+                "related_debt_id": "99",
+                "category": "Debt payment",
+                "amount_original": "25",
+                "currency": "USD",
+                "description": "Debt payment",
+            }
+        ],
+        wallets=[
+            {
+                "id": 1,
+                "name": "Main",
+                "currency": "KZT",
+                "initial_balance": 0.0,
+                "system": True,
+                "allow_negative": False,
+                "is_active": True,
+            }
+        ],
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        summary = ImportService(finance_service, policy=ImportPolicy.CURRENT_RATE).import_file(
+            "data_backup.json"
+        )
+
+    assert summary == ImportResult(imported=1, skipped=0, errors=tuple())
+    kwargs = finance_service.replace_all_for_import.call_args.kwargs
+    assert kwargs["records"][0].related_debt_id is None
+
+
+def test_import_service_current_rate_json_skips_invalid_distribution_snapshots() -> None:
+    finance_service = _finance_mock()
+    finance_service.supports_bulk_import_replace = True
+    finance_service.replace_all_for_import = Mock()
+    payload = ParsedImportData(
+        path="data_backup.json",
+        file_type="json",
+        rows=[],
+        distribution_snapshots=[
+            {
+                "month": "2026-13",
+                "column_order": ["month", "fixed"],
+                "headings_by_column": {"month": "Month"},
+                "values_by_column": {"month": "2026-13"},
+            },
+            {
+                "month": "2026-03",
+                "column_order": ["month", "fixed"],
+                "headings_by_column": {"month": "Month"},
+                "values_by_column": {"month": "2026-03"},
+            },
+            {
+                "month": "2026-03",
+                "column_order": ["month", "fixed"],
+                "headings_by_column": {"month": "Month"},
+                "values_by_column": {"month": "2026-03 duplicate"},
+            },
+        ],
+        wallets=[
+            {
+                "id": 1,
+                "name": "Main",
+                "currency": "KZT",
+                "initial_balance": 0.0,
+                "system": True,
+                "allow_negative": False,
+                "is_active": True,
+            }
+        ],
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        summary = ImportService(finance_service, policy=ImportPolicy.CURRENT_RATE).import_file(
+            "data_backup.json"
+        )
+
+    assert summary == ImportResult(imported=0, skipped=0, errors=tuple())
+    finance_service.replace_distribution_snapshots.assert_called_once()
+    rows_arg = finance_service.replace_distribution_snapshots.call_args.args[0]
+    assert [row.month for row in rows_arg] == ["2026-03"]
+
+
+def test_import_service_full_backup_rejects_duplicate_distribution_snapshot_month() -> None:
+    finance_service = _finance_mock()
+    payload = ParsedImportData(
+        path="data_backup.json",
+        file_type="json",
+        rows=[],
+        distribution_snapshots=[
+            {
+                "month": "2026-03",
+                "column_order": ["month"],
+                "headings_by_column": {"month": "Month"},
+                "values_by_column": {"month": "2026-03"},
+            },
+            {
+                "month": "2026-03",
+                "column_order": ["month"],
+                "headings_by_column": {"month": "Month"},
+                "values_by_column": {"month": "2026-03 duplicate"},
+            },
+        ],
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        with pytest.raises(ValueError, match="Duplicate distribution snapshot month: 2026-03"):
+            ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file(
+                "data_backup.json"
+            )
+
+
+def test_import_service_rejects_duplicate_wallet_ids_in_payload() -> None:
+    finance_service = _finance_mock()
+    payload = ParsedImportData(
+        path="data_backup.json",
+        file_type="json",
+        rows=[],
+        wallets=[
+            {
+                "id": 1,
+                "name": "Main",
+                "currency": "KZT",
+                "initial_balance": 0.0,
+                "system": True,
+                "allow_negative": False,
+                "is_active": True,
+            },
+            {
+                "id": 1,
+                "name": "Duplicate",
+                "currency": "USD",
+                "initial_balance": 5.0,
+                "system": False,
+                "allow_negative": False,
+                "is_active": True,
+            },
+        ],
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        with pytest.raises(ValueError, match="Duplicate wallet id in import payload: 1"):
+            ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file(
+                "data_backup.json"
+            )
+
+
+def test_import_service_rejects_multiple_system_wallets_in_payload() -> None:
+    finance_service = _finance_mock()
+    payload = ParsedImportData(
+        path="data_backup.json",
+        file_type="json",
+        rows=[],
+        wallets=[
+            {
+                "id": 1,
+                "name": "Main",
+                "currency": "KZT",
+                "initial_balance": 0.0,
+                "system": True,
+                "allow_negative": False,
+                "is_active": True,
+            },
+            {
+                "id": 2,
+                "name": "Secondary system",
+                "currency": "USD",
+                "initial_balance": 5.0,
+                "system": True,
+                "allow_negative": False,
+                "is_active": True,
+            },
+        ],
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        with pytest.raises(ValueError, match="Multiple system wallets in import payload: 1, 2"):
+            ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file(
+                "data_backup.json"
+            )
+
+
 def test_import_service_full_backup_rejects_invalid_distribution_structure() -> None:
     finance_service = _finance_mock()
     payload = ParsedImportData(
@@ -1178,3 +1571,218 @@ def test_normalize_operation_ids_for_import_is_deterministic_by_date_then_id() -
     assert [transfer.description for transfer in normalized_transfers] == ["Earlier", "Later"]
     assert [record.id for record in normalized_records] == [1, 2, 3]
     assert [record.transfer_id for record in normalized_records] == [2, 2, None]
+
+
+def test_normalize_operation_ids_for_import_remaps_debt_payment_record_ids() -> None:
+    repository = Mock()
+    repository.load_all.return_value = [
+        ExpenseRecord(
+            id=10,
+            date="2026-03-01",
+            wallet_id=1,
+            related_debt_id=1,
+            amount_original=5.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=5.0,
+            category="Debt payment",
+        )
+    ]
+    repository.load_transfers.return_value = []
+    repository.load_wallets.return_value = [
+        Wallet(id=1, name="Main", currency="KZT", initial_balance=0.0, system=True)
+    ]
+    repository.load_mandatory_expenses.return_value = []
+    repository.load_debts.return_value = [
+        Debt(
+            id=1,
+            contact_name="Alex",
+            kind=DebtKind.DEBT,
+            total_amount_minor=1000,
+            remaining_amount_minor=500,
+            currency="KZT",
+            interest_rate=0.0,
+            status=DebtStatus.OPEN,
+            created_at="2026-03-01",
+        )
+    ]
+    repository.load_debt_payments.return_value = [
+        DebtPayment(
+            id=1,
+            debt_id=1,
+            record_id=10,
+            operation_type=DebtOperationType.DEBT_REPAY,
+            principal_paid_minor=500,
+            is_write_off=False,
+            payment_date="2026-03-02",
+        )
+    ]
+
+    normalize_operation_ids_for_import(repository)
+
+    kwargs = repository.replace_all_data.call_args.kwargs
+    assert [record.id for record in kwargs["records"]] == [1]
+    assert kwargs["debt_payments"][0].record_id == 1
+
+
+def test_run_import_transaction_restores_assets_on_failure(tmp_path: Path) -> None:
+    repo, controller = _make_sqlite_controller(tmp_path, "import_rollback_assets.db")
+    try:
+        repo.replace_all_data(
+            wallets=[
+                Wallet(
+                    id=1,
+                    name="Main",
+                    currency="KZT",
+                    initial_balance=0.0,
+                    system=True,
+                    allow_negative=False,
+                    is_active=True,
+                )
+            ],
+            records=[],
+            mandatory_expenses=[],
+            transfers=[],
+        )
+        controller.replace_assets(
+            [
+                Asset(
+                    id=1,
+                    name="Old",
+                    category=AssetCategory.BANK,
+                    currency="KZT",
+                    is_active=True,
+                    created_at="2026-04-01",
+                )
+            ],
+            [
+                AssetSnapshot(
+                    id=1,
+                    asset_id=1,
+                    snapshot_date="2026-04-02",
+                    value_minor=100,
+                    currency="KZT",
+                    note="",
+                )
+            ],
+        )
+
+        with pytest.raises(RuntimeError, match="boom"):
+            controller.run_import_transaction(
+                lambda: (
+                    controller.replace_assets(
+                        [
+                            Asset(
+                                id=2,
+                                name="New",
+                                category=AssetCategory.BANK,
+                                currency="KZT",
+                                is_active=True,
+                                created_at="2026-04-03",
+                            )
+                        ],
+                        [
+                            AssetSnapshot(
+                                id=2,
+                                asset_id=2,
+                                snapshot_date="2026-04-04",
+                                value_minor=200,
+                                currency="KZT",
+                                note="",
+                            )
+                        ],
+                    ),
+                    (_ for _ in ()).throw(RuntimeError("boom")),
+                )
+            )
+
+        assets = repo.load_assets()
+        snapshots = repo.load_asset_snapshots()
+        assert [(asset.id, asset.name) for asset in assets] == [(1, "Old")]
+        assert [(snapshot.id, snapshot.asset_id, snapshot.value_minor) for snapshot in snapshots] == [
+            (1, 1, 100)
+        ]
+    finally:
+        repo.close()
+
+
+def test_run_import_transaction_restores_debts_for_json_repository(tmp_path: Path) -> None:
+    repo = JsonFileRecordRepository(str(tmp_path / "import_rollback.json"))
+    repo.replace_all_data(
+        wallets=[
+            Wallet(
+                id=1,
+                name="Main",
+                currency="KZT",
+                initial_balance=0.0,
+                system=True,
+                allow_negative=False,
+                is_active=True,
+            )
+        ],
+        records=[],
+        mandatory_expenses=[],
+        transfers=[],
+        debts=[
+            Debt(
+                id=1,
+                contact_name="Alex",
+                kind=DebtKind.DEBT,
+                total_amount_minor=1000,
+                remaining_amount_minor=700,
+                currency="KZT",
+                interest_rate=0.0,
+                status=DebtStatus.OPEN,
+                created_at="2026-04-01",
+            )
+        ],
+        debt_payments=[
+            DebtPayment(
+                id=1,
+                debt_id=1,
+                record_id=None,
+                operation_type=DebtOperationType.DEBT_REPAY,
+                principal_paid_minor=300,
+                is_write_off=False,
+                payment_date="2026-04-02",
+            )
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        run_import_transaction(
+            repo,
+            lambda: (
+                repo.replace_all_data(
+                    wallets=repo.load_wallets(),
+                    records=[],
+                    mandatory_expenses=[],
+                    transfers=[],
+                    debts=[
+                        Debt(
+                            id=2,
+                            contact_name="New",
+                            kind=DebtKind.LOAN,
+                            total_amount_minor=500,
+                            remaining_amount_minor=500,
+                            currency="USD",
+                            interest_rate=0.0,
+                            status=DebtStatus.OPEN,
+                            created_at="2026-04-03",
+                        )
+                    ],
+                    debt_payments=[],
+                ),
+                (_ for _ in ()).throw(RuntimeError("boom")),
+            ),
+            logging.getLogger(__name__),
+        )
+
+    debts = repo.load_debts()
+    debt_payments = repo.load_debt_payments()
+    assert [(debt.id, debt.contact_name, debt.remaining_amount_minor) for debt in debts] == [
+        (1, "Alex", 700)
+    ]
+    assert [
+        (payment.id, payment.debt_id, payment.principal_paid_minor) for payment in debt_payments
+    ] == [(1, 1, 300)]

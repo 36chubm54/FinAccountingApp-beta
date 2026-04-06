@@ -1109,8 +1109,8 @@ class SQLiteRecordRepository(RecordRepository):
             )
         return int(cursor.rowcount or 0) > 0
 
-    def save_asset_snapshot(self, snapshot: AssetSnapshot) -> None:
-        with self._conn:
+    def save_asset_snapshot(self, snapshot: AssetSnapshot, *, commit: bool = True) -> None:
+        def _save() -> None:
             row = self._conn.execute(
                 "SELECT 1 FROM asset_snapshots WHERE id = ?",
                 (int(snapshot.id),),
@@ -1130,6 +1130,12 @@ class SQLiteRecordRepository(RecordRepository):
                 self._update_asset_snapshot_row(int(existing["id"]), snapshot)
             else:
                 self._insert_asset_snapshot_row(snapshot)
+
+        if commit:
+            with self._conn:
+                _save()
+            return
+        _save()
 
     def load_asset_snapshots(self, asset_id: int | None = None) -> list[AssetSnapshot]:
         if asset_id is None:

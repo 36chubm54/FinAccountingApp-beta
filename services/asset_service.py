@@ -87,36 +87,39 @@ class AssetService:
         currency: str | None = None,
         note: str = "",
     ) -> AssetSnapshot:
-        asset = self._repo.get_asset_by_id(int(asset_id))
-        snapshot_date_text = self._normalize_date(snapshot_date)
-        amount_minor = to_minor_units(value)
-        if amount_minor < 0:
-            raise ValueError("Asset snapshot value cannot be negative")
-        snapshot = AssetSnapshot(
-            id=self._next_asset_snapshot_id(),
-            asset_id=int(asset.id),
-            snapshot_date=snapshot_date_text,
-            value_minor=amount_minor,
-            currency=str(currency or asset.currency).strip().upper(),
-            note=str(note or "").strip(),
+        snapshot = self._build_snapshot(
+            asset_id=asset_id,
+            snapshot_date=snapshot_date,
+            value=value,
+            currency=currency,
+            note=note,
         )
         self._repo.save_asset_snapshot(snapshot)
-        return self._load_snapshot_by_asset_date(int(asset.id), snapshot_date_text)
+        return self._load_snapshot_by_asset_date(int(snapshot.asset_id), str(snapshot.snapshot_date))
 
     def bulk_upsert_snapshots(self, entries: list[dict]) -> list[AssetSnapshot]:
-        created: list[AssetSnapshot] = []
-        with self._repo.transaction():
-            for entry in entries:
-                created.append(
-                    self.add_snapshot(
-                        asset_id=int(entry["asset_id"]),
-                        snapshot_date=str(entry["snapshot_date"]),
-                        value=float(entry["value"]),
-                        currency=entry.get("currency"),
-                        note=str(entry.get("note", "") or ""),
-                    )
+        next_snapshot_id = self._next_asset_snapshot_id()
+        prepared: list[AssetSnapshot] = []
+        for entry in entries:
+            prepared.append(
+                self._build_snapshot(
+                    asset_id=int(entry["asset_id"]),
+                    snapshot_date=str(entry["snapshot_date"]),
+                    value=float(entry["value"]),
+                    currency=entry.get("currency"),
+                    note=str(entry.get("note", "") or ""),
+                    snapshot_id=next_snapshot_id,
                 )
-        return created
+            )
+            next_snapshot_id += 1
+
+        with self._repo.transaction():
+            for snapshot in prepared:
+                self._repo.save_asset_snapshot(snapshot, commit=False)
+        return [
+            self._load_snapshot_by_asset_date(int(snapshot.asset_id), str(snapshot.snapshot_date))
+            for snapshot in prepared
+        ]
 
     def get_assets(self, *, active_only: bool = False) -> list[Asset]:
         return self._repo.load_assets(active_only=active_only)
@@ -232,6 +235,30 @@ class AssetService:
     def _next_asset_snapshot_id(self) -> int:
         return (
             max((int(snapshot.id) for snapshot in self._repo.load_asset_snapshots()), default=0) + 1
+        )
+
+    def _build_snapshot(
+        self,
+        *,
+        asset_id: int,
+        snapshot_date: str,
+        value: float,
+        currency: str | None = None,
+        note: str = "",
+        snapshot_id: int | None = None,
+    ) -> AssetSnapshot:
+        asset = self._repo.get_asset_by_id(int(asset_id))
+        snapshot_date_text = self._normalize_date(snapshot_date)
+        amount_minor = to_minor_units(value)
+        if amount_minor < 0:
+            raise ValueError("Asset snapshot value cannot be negative")
+        return AssetSnapshot(
+            id=self._next_asset_snapshot_id() if snapshot_id is None else int(snapshot_id),
+            asset_id=int(asset.id),
+            snapshot_date=snapshot_date_text,
+            value_minor=amount_minor,
+            currency=str(currency or asset.currency).strip().upper(),
+            note=str(note or "").strip(),
         )
 
     def _load_snapshot_by_asset_date(self, asset_id: int, snapshot_date: str) -> AssetSnapshot:
