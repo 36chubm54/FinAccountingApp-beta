@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -13,6 +15,28 @@ logger = logging.getLogger(__name__)
 
 
 _BACKUP_RE = re.compile(r"^(?P<stem>.+)_backup_(?P<stamp>\d{8}_\d{6})$")
+
+
+def _copy_backup_atomically(source: Path, destination: Path) -> None:
+    fd, temp_path_str = tempfile.mkstemp(
+        prefix=f".{destination.stem}_",
+        suffix=destination.suffix,
+        dir=destination.parent,
+    )
+    temp_path = Path(temp_path_str)
+    try:
+        with source.open("rb") as src, os.fdopen(fd, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+            dst.flush()
+            os.fsync(dst.fileno())
+        shutil.copystat(source, temp_path)
+        os.replace(temp_path, destination)
+    except Exception:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except Exception:
+            logger.exception("Failed to clean up temporary backup file: %s", temp_path)
+        raise
 
 
 def _prune_backups(
@@ -48,7 +72,7 @@ def create_backup(json_path: str, *, keep_last: int | None = None) -> str | None
     backup_dir = source.parent / "backups"
     backup_dir.mkdir(exist_ok=True)
     backup_path = backup_dir / f"{source.stem}_backup_{stamp}{source.suffix}"
-    shutil.copy2(source, backup_path)
+    _copy_backup_atomically(source, backup_path)
     if keep_last is not None:
         _prune_backups(
             backup_dir,
