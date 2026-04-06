@@ -6,9 +6,11 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from app.finance_service import FinanceService
+from domain.asset import Asset, AssetCategory, AssetSnapshot
 from domain.budget import Budget
 from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
 from domain.distribution import DistributionItem, DistributionSubitem, FrozenDistributionRow
+from domain.goal import Goal
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
@@ -43,6 +45,9 @@ class PreparedImportPayload:
     budgets: list[Budget]
     debts: list[Debt]
     debt_payments: list[DebtPayment]
+    assets: list[Asset]
+    asset_snapshots: list[AssetSnapshot]
+    goals: list[Goal]
     distribution_items: list[DistributionItem]
     distribution_subitems_by_item: dict[int, list[DistributionSubitem]]
     frozen_distribution_rows: list[FrozenDistributionRow]
@@ -126,6 +131,13 @@ class ImportService:
             records=parsed.rows,
             strict=strict_distribution,
         )
+        assets = self._assets_from_payload(parsed.assets, strict=strict_distribution)
+        asset_snapshots = self._asset_snapshots_from_payload(
+            parsed.asset_snapshots,
+            assets=assets,
+            strict=strict_distribution,
+        )
+        goals = self._goals_from_payload(parsed.goals, strict=strict_distribution)
         frozen_distribution_rows = self._frozen_rows_from_payload(parsed.distribution_snapshots)
         errors: list[str] = []
         skipped = 0
@@ -226,6 +238,9 @@ class ImportService:
             budgets=budgets,
             debts=debts,
             debt_payments=debt_payments,
+            assets=assets,
+            asset_snapshots=asset_snapshots,
+            goals=goals,
             distribution_items=distribution_items,
             distribution_subitems_by_item=distribution_subitems_by_item,
             frozen_distribution_rows=frozen_distribution_rows,
@@ -245,6 +260,9 @@ class ImportService:
         budgets = list(prepared.budgets)
         debts = list(prepared.debts)
         debt_payments = list(prepared.debt_payments)
+        assets = list(prepared.assets)
+        asset_snapshots = list(prepared.asset_snapshots)
+        goals = list(prepared.goals)
         distribution_items = list(prepared.distribution_items)
         distribution_subitems_by_item = {
             int(item_id): list(subitems)
@@ -263,6 +281,9 @@ class ImportService:
             and not budgets
             and not debts
             and not debt_payments
+            and not assets
+            and not asset_snapshots
+            and not goals
             and not distribution_items
             and not frozen_distribution_rows
             and not raw_transfer_ops
@@ -300,8 +321,13 @@ class ImportService:
                 mandatory_templates=mandatory_templates,
                 debts=debts,
                 debt_payments=debt_payments,
+                assets=assets,
+                asset_snapshots=asset_snapshots,
+                goals=goals,
                 preserve_existing_mandatory=not bool(target_wallets),
             )
+            self._replace_assets_if_supported(parsed.file_type, assets, asset_snapshots)
+            self._replace_goals_if_supported(parsed.file_type, goals)
             self._replace_distribution_structure_if_supported(
                 parsed.file_type,
                 distribution_items,
@@ -339,6 +365,8 @@ class ImportService:
             counters=counters,
         )
         self._apply_mandatory_templates(parsed_mandatory_templates)
+        self._replace_assets_if_supported(parsed.file_type, assets, asset_snapshots)
+        self._replace_goals_if_supported(parsed.file_type, goals)
         self._replace_distribution_structure_if_supported(
             parsed.file_type,
             distribution_items,
@@ -370,6 +398,25 @@ class ImportService:
         replace_snapshots = getattr(self._finance_service, "replace_distribution_snapshots", None)
         if callable(replace_snapshots):
             replace_snapshots(rows)
+
+    def _replace_assets_if_supported(
+        self,
+        file_type: str,
+        assets: list[Asset],
+        snapshots: list[AssetSnapshot],
+    ) -> None:
+        if file_type != "json":
+            return
+        replace_assets = getattr(self._finance_service, "replace_assets", None)
+        if callable(replace_assets):
+            replace_assets(assets, snapshots)
+
+    def _replace_goals_if_supported(self, file_type: str, goals: list[Goal]) -> None:
+        if file_type != "json":
+            return
+        replace_goals = getattr(self._finance_service, "replace_goals", None)
+        if callable(replace_goals):
+            replace_goals(goals)
 
     def _replace_budgets_if_supported(self, file_type: str, budgets: list[Budget]) -> None:
         if file_type != "json":
@@ -723,6 +770,137 @@ class ImportService:
                 )
             )
         return items, dict(subitems_by_item)
+
+    @staticmethod
+    def _assets_from_payload(
+        raw_assets: list[dict[str, Any]],
+        *,
+        strict: bool = False,
+    ) -> list[Asset]:
+        assets: list[Asset] = []
+        seen_ids: set[int] = set()
+        for item in raw_assets:
+            if not isinstance(item, dict):
+                if strict:
+                    raise ValueError("Invalid asset payload: expected object")
+                continue
+            asset_id = parse_optional_strict_int(item.get("id")) or 0
+            if asset_id <= 0:
+                if strict:
+                    raise ValueError(f"Invalid asset id: {item.get('id')!r}")
+                continue
+            if asset_id in seen_ids:
+                if strict:
+                    raise ValueError(f"Duplicate asset id: {asset_id}")
+                continue
+            try:
+                asset = Asset(
+                    id=asset_id,
+                    name=str(item.get("name", "") or "").strip(),
+                    category=AssetCategory(
+                        str(item.get("category", "other") or "other").strip().lower()
+                    ),
+                    currency=str(item.get("currency", "KZT") or "KZT").upper(),
+                    is_active=bool(item.get("is_active", True)),
+                    created_at=str(item.get("created_at", "") or "").strip(),
+                    description=str(item.get("description", "") or ""),
+                )
+            except Exception:
+                if strict:
+                    raise
+                continue
+            seen_ids.add(asset_id)
+            assets.append(asset)
+        return assets
+
+    @staticmethod
+    def _asset_snapshots_from_payload(
+        raw_snapshots: list[dict[str, Any]],
+        *,
+        assets: list[Asset],
+        strict: bool = False,
+    ) -> list[AssetSnapshot]:
+        snapshots: list[AssetSnapshot] = []
+        seen_ids: set[int] = set()
+        asset_ids = {int(asset.id) for asset in assets}
+        for item in raw_snapshots:
+            if not isinstance(item, dict):
+                if strict:
+                    raise ValueError("Invalid asset snapshot payload: expected object")
+                continue
+            snapshot_id = parse_optional_strict_int(item.get("id")) or 0
+            asset_id = parse_optional_strict_int(item.get("asset_id")) or 0
+            if snapshot_id <= 0:
+                if strict:
+                    raise ValueError(f"Invalid asset snapshot id: {item.get('id')!r}")
+                continue
+            if snapshot_id in seen_ids:
+                if strict:
+                    raise ValueError(f"Duplicate asset snapshot id: {snapshot_id}")
+                continue
+            if strict and asset_id not in asset_ids:
+                raise ValueError(
+                    f"Asset snapshot #{snapshot_id} references missing asset_id={asset_id}"
+                )
+            try:
+                snapshot = AssetSnapshot(
+                    id=snapshot_id,
+                    asset_id=asset_id,
+                    snapshot_date=str(item.get("snapshot_date", "") or "").strip(),
+                    value_minor=int(parse_optional_strict_int(item.get("value_minor")) or 0),
+                    currency=str(item.get("currency", "KZT") or "KZT").upper(),
+                    note=str(item.get("note", "") or ""),
+                )
+            except Exception:
+                if strict:
+                    raise
+                continue
+            seen_ids.add(snapshot_id)
+            snapshots.append(snapshot)
+        return snapshots
+
+    @staticmethod
+    def _goals_from_payload(
+        raw_goals: list[dict[str, Any]],
+        *,
+        strict: bool = False,
+    ) -> list[Goal]:
+        goals: list[Goal] = []
+        seen_ids: set[int] = set()
+        for item in raw_goals:
+            if not isinstance(item, dict):
+                if strict:
+                    raise ValueError("Invalid goal payload: expected object")
+                continue
+            goal_id = parse_optional_strict_int(item.get("id")) or 0
+            if goal_id <= 0:
+                if strict:
+                    raise ValueError(f"Invalid goal id: {item.get('id')!r}")
+                continue
+            if goal_id in seen_ids:
+                if strict:
+                    raise ValueError(f"Duplicate goal id: {goal_id}")
+                continue
+            try:
+                goal = Goal(
+                    id=goal_id,
+                    title=str(item.get("title", "") or "").strip(),
+                    target_amount_minor=int(
+                        parse_optional_strict_int(item.get("target_amount_minor")) or 0
+                    ),
+                    currency=str(item.get("currency", "KZT") or "KZT").upper(),
+                    created_at=str(item.get("created_at", "") or "").strip(),
+                    is_completed=bool(item.get("is_completed", False)),
+                    target_date=str(item.get("target_date", "") or "").strip() or None,
+                    description=str(item.get("description", "") or ""),
+                )
+            except Exception:
+                if strict:
+                    raise
+                continue
+            seen_ids.add(goal_id)
+            goals.append(goal)
+        return goals
 
     @staticmethod
     def _debts_from_payload(raw_debts: list[dict[str, Any]], *, strict: bool = False) -> list[Debt]:
@@ -1162,6 +1340,9 @@ class ImportService:
             budgets=list(parsed.budgets),
             debts=list(parsed.debts),
             debt_payments=list(parsed.debt_payments),
+            assets=list(parsed.assets),
+            asset_snapshots=list(parsed.asset_snapshots),
+            goals=list(parsed.goals),
             distribution_items=list(parsed.distribution_items),
             distribution_subitems=list(parsed.distribution_subitems),
             distribution_snapshots=list(parsed.distribution_snapshots),

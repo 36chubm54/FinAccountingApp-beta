@@ -83,6 +83,9 @@ def export_to_json(
         mandatory_expenses = sqlite_repo.load_mandatory_expenses()
         debts = sqlite_repo.load_debts()
         debt_payments = sqlite_repo.load_debt_payments()
+        assets = sqlite_repo.load_assets()
+        asset_snapshots = sqlite_repo.load_asset_snapshots()
+        goals = sqlite_repo.load_goals()
         export_full_backup_to_json(
             json_path,
             wallets=wallets,
@@ -91,6 +94,9 @@ def export_to_json(
             budgets=budget_service.get_budgets(),
             debts=debts,
             debt_payments=debt_payments,
+            assets=assets,
+            asset_snapshots=asset_snapshots,
+            goals=goals,
             distribution_items=distribution_items,
             distribution_subitems=[
                 subitem

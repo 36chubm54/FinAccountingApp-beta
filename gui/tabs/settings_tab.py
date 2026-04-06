@@ -897,6 +897,11 @@ def build_settings_tab(
         debt_payments = []
         for debt in debts:
             debt_payments.extend(context.controller.get_debt_history(debt.id))
+        assets = context.controller.get_assets(active_only=False)
+        asset_snapshots = []
+        for asset in assets:
+            asset_snapshots.extend(context.controller.get_asset_history(asset.id))
+        goals = context.controller.get_goals()
         distribution_items, distribution_subitems_by_item = (
             context.controller.export_distribution_structure()
         )
@@ -919,6 +924,9 @@ def build_settings_tab(
                 budgets=budgets,
                 debts=debts,
                 debt_payments=debt_payments,
+                assets=assets,
+                asset_snapshots=asset_snapshots,
+                goals=goals,
                 distribution_items=distribution_items,
                 distribution_subitems=distribution_subitems,
                 distribution_snapshots=distribution_snapshots,

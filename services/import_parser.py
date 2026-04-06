@@ -30,6 +30,9 @@ class ParsedImportData:
     budgets: list[dict[str, Any]] = field(default_factory=list)
     debts: list[dict[str, Any]] = field(default_factory=list)
     debt_payments: list[dict[str, Any]] = field(default_factory=list)
+    assets: list[dict[str, Any]] = field(default_factory=list)
+    asset_snapshots: list[dict[str, Any]] = field(default_factory=list)
+    goals: list[dict[str, Any]] = field(default_factory=list)
     distribution_items: list[dict[str, Any]] = field(default_factory=list)
     distribution_subitems: list[dict[str, Any]] = field(default_factory=list)
     distribution_snapshots: list[dict[str, Any]] = field(default_factory=list)
@@ -282,6 +285,15 @@ def _read_json_payload(path: str, *, force: bool = False) -> ParsedImportData:
     debt_payments = payload.get("debt_payments", [])
     if not isinstance(debt_payments, list):
         debt_payments = []
+    assets = payload.get("assets", [])
+    if not isinstance(assets, list):
+        assets = []
+    asset_snapshots = payload.get("asset_snapshots", [])
+    if not isinstance(asset_snapshots, list):
+        asset_snapshots = []
+    goals = payload.get("goals", [])
+    if not isinstance(goals, list):
+        goals = []
     distribution_items = payload.get("distribution_items", [])
     if not isinstance(distribution_items, list):
         distribution_items = []
@@ -332,6 +344,9 @@ def _read_json_payload(path: str, *, force: bool = False) -> ParsedImportData:
         budgets=[item for item in budgets if isinstance(item, dict)],
         debts=[item for item in debts if isinstance(item, dict)],
         debt_payments=[item for item in debt_payments if isinstance(item, dict)],
+        assets=[item for item in assets if isinstance(item, dict)],
+        asset_snapshots=[item for item in asset_snapshots if isinstance(item, dict)],
+        goals=[item for item in goals if isinstance(item, dict)],
         distribution_items=[item for item in distribution_items if isinstance(item, dict)],
         distribution_subitems=[item for item in distribution_subitems if isinstance(item, dict)],
         distribution_snapshots=[item for item in distribution_snapshots if isinstance(item, dict)],

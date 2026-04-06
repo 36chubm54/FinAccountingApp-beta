@@ -2,6 +2,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from domain.asset import AssetCategory
 from domain.debt import DebtKind, DebtOperationType, DebtStatus
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
@@ -581,6 +582,76 @@ def test_import_service_json_backup_restores_budgets() -> None:
     assert len(budgets_arg) == 1
     assert budgets_arg[0].category == "Food"
     assert budgets_arg[0].include_mandatory is True
+
+
+def test_import_service_json_backup_restores_assets_and_goals() -> None:
+    finance_service = _finance_mock()
+    payload = ParsedImportData(
+        path="data_backup.json",
+        file_type="json",
+        rows=[],
+        assets=[
+            {
+                "id": 1,
+                "name": "Deposit",
+                "category": "bank",
+                "currency": "KZT",
+                "is_active": True,
+                "created_at": "2026-04-05",
+                "description": "Reserve",
+            }
+        ],
+        asset_snapshots=[
+            {
+                "id": 1,
+                "asset_id": 1,
+                "snapshot_date": "2026-04-05",
+                "value_minor": 500000,
+                "currency": "KZT",
+                "note": "Initial",
+            }
+        ],
+        goals=[
+            {
+                "id": 1,
+                "title": "Emergency Fund",
+                "target_amount_minor": 1000000,
+                "currency": "KZT",
+                "created_at": "2026-04-05",
+                "target_date": "2026-12-31",
+                "is_completed": False,
+            }
+        ],
+        wallets=[
+            {
+                "id": 1,
+                "name": "Main",
+                "currency": "KZT",
+                "initial_balance": 10.0,
+                "system": True,
+                "allow_negative": False,
+                "is_active": True,
+            }
+        ],
+        initial_balance=10.0,
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        summary = ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file(
+            "data_backup.json"
+        )
+
+    assert summary == ImportResult(imported=0, skipped=0, errors=tuple())
+    finance_service.replace_assets.assert_called_once()
+    finance_service.replace_goals.assert_called_once()
+    assets_arg, snapshots_arg = finance_service.replace_assets.call_args.args
+    assert len(assets_arg) == 1
+    assert assets_arg[0].category is AssetCategory.BANK
+    assert len(snapshots_arg) == 1
+    assert snapshots_arg[0].value_minor == 500000
+    goals_arg = finance_service.replace_goals.call_args.args[0]
+    assert len(goals_arg) == 1
+    assert goals_arg[0].title == "Emergency Fund"
 
 
 def test_import_service_full_backup_rejects_invalid_distribution_structure() -> None:
