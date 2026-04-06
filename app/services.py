@@ -1,5 +1,7 @@
 import json
 import logging
+import os
+import tempfile
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -204,8 +206,25 @@ class CurrencyService:
         return None
 
     def _save_cache(self, rates: dict[str, float]) -> None:
+        temp_path: str | None = None
         try:
-            with open(self.CACHE_FILE, "w", encoding="utf-8") as f:
+            self.CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            fd, temp_path = tempfile.mkstemp(
+                prefix=".currency_rates_",
+                suffix=".json",
+                dir=str(self.CACHE_FILE.parent),
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(rates, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, self.CACHE_FILE)
         except Exception as e:
             logger.exception("Failed to save currency cache: %s", e)
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except FileNotFoundError:
+                    pass
+                except Exception:
+                    logger.exception("Failed to cleanup temporary currency cache: %s", temp_path)

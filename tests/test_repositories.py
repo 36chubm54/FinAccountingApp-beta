@@ -3,10 +3,12 @@ import os
 import tempfile
 import threading
 from datetime import date
+from unittest.mock import patch
 
 import pytest
 
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
+import infrastructure.repositories as repositories_module
 from infrastructure.repositories import JsonFileRecordRepository, RecordRepository
 
 
@@ -92,6 +94,12 @@ class TestJsonFileRecordRepository:
         assert data["records"][0]["currency"] == "KZT"
         assert data["records"][0]["rate_at_operation"] == 1.0
         assert data["records"][0]["category"] == "Salary"
+
+    def test_save_data_fsyncs_temp_file_before_replace(self):
+        with patch.object(repositories_module.os, "fsync") as fsync_mock:
+            self.repo.save(IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"))
+
+        fsync_mock.assert_called_once()
 
     def test_load_records_with_backward_compatibility(self):
         # Test loading records without category (backward compatibility)

@@ -493,6 +493,8 @@ class JsonFileRecordRepository(RecordRepository):
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
                     json.dump(payload, f, indent=2, ensure_ascii=False)
+                    f.flush()
+                    os.fsync(f.fileno())
                 self._replace_with_retry(tmp_path)
             except PermissionError as e:
                 error_path = self._file_path + ".error"
