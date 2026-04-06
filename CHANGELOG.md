@@ -7,6 +7,30 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.10.1] - 2026-04-07
+
+### Fixed
+
+- Fixed import rollback for SQLite so failed restore flows no longer leave partially updated `assets`, `goals`, or other newer entities behind
+- Extended non-SQLite import rollback so JSON/file-based repositories now restore `debts` and `debt_payments` too, instead of only records/transfers
+- Fixed operation-id normalization after import so `debt_payments.record_id` links are preserved instead of being nulled during record reindexing
+- Fixed bulk asset snapshot upsert so late validation failures no longer leave partial writes in the database
+- Fixed non-strict JSON import so orphan `asset_snapshots` are skipped early instead of failing later during asset replacement
+- Fixed non-strict JSON import so orphan `debt_payments` are skipped early and orphan `records.related_debt_id` links are cleared before bulk replace
+- Fixed bulk JSON import so `assets` and `goals` are no longer applied twice after `replace_all_for_import(...)`
+- Hardened import payload validation to reject duplicate `wallet.id`, multiple `system` wallets, and duplicate/invalid `distribution_snapshots` earlier in the pipeline
+- Hardened backup creation so JSON backup files are written atomically via temp file + `fsync` + `os.replace`
+- Hardened the currency-rate cache and JSON repository writes so temp files are flushed and synced before replace
+- Hardened JSON -> SQLite migration validation so reruns now compare payload signatures for wallets, transfers, records, and mandatory templates instead of relying only on counts/balances
+
+### Tests
+
+- Added regression coverage for SQLite/file import rollback, debt-payment link preservation during normalization, atomic asset snapshot batch updates, orphan asset/debt snapshot handling in non-strict JSON import, duplicate wallet/system-wallet payload rejection, distribution snapshot validation, atomic backup/cache writes, JSON repository fsync behavior, and stronger JSON -> SQLite equivalence checks
+
+No breaking changes.
+
+---
+
 ## [1.10.0] - 2026-04-06
 
 ### Added
