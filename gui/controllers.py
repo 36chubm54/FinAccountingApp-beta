@@ -6,22 +6,26 @@ from dataclasses import replace
 from app.record_service import RecordService
 from app.services import CurrencyService
 from app.use_cases import (
+    AddAssetSnapshot,
     AddMandatoryExpenseToReport,
     ApplyMandatoryAutoPayments,
     CalculateNetWorth,
     CalculateWalletBalance,
     CloseDebt,
+    CreateAsset,
     CreateBudget,
     CreateDebt,
     CreateDistributionItem,
     CreateDistributionSubitem,
     CreateExpense,
+    CreateGoal,
     CreateIncome,
     CreateLoan,
     CreateMandatoryExpense,
     CreateMandatoryExpenseRecord,
     CreateTransfer,
     CreateWallet,
+    DeactivateAsset,
     DeleteAllMandatoryExpenses,
     DeleteAllRecords,
     DeleteBudget,
@@ -29,17 +33,24 @@ from app.use_cases import (
     DeleteDebtPayment,
     DeleteDistributionItem,
     DeleteDistributionSubitem,
+    DeleteGoal,
     DeleteMandatoryExpense,
     DeleteRecord,
     DeleteTransfer,
     GenerateReport,
     GetActiveWallets,
+    GetAllGoalProgress,
+    GetAssetHistory,
+    GetAssets,
     GetBudgetResults,
     GetBudgets,
     GetClosedDebts,
     GetDebtHistory,
     GetDebts,
     GetDistributionItems,
+    GetGoalProgress,
+    GetGoals,
+    GetLatestAssetSnapshots,
     GetMandatoryExpenses,
     GetMonthlyDistribution,
     GetOpenDebts,
@@ -48,14 +59,19 @@ from app.use_cases import (
     RegisterDebtPayment,
     RegisterDebtWriteOff,
     RunAudit,
+    SetGoalCompleted,
     SoftDeleteWallet,
+    UpdateAsset,
     UpdateBudgetLimit,
     UpdateDistributionItemPct,
     UpdateDistributionSubitemPct,
 )
+from domain.asset import Asset, AssetSnapshot
 from domain.audit import AuditReport
 from domain.budget import Budget
+from domain.dashboard import DashboardPayload
 from domain.debt import Debt, DebtPayment
+from domain.goal import Goal, GoalProgress
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
 from domain.records import MandatoryExpenseRecord, Record
@@ -76,11 +92,14 @@ from gui.controller_support import (
 )
 from infrastructure.repositories import RecordRepository
 from infrastructure.sqlite_repository import SQLiteRecordRepository
+from services.asset_service import AssetService
 from services.audit_service import AuditService
 from services.balance_service import BalanceService, CashflowResult, WalletBalance
 from services.budget_service import BudgetService
+from services.dashboard_service import DashboardService
 from services.debt_service import DebtService
 from services.distribution_service import DistributionService
+from services.goal_service import GoalService
 from services.metrics_service import MetricsService
 from services.timeline_service import TimelineService
 from utils.money import to_money_float
@@ -93,8 +112,10 @@ class FinancialController:
         self._repository = repository
         self._currency = currency_service
         self._record_service = RecordService(repository)
+        self._asset_service_instance: AssetService | None = None
         self._debt_service_instance: DebtService | None = None
         self._distribution_service_instance: DistributionService | None = None
+        self._goal_service_instance: GoalService | None = None
         self.supports_bulk_import_replace = True
 
     def build_record_list_items(self, records: list[Record] | None = None) -> list[RecordListItem]:
@@ -363,6 +384,142 @@ class FinancialController:
     def net_worth_current(self) -> float:
         return CalculateNetWorth(self._repository, self._currency).execute_current()
 
+    def _asset_service(self) -> AssetService:
+        if not isinstance(self._repository, SQLiteRecordRepository):
+            raise TypeError("Asset System is supported only for SQLite repository")
+        if self._asset_service_instance is None:
+            self._asset_service_instance = AssetService(self._repository, self._currency)
+        return self._asset_service_instance
+
+    def _goal_service(self) -> GoalService:
+        if not isinstance(self._repository, SQLiteRecordRepository):
+            raise TypeError("Goal System is supported only for SQLite repository")
+        if self._goal_service_instance is None:
+            self._goal_service_instance = GoalService(
+                self._repository,
+                self._asset_service(),
+                self._currency,
+            )
+        return self._goal_service_instance
+
+    def create_asset(
+        self,
+        *,
+        name: str,
+        category: str,
+        currency: str,
+        created_at: str,
+        description: str = "",
+        is_active: bool = True,
+    ) -> Asset:
+        return CreateAsset(self._asset_service()).execute(
+            name=name,
+            category=category,
+            currency=currency,
+            created_at=created_at,
+            description=description,
+            is_active=is_active,
+        )
+
+    def update_asset(
+        self,
+        asset_id: int,
+        *,
+        name: str | None = None,
+        category: str | None = None,
+        currency: str | None = None,
+        created_at: str | None = None,
+        description: str | None = None,
+        is_active: bool | None = None,
+    ) -> Asset:
+        return UpdateAsset(self._asset_service()).execute(
+            asset_id,
+            name=name,
+            category=category,
+            currency=currency,
+            created_at=created_at,
+            description=description,
+            is_active=is_active,
+        )
+
+    def get_assets(self, *, active_only: bool = False) -> list[Asset]:
+        return GetAssets(self._asset_service()).execute(active_only=active_only)
+
+    def deactivate_asset(self, asset_id: int) -> None:
+        DeactivateAsset(self._asset_service()).execute(asset_id)
+
+    def add_asset_snapshot(
+        self,
+        *,
+        asset_id: int,
+        snapshot_date: str,
+        value: float,
+        currency: str | None = None,
+        note: str = "",
+    ) -> AssetSnapshot:
+        return AddAssetSnapshot(self._asset_service()).execute(
+            asset_id=asset_id,
+            snapshot_date=snapshot_date,
+            value=value,
+            currency=currency,
+            note=note,
+        )
+
+    def get_asset_history(self, asset_id: int) -> list[AssetSnapshot]:
+        return GetAssetHistory(self._asset_service()).execute(asset_id)
+
+    def get_latest_asset_snapshots(self, *, active_only: bool = True) -> list[AssetSnapshot]:
+        return GetLatestAssetSnapshots(self._asset_service()).execute(active_only=active_only)
+
+    def get_total_assets_kzt(self, *, active_only: bool = True) -> float:
+        return self._asset_service().get_total_assets_kzt(active_only=active_only)
+
+    def get_asset_allocation(self, *, active_only: bool = True) -> list[tuple[str, float, float]]:
+        return self._asset_service().get_allocation_by_category(active_only=active_only)
+
+    def bulk_upsert_asset_snapshots(self, entries: list[dict]) -> list[AssetSnapshot]:
+        return self._asset_service().bulk_upsert_snapshots(list(entries or []))
+
+    def replace_assets(self, assets: list[Asset], snapshots: list[AssetSnapshot]) -> None:
+        self._asset_service().replace_assets(assets, snapshots)
+
+    def create_goal(
+        self,
+        *,
+        title: str,
+        target_amount: float,
+        currency: str,
+        created_at: str,
+        target_date: str | None = None,
+        description: str = "",
+    ) -> Goal:
+        return CreateGoal(self._goal_service()).execute(
+            title=title,
+            target_amount=target_amount,
+            currency=currency,
+            created_at=created_at,
+            target_date=target_date,
+            description=description,
+        )
+
+    def get_goals(self) -> list[Goal]:
+        return GetGoals(self._goal_service()).execute()
+
+    def set_goal_completed(self, goal_id: int, completed: bool = True) -> Goal:
+        return SetGoalCompleted(self._goal_service()).execute(goal_id, completed)
+
+    def delete_goal(self, goal_id: int) -> None:
+        DeleteGoal(self._goal_service()).execute(goal_id)
+
+    def get_goal_progress(self, goal_id: int) -> GoalProgress:
+        return GetGoalProgress(self._goal_service()).execute(goal_id)
+
+    def get_all_goal_progress(self) -> list[GoalProgress]:
+        return GetAllGoalProgress(self._goal_service()).execute()
+
+    def replace_goals(self, goals: list[Goal]) -> None:
+        self._goal_service().replace_goals(goals)
+
     def create_transfer(
         self,
         *,
@@ -443,6 +600,9 @@ class FinancialController:
         mandatory_templates: list[MandatoryExpenseRecord],
         debts: list[Debt] | None = None,
         debt_payments: list[DebtPayment] | None = None,
+        assets: list[Asset] | None = None,
+        asset_snapshots: list[AssetSnapshot] | None = None,
+        goals: list[Goal] | None = None,
         preserve_existing_mandatory: bool,
     ) -> None:
         target_wallets = list(wallets) if wallets else list(self._repository.load_wallets())
@@ -463,6 +623,10 @@ class FinancialController:
             debts=list(debts or []),
             debt_payments=list(debt_payments or []),
         )
+        if assets is not None or asset_snapshots is not None:
+            self.replace_assets(list(assets or []), list(asset_snapshots or []))
+        if goals is not None:
+            self.replace_goals(list(goals or []))
 
     def replace_budgets(self, budgets: list[Budget]) -> None:
         self._budget_service().replace_budgets(budgets)
@@ -814,6 +978,18 @@ class FinancialController:
     def get_cumulative_income_expense(self) -> list:
         """Cumulative income and expenses per month. Returns list[MonthlyCumulative]."""
         return self._timeline_service().get_cumulative_income_expense()
+
+    def get_dashboard_payload(self) -> DashboardPayload:
+        if not isinstance(self._repository, SQLiteRecordRepository):
+            raise TypeError("Dashboard is supported only for SQLite repository")
+        service = DashboardService(
+            self._repository,
+            self._asset_service(),
+            self._goal_service(),
+            self._timeline_service(),
+            current_net_worth_kzt=self.net_worth_fixed(),
+        )
+        return service.build_payload()
 
     def _metrics_service(self) -> MetricsService:
         if not isinstance(self._repository, SQLiteRecordRepository):

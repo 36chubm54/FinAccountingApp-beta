@@ -137,3 +137,37 @@ def test_schema_contains_debt_tables_with_expected_columns() -> None:
         "CREATE INDEX IF NOT EXISTS idx_debt_payments_record_id ON debt_payments(record_id);"
         in schema
     )
+
+
+def test_schema_contains_assets_and_goals_tables_with_expected_columns() -> None:
+    schema = _schema_sql()
+
+    assert "CREATE TABLE IF NOT EXISTS assets" in schema
+    assert "name TEXT NOT NULL" in schema
+    assert "category TEXT NOT NULL CHECK(category IN ('bank', 'crypto', 'cash', 'other'))" in schema
+    assert "is_active INTEGER NOT NULL DEFAULT 1" in schema
+    assert "created_at TEXT NOT NULL CHECK(created_at GLOB" in schema
+
+    assert "CREATE TABLE IF NOT EXISTS asset_snapshots" in schema
+    assert "asset_id INTEGER NOT NULL" in schema
+    assert "snapshot_date TEXT NOT NULL CHECK(" in schema
+    assert "value_minor INTEGER NOT NULL CHECK(value_minor >= 0)" in schema
+    assert (
+        "FOREIGN KEY(asset_id) REFERENCES assets(id) ON UPDATE CASCADE ON DELETE CASCADE" in schema
+    )
+    assert "UNIQUE(asset_id, snapshot_date)" in schema
+
+    assert "CREATE TABLE IF NOT EXISTS goals" in schema
+    assert "title TEXT NOT NULL" in schema
+    assert "target_amount_minor INTEGER NOT NULL CHECK(target_amount_minor > 0)" in schema
+    assert "target_date TEXT DEFAULT NULL CHECK(" in schema
+    assert "is_completed INTEGER NOT NULL DEFAULT 0 CHECK(is_completed IN (0, 1))" in schema
+
+    assert "CREATE INDEX IF NOT EXISTS idx_assets_category ON assets(category);" in schema
+    assert "CREATE INDEX IF NOT EXISTS idx_assets_is_active ON assets(is_active);" in schema
+    assert (
+        "CREATE INDEX IF NOT EXISTS idx_asset_snapshots_asset_date "
+        "ON asset_snapshots(asset_id, snapshot_date DESC);" in schema
+    )
+    assert "CREATE INDEX IF NOT EXISTS idx_goals_completed ON goals(is_completed);" in schema
+    assert "CREATE INDEX IF NOT EXISTS idx_goals_target_date ON goals(target_date);" in schema
