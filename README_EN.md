@@ -2,7 +2,7 @@
 
 Graphical application for personal financial accounting with multicurrency support, import/export, budgets, debts, assets, and goals.
 
-The current `v1.10.0` release adds a strategic wealth-management layer: manual `Assets`, `Goals`, a dedicated `Dashboard` tab, asset-aware `net worth`, and support for the new entities across backup/import/migration and the Data Audit Engine.
+The current `v1.10.1` release hardens the `Assets / Goals / Dashboard` layer introduced in `v1.10.0`: it strengthens import/backup/migration paths, fixes rollback and link normalization issues, makes batch/file writes more atomic, and validates malformed JSON payloads earlier before they reach persistent storage.
 
 ## 🚀 Quick Start
 
@@ -151,13 +151,14 @@ pytest --cov=. --cov-report=term-missing
 - `JSON` full backup restores runtime entities including `budgets`, `debts`, `debt_payments`, and distribution/wealth payloads when supported by the repository
 - Readonly snapshots require `force=True`
 - For `JSON` under `ImportPolicy.CURRENT_RATE`, the fast bulk-replace path is still allowed when the repository supports it
+- `v1.10.1` adds stricter early payload validation: broken references, duplicate `wallet.id`, multiple `system` wallets, and invalid/duplicate `distribution_snapshots` are rejected earlier in the import pipeline
 
 ### Backup
 
 - Full backup is stored as `JSON`
 - Main low-level parser: `import_full_backup_from_json(...)`
 - `import_backup(...)` remains only as a deprecated compatibility wrapper
-- JSON export is written atomically through a temporary file plus `os.replace`
+- JSON export and backup-copy paths are written atomically through a temporary file plus `fsync` and `os.replace`
 - `requirements-pdf.txt` is only needed for PDF export, not for the default runtime install
 
 ### Migration

@@ -966,6 +966,208 @@ def _wallet_balances_minor_from_sqlite(sqlite_storage: SQLiteStorage) -> dict[in
     return {int(row[0]): int(row[1]) for row in rows}
 
 
+def _wallet_signatures_from_json(
+    wallets: list[Wallet],
+    *,
+    wallet_map: dict[int, int],
+) -> list[tuple]:
+    return sorted(
+        (
+            wallet_map[int(wallet.id)],
+            str(wallet.name),
+            str(wallet.currency).upper(),
+            int(to_minor_units(wallet.initial_balance or 0.0)),
+            bool(wallet.system),
+            bool(wallet.allow_negative),
+            bool(wallet.is_active),
+        )
+        for wallet in wallets
+    )
+
+
+def _wallet_signatures_from_sqlite(sqlite_storage: SQLiteStorage) -> list[tuple]:
+    rows = sqlite_storage.query_all(
+        """
+        SELECT id, name, currency, initial_balance_minor, system, allow_negative, is_active
+        FROM wallets
+        ORDER BY id
+        """
+    )
+    return [
+        (
+            int(row[0]),
+            str(row[1]),
+            str(row[2]).upper(),
+            int(row[3]),
+            bool(row[4]),
+            bool(row[5]),
+            bool(row[6]),
+        )
+        for row in rows
+    ]
+
+
+def _transfer_signatures_from_json(
+    transfers: list[Transfer],
+    *,
+    wallet_map: dict[int, int],
+    transfer_map: dict[int, int],
+) -> list[tuple]:
+    return sorted(
+        (
+            transfer_map[int(transfer.id)],
+            wallet_map[int(transfer.from_wallet_id)],
+            wallet_map[int(transfer.to_wallet_id)],
+            str(transfer.date),
+            int(to_minor_units(transfer.amount_original or 0.0)),
+            str(transfer.currency).upper(),
+            rate_to_text(transfer.rate_at_operation),
+            int(to_minor_units(transfer.amount_kzt or 0.0)),
+            str(transfer.description or ""),
+        )
+        for transfer in transfers
+    )
+
+
+def _transfer_signatures_from_sqlite(sqlite_storage: SQLiteStorage) -> list[tuple]:
+    rows = sqlite_storage.query_all(
+        """
+        SELECT id, from_wallet_id, to_wallet_id, date,
+               amount_original_minor, currency, rate_at_operation_text,
+               amount_kzt_minor, description
+        FROM transfers
+        ORDER BY id
+        """
+    )
+    return [
+        (
+            int(row[0]),
+            int(row[1]),
+            int(row[2]),
+            str(row[3]),
+            int(row[4]),
+            str(row[5]).upper(),
+            str(row[6]),
+            int(row[7]),
+            str(row[8] or ""),
+        )
+        for row in rows
+    ]
+
+
+def _record_signatures_from_json(
+    records: list[Record],
+    *,
+    wallet_map: dict[int, int],
+    transfer_map: dict[int, int],
+    debt_map: dict[int, int],
+    record_map: dict[int, int],
+) -> list[tuple]:
+    return sorted(
+        (
+            record_map[int(record.id)],
+            str(record.type),
+            str(record.date),
+            wallet_map[int(record.wallet_id)],
+            transfer_map[int(record.transfer_id)] if record.transfer_id is not None else None,
+            debt_map[int(record.related_debt_id)] if record.related_debt_id is not None else None,
+            int(to_minor_units(record.amount_original or 0.0)),
+            str(record.currency).upper(),
+            rate_to_text(record.rate_at_operation),
+            int(to_minor_units(record.amount_kzt or 0.0)),
+            str(record.category),
+            str(record.description or ""),
+            (
+                str(record.period)
+                if isinstance(record, MandatoryExpenseRecord) and record.period is not None
+                else None
+            ),
+        )
+        for record in records
+    )
+
+
+def _record_signatures_from_sqlite(sqlite_storage: SQLiteStorage) -> list[tuple]:
+    rows = sqlite_storage.query_all(
+        """
+        SELECT id, type, date, wallet_id, transfer_id, related_debt_id,
+               amount_original_minor, currency, rate_at_operation_text,
+               amount_kzt_minor, category, description, period
+        FROM records
+        ORDER BY id
+        """
+    )
+    return [
+        (
+            int(row[0]),
+            str(row[1]),
+            str(row[2]),
+            int(row[3]),
+            int(row[4]) if row[4] is not None else None,
+            int(row[5]) if row[5] is not None else None,
+            int(row[6]),
+            str(row[7]).upper(),
+            str(row[8]),
+            int(row[9]),
+            str(row[10]),
+            str(row[11] or ""),
+            str(row[12]) if row[12] is not None else None,
+        )
+        for row in rows
+    ]
+
+
+def _mandatory_signatures_from_json(
+    mandatory_expenses: list[MandatoryExpenseRecord],
+    *,
+    wallet_map: dict[int, int],
+    mandatory_map: dict[int, int],
+) -> list[tuple]:
+    return sorted(
+        (
+            mandatory_map[int(expense.id)],
+            str(expense.date),
+            wallet_map[int(expense.wallet_id)],
+            int(to_minor_units(expense.amount_original or 0.0)),
+            str(expense.currency).upper(),
+            rate_to_text(expense.rate_at_operation),
+            int(to_minor_units(expense.amount_kzt or 0.0)),
+            str(expense.category),
+            str(expense.description or ""),
+            str(expense.period),
+            bool(expense.auto_pay),
+        )
+        for expense in mandatory_expenses
+    )
+
+
+def _mandatory_signatures_from_sqlite(sqlite_storage: SQLiteStorage) -> list[tuple]:
+    rows = sqlite_storage.query_all(
+        """
+        SELECT id, date, wallet_id, amount_original_minor, currency, rate_at_operation_text,
+               amount_kzt_minor, category, description, period, auto_pay
+        FROM mandatory_expenses
+        ORDER BY id
+        """
+    )
+    return [
+        (
+            int(row[0]),
+            str(row[1]),
+            int(row[2]),
+            int(row[3]),
+            str(row[4]).upper(),
+            str(row[5]),
+            int(row[6]),
+            str(row[7]),
+            str(row[8] or ""),
+            str(row[9]),
+            bool(row[10]),
+        )
+        for row in rows
+    ]
+
+
 def validate_migration(
     sqlite_storage: SQLiteStorage,
     wallets: list[Wallet],
@@ -1058,6 +1260,30 @@ def validate_migration(
         errors.append("Asset snapshot id mapping is incomplete")
     if len(goal_map) != len(goals):
         errors.append("Goal id mapping is incomplete")
+    if _wallet_signatures_from_json(wallets, wallet_map=wallet_map) != _wallet_signatures_from_sqlite(
+        sqlite_storage
+    ):
+        errors.append("Wallet payload mismatch")
+    if _transfer_signatures_from_json(
+        transfers,
+        wallet_map=wallet_map,
+        transfer_map=transfer_map,
+    ) != _transfer_signatures_from_sqlite(sqlite_storage):
+        errors.append("Transfer payload mismatch")
+    if _record_signatures_from_json(
+        records,
+        wallet_map=wallet_map,
+        transfer_map=transfer_map,
+        debt_map=debt_map,
+        record_map=record_map,
+    ) != _record_signatures_from_sqlite(sqlite_storage):
+        errors.append("Record payload mismatch")
+    if _mandatory_signatures_from_json(
+        mandatory_expenses,
+        wallet_map=wallet_map,
+        mandatory_map=mandatory_map,
+    ) != _mandatory_signatures_from_sqlite(sqlite_storage):
+        errors.append("Mandatory expense payload mismatch")
     if _asset_signatures_from_json(assets) != _asset_signatures_from_sqlite(sqlite_storage):
         errors.append("Asset payload mismatch")
     if _asset_snapshot_signatures_from_json(

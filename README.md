@@ -2,7 +2,7 @@
 
 Графическое приложение для персонального финансового учёта с мультивалютностью, импортом/экспортом, бюджетами, долгами, активами и целями.
 
-Текущий релиз `v1.10.0` добавляет strategic wealth management-слой: ручной реестр `Assets`, цели `Goals`, отдельную вкладку `Dashboard`, asset-aware `net worth`, а также поддержку новых сущностей в backup/import/migration и Data Audit Engine.
+Текущий релиз `v1.10.1` закрепляет `Assets / Goals / Dashboard` как стабильный слой: поверх `v1.10.0` он усиливает import/backup/migration paths, исправляет rollback и нормализацию связей, делает batch/file writes атомарнее и жёстче валидирует битые JSON payloads до записи в хранилище.
 
 ## 🚀 Быстрый старт
 
@@ -151,13 +151,14 @@ pytest --cov=. --cov-report=term-missing
 - Для `JSON` full backup восстанавливаются runtime-сущности, включая `budgets`, `debts`, `debt_payments`, distribution/wealth payloads, если подсистемы поддерживаются репозиторием
 - Для readonly snapshot требуется `force=True`
 - Для `JSON` под `ImportPolicy.CURRENT_RATE` fast bulk-replace path тоже разрешён, если репозиторий его поддерживает
+- `v1.10.1` усиливает раннюю валидацию import payload: битые ссылочные связи, дубликаты `wallet.id`, несколько `system` wallets и невалидные/дублированные `distribution_snapshots` теперь отсекаются раньше
 
 ### Backup
 
 - Full backup хранится в `JSON`
 - Базовый low-level parser: `import_full_backup_from_json(...)`
 - `import_backup(...)` оставлен только как deprecated compatibility wrapper
-- JSON export записывается atomically через temporary file + `os.replace`
+- JSON export и backup-copy paths записываются atomically через temporary file + `fsync` + `os.replace`
 - `requirements-pdf.txt` нужен только для PDF-экспорта, не для базового runtime
 
 ### Migration
