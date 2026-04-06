@@ -8,9 +8,11 @@ import sys
 import tempfile
 from pathlib import Path
 
+from domain.asset import Asset, AssetCategory, AssetSnapshot
 from domain.budget import Budget
 from domain.debt import Debt, DebtPayment
 from domain.distribution import DistributionItem, DistributionSubitem, FrozenDistributionRow
+from domain.goal import Goal
 from domain.records import MandatoryExpenseRecord, Record
 from domain.wallets import Wallet
 from storage.json_storage import JsonStorage
@@ -72,6 +74,9 @@ def _validate_source_integrity(
     budgets: list[Budget],
     debts: list[Debt],
     debt_payments: list[DebtPayment],
+    assets: list[Asset],
+    asset_snapshots: list[AssetSnapshot],
+    goals: list[Goal],
     distribution_items: list[DistributionItem],
     distribution_subitems: list[DistributionSubitem],
     distribution_snapshots: list[FrozenDistributionRow],
@@ -94,6 +99,7 @@ def _validate_source_integrity(
 
     debt_ids = {int(debt.id) for debt in debts}
     record_ids = {int(record.id) for record in records}
+    asset_ids = {int(asset.id) for asset in assets}
 
     for record in records:
         _require_existing_wallet(wallets, int(record.wallet_id), f"Record #{record.id}")
@@ -143,6 +149,19 @@ def _validate_source_integrity(
             raise ValueError(
                 f"DebtPayment #{payment_id} references missing record_id={payment.record_id}"
             )
+
+    for snapshot in asset_snapshots:
+        if int(snapshot.asset_id) not in asset_ids:
+            raise ValueError(
+                f"AssetSnapshot #{snapshot.id} references missing asset_id={snapshot.asset_id}"
+            )
+
+    goal_ids: set[int] = set()
+    for goal in goals:
+        goal_id = int(goal.id)
+        if goal_id in goal_ids:
+            raise ValueError(f"Duplicate goal id: {goal_id}")
+        goal_ids.add(goal_id)
 
     seen_budget_ids: set[int] = set()
     for budget in budgets:
@@ -739,6 +758,138 @@ def _insert_debt_payments(
     return mapping
 
 
+def _insert_assets(sqlite_storage: SQLiteStorage, assets: list[Asset]) -> dict[int, int]:
+    mapping: dict[int, int] = {}
+    preserve_ids = _all_positive_unique_ids(assets, lambda asset: asset.id)
+    for asset in assets:
+        payload = (
+            str(asset.name),
+            str(asset.category.value),
+            str(asset.currency).upper(),
+            int(bool(asset.is_active)),
+            str(asset.created_at),
+            str(asset.description or ""),
+        )
+        if preserve_ids:
+            sqlite_storage.execute(
+                """
+                INSERT INTO assets (
+                    id, name, category, currency, is_active, created_at, description
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (int(asset.id), *payload),
+            )
+            mapping[int(asset.id)] = int(asset.id)
+        else:
+            cursor = sqlite_storage.execute(
+                """
+                INSERT INTO assets (
+                    name, category, currency, is_active, created_at, description
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                payload,
+            )
+            lastrowid = cursor.lastrowid
+            if lastrowid is None:
+                raise RuntimeError("Failed to insert asset: no row ID returned")
+            mapping[int(asset.id)] = int(lastrowid)
+    if preserve_ids and assets:
+        _set_sqlite_sequence(sqlite_storage, "assets")
+    return mapping
+
+
+def _insert_asset_snapshots(
+    sqlite_storage: SQLiteStorage,
+    asset_snapshots: list[AssetSnapshot],
+    asset_map: dict[int, int],
+) -> dict[int, int]:
+    mapping: dict[int, int] = {}
+    preserve_ids = _all_positive_unique_ids(asset_snapshots, lambda snapshot: snapshot.id)
+    for snapshot in asset_snapshots:
+        payload = (
+            asset_map[int(snapshot.asset_id)],
+            str(snapshot.snapshot_date),
+            int(snapshot.value_minor),
+            str(snapshot.currency).upper(),
+            str(snapshot.note or ""),
+        )
+        if preserve_ids:
+            sqlite_storage.execute(
+                """
+                INSERT INTO asset_snapshots (
+                    id, asset_id, snapshot_date, value_minor, currency, note
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (int(snapshot.id), *payload),
+            )
+            mapping[int(snapshot.id)] = int(snapshot.id)
+        else:
+            cursor = sqlite_storage.execute(
+                """
+                INSERT INTO asset_snapshots (
+                    asset_id, snapshot_date, value_minor, currency, note
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                payload,
+            )
+            lastrowid = cursor.lastrowid
+            if lastrowid is None:
+                raise RuntimeError("Failed to insert asset snapshot: no row ID returned")
+            mapping[int(snapshot.id)] = int(lastrowid)
+    if preserve_ids and asset_snapshots:
+        _set_sqlite_sequence(sqlite_storage, "asset_snapshots")
+    return mapping
+
+
+def _insert_goals(sqlite_storage: SQLiteStorage, goals: list[Goal]) -> dict[int, int]:
+    mapping: dict[int, int] = {}
+    preserve_ids = _all_positive_unique_ids(goals, lambda goal: goal.id)
+    for goal in goals:
+        payload = (
+            str(goal.title),
+            int(goal.target_amount_minor),
+            str(goal.currency).upper(),
+            str(goal.target_date) if goal.target_date else None,
+            int(bool(goal.is_completed)),
+            str(goal.created_at),
+            str(goal.description or ""),
+        )
+        if preserve_ids:
+            sqlite_storage.execute(
+                """
+                INSERT INTO goals (
+                    id, title, target_amount_minor, currency, target_date,
+                    is_completed, created_at, description
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (int(goal.id), *payload),
+            )
+            mapping[int(goal.id)] = int(goal.id)
+        else:
+            cursor = sqlite_storage.execute(
+                """
+                INSERT INTO goals (
+                    title, target_amount_minor, currency, target_date,
+                    is_completed, created_at, description
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                payload,
+            )
+            lastrowid = cursor.lastrowid
+            if lastrowid is None:
+                raise RuntimeError("Failed to insert goal: no row ID returned")
+            mapping[int(goal.id)] = int(lastrowid)
+    if preserve_ids and goals:
+        _set_sqlite_sequence(sqlite_storage, "goals")
+    return mapping
+
+
 def _counts_from_sqlite(sqlite_storage: SQLiteStorage) -> dict[str, int]:
     return {
         "wallets": int(sqlite_storage.query_one("SELECT COUNT(*) FROM wallets")[0]),
@@ -750,6 +901,9 @@ def _counts_from_sqlite(sqlite_storage: SQLiteStorage) -> dict[str, int]:
         "budgets": int(sqlite_storage.query_one("SELECT COUNT(*) FROM budgets")[0]),
         "debts": int(sqlite_storage.query_one("SELECT COUNT(*) FROM debts")[0]),
         "debt_payments": int(sqlite_storage.query_one("SELECT COUNT(*) FROM debt_payments")[0]),
+        "assets": int(sqlite_storage.query_one("SELECT COUNT(*) FROM assets")[0]),
+        "asset_snapshots": int(sqlite_storage.query_one("SELECT COUNT(*) FROM asset_snapshots")[0]),
+        "goals": int(sqlite_storage.query_one("SELECT COUNT(*) FROM goals")[0]),
         "distribution_items": int(
             sqlite_storage.query_one("SELECT COUNT(*) FROM distribution_items")[0]
         ),
@@ -821,6 +975,9 @@ def validate_migration(
     budgets: list[Budget],
     debts: list[Debt],
     debt_payments: list[DebtPayment],
+    assets: list[Asset],
+    asset_snapshots: list[AssetSnapshot],
+    goals: list[Goal],
     distribution_items: list[DistributionItem],
     distribution_subitems: list[DistributionSubitem],
     distribution_snapshots: list[FrozenDistributionRow],
@@ -830,6 +987,9 @@ def validate_migration(
     mandatory_map: dict[int, int],
     debt_map: dict[int, int],
     debt_payment_map: dict[int, int],
+    asset_map: dict[int, int],
+    asset_snapshot_map: dict[int, int],
+    goal_map: dict[int, int],
 ) -> tuple[bool, list[str]]:
     errors: list[str] = []
 
@@ -841,6 +1001,9 @@ def validate_migration(
         "budgets": len(budgets),
         "debts": len(debts),
         "debt_payments": len(debt_payments),
+        "assets": len(assets),
+        "asset_snapshots": len(asset_snapshots),
+        "goals": len(goals),
         "distribution_items": len(distribution_items),
         "distribution_subitems": len(distribution_subitems),
         "distribution_snapshots": len(distribution_snapshots),
@@ -889,6 +1052,21 @@ def validate_migration(
         errors.append("Debt id mapping is incomplete")
     if len(debt_payment_map) != len(debt_payments):
         errors.append("Debt payment id mapping is incomplete")
+    if len(asset_map) != len(assets):
+        errors.append("Asset id mapping is incomplete")
+    if len(asset_snapshot_map) != len(asset_snapshots):
+        errors.append("Asset snapshot id mapping is incomplete")
+    if len(goal_map) != len(goals):
+        errors.append("Goal id mapping is incomplete")
+    if _asset_signatures_from_json(assets) != _asset_signatures_from_sqlite(sqlite_storage):
+        errors.append("Asset payload mismatch")
+    if _asset_snapshot_signatures_from_json(
+        asset_snapshots,
+        asset_map=asset_map,
+    ) != _asset_snapshot_signatures_from_sqlite(sqlite_storage):
+        errors.append("Asset snapshot payload mismatch")
+    if _goal_signatures_from_json(goals) != _goal_signatures_from_sqlite(sqlite_storage):
+        errors.append("Goal payload mismatch")
     if _budget_signatures_from_json(budgets) != _budget_signatures_from_sqlite(sqlite_storage):
         errors.append("Budget payload mismatch")
     if _debt_signatures_from_json(debts) != _debt_signatures_from_sqlite(sqlite_storage):
@@ -921,6 +1099,9 @@ def _validate_existing_target_equivalence(
     budgets: list[Budget],
     debts: list[Debt],
     debt_payments: list[DebtPayment],
+    assets: list[Asset],
+    asset_snapshots: list[AssetSnapshot],
+    goals: list[Goal],
     distribution_items: list[DistributionItem],
     distribution_subitems: list[DistributionSubitem],
     distribution_snapshots: list[FrozenDistributionRow],
@@ -935,6 +1116,9 @@ def _validate_existing_target_equivalence(
         budgets=budgets,
         debts=debts,
         debt_payments=debt_payments,
+        assets=assets,
+        asset_snapshots=asset_snapshots,
+        goals=goals,
         distribution_items=distribution_items,
         distribution_subitems=distribution_subitems,
         distribution_snapshots=distribution_snapshots,
@@ -944,6 +1128,9 @@ def _validate_existing_target_equivalence(
         mandatory_map={int(expense.id): int(expense.id) for expense in mandatory_expenses},
         debt_map={int(debt.id): int(debt.id) for debt in debts},
         debt_payment_map={int(payment.id): int(payment.id) for payment in debt_payments},
+        asset_map={int(asset.id): int(asset.id) for asset in assets},
+        asset_snapshot_map={int(snapshot.id): int(snapshot.id) for snapshot in asset_snapshots},
+        goal_map={int(goal.id): int(goal.id) for goal in goals},
     )
 
 
@@ -979,6 +1166,128 @@ def _budget_signatures_from_sqlite(sqlite_storage: SQLiteStorage) -> list[tuple]
             float(row[4]),
             int(row[5]),
             bool(row[6]),
+        )
+        for row in rows
+    ]
+
+
+def _asset_signatures_from_json(assets: list[Asset]) -> list[tuple]:
+    return sorted(
+        (
+            int(asset.id),
+            str(asset.name),
+            str(asset.category.value),
+            str(asset.currency).upper(),
+            bool(asset.is_active),
+            str(asset.created_at),
+            str(asset.description or ""),
+        )
+        for asset in assets
+    )
+
+
+def _asset_signatures_from_sqlite(sqlite_storage: SQLiteStorage) -> list[tuple]:
+    rows = sqlite_storage.query_all(
+        """
+        SELECT id, name, category, currency, is_active, created_at, description
+        FROM assets
+        ORDER BY id
+        """
+    )
+    return [
+        (
+            int(row[0]),
+            str(row[1]),
+            str(row[2]),
+            str(row[3]).upper(),
+            bool(row[4]),
+            str(row[5]),
+            str(row[6] or ""),
+        )
+        for row in rows
+    ]
+
+
+def _asset_snapshot_signatures_from_json(
+    snapshots: list[AssetSnapshot],
+    *,
+    asset_map: dict[int, int],
+) -> list[tuple]:
+    return sorted(
+        (
+            int(snapshot.id),
+            asset_map[int(snapshot.asset_id)],
+            str(snapshot.snapshot_date),
+            int(snapshot.value_minor),
+            str(snapshot.currency).upper(),
+            str(snapshot.note or ""),
+        )
+        for snapshot in snapshots
+    )
+
+
+def _asset_snapshot_signatures_from_sqlite(sqlite_storage: SQLiteStorage) -> list[tuple]:
+    rows = sqlite_storage.query_all(
+        """
+        SELECT id, asset_id, snapshot_date, value_minor, currency, note
+        FROM asset_snapshots
+        ORDER BY id
+        """
+    )
+    return [
+        (
+            int(row[0]),
+            int(row[1]),
+            str(row[2]),
+            int(row[3]),
+            str(row[4]).upper(),
+            str(row[5] or ""),
+        )
+        for row in rows
+    ]
+
+
+def _goal_signatures_from_json(goals: list[Goal]) -> list[tuple]:
+    return sorted(
+        (
+            int(goal.id),
+            str(goal.title),
+            int(goal.target_amount_minor),
+            str(goal.currency).upper(),
+            str(goal.target_date) if goal.target_date else None,
+            bool(goal.is_completed),
+            str(goal.created_at),
+            str(goal.description or ""),
+        )
+        for goal in goals
+    )
+
+
+def _goal_signatures_from_sqlite(sqlite_storage: SQLiteStorage) -> list[tuple]:
+    rows = sqlite_storage.query_all(
+        """
+        SELECT id,
+        title,
+        target_amount_minor,
+        currency,
+        target_date,
+        is_completed,
+        created_at,
+        description
+        FROM goals
+        ORDER BY id
+        """
+    )
+    return [
+        (
+            int(row[0]),
+            str(row[1]),
+            int(row[2]),
+            str(row[3]).upper(),
+            str(row[4]) if row[4] is not None else None,
+            bool(row[5]),
+            str(row[6]),
+            str(row[7] or ""),
         )
         for row in rows
     ]
@@ -1434,6 +1743,100 @@ def _load_distribution_structure_from_json(
     return items, subitems
 
 
+def _load_assets_and_goals_from_json(
+    path: str,
+) -> tuple[list[Asset], list[AssetSnapshot], list[Goal]]:
+    with open(path, encoding="utf-8") as fp:
+        payload = json.load(fp)
+    payload = unwrap_backup_payload(payload, force=True)
+
+    raw_assets = payload.get("assets", [])
+    raw_asset_snapshots = payload.get("asset_snapshots", [])
+    raw_goals = payload.get("goals", [])
+    if not isinstance(raw_assets, list):
+        raw_assets = []
+    if not isinstance(raw_asset_snapshots, list):
+        raw_asset_snapshots = []
+    if not isinstance(raw_goals, list):
+        raw_goals = []
+
+    assets: list[Asset] = []
+    seen_asset_ids: set[int] = set()
+    for item in raw_assets:
+        if not isinstance(item, dict):
+            raise ValueError("Invalid asset payload: expected object")
+        asset_id = int(item.get("id", 0) or 0)
+        if asset_id <= 0:
+            raise ValueError(f"Invalid asset id: {item.get('id')!r}")
+        if asset_id in seen_asset_ids:
+            raise ValueError(f"Duplicate asset id: {asset_id}")
+        assets.append(
+            Asset(
+                id=asset_id,
+                name=str(item.get("name", "") or "").strip(),
+                category=AssetCategory(str(item.get("category", "other") or "other")),
+                currency=str(item.get("currency", "KZT") or "KZT").upper(),
+                is_active=bool(item.get("is_active", True)),
+                created_at=str(item.get("created_at", "") or ""),
+                description=str(item.get("description", "") or ""),
+            )
+        )
+        seen_asset_ids.add(asset_id)
+
+    asset_ids = {int(asset.id) for asset in assets}
+    asset_snapshots: list[AssetSnapshot] = []
+    seen_snapshot_ids: set[int] = set()
+    for item in raw_asset_snapshots:
+        if not isinstance(item, dict):
+            raise ValueError("Invalid asset snapshot payload: expected object")
+        snapshot_id = int(item.get("id", 0) or 0)
+        if snapshot_id <= 0:
+            raise ValueError(f"Invalid asset snapshot id: {item.get('id')!r}")
+        if snapshot_id in seen_snapshot_ids:
+            raise ValueError(f"Duplicate asset snapshot id: {snapshot_id}")
+        snapshot = AssetSnapshot(
+            id=snapshot_id,
+            asset_id=int(item.get("asset_id", 0) or 0),
+            snapshot_date=str(item.get("snapshot_date", "") or ""),
+            value_minor=int(item.get("value_minor", 0) or 0),
+            currency=str(item.get("currency", "KZT") or "KZT").upper(),
+            note=str(item.get("note", "") or ""),
+        )
+        if int(snapshot.asset_id) not in asset_ids:
+            raise ValueError(
+                f"Asset snapshot #{snapshot.id} references missing asset_id={snapshot.asset_id}"
+            )
+        asset_snapshots.append(snapshot)
+        seen_snapshot_ids.add(snapshot_id)
+
+    goals: list[Goal] = []
+    seen_goal_ids: set[int] = set()
+    for item in raw_goals:
+        if not isinstance(item, dict):
+            raise ValueError("Invalid goal payload: expected object")
+        goal_id = int(item.get("id", 0) or 0)
+        if goal_id <= 0:
+            raise ValueError(f"Invalid goal id: {item.get('id')!r}")
+        if goal_id in seen_goal_ids:
+            raise ValueError(f"Duplicate goal id: {goal_id}")
+        goals.append(
+            Goal(
+                id=goal_id,
+                title=str(item.get("title", "") or "").strip(),
+                target_amount_minor=int(item.get("target_amount_minor", 0) or 0),
+                currency=str(item.get("currency", "KZT") or "KZT").upper(),
+                created_at=str(item.get("created_at", "") or ""),
+                is_completed=bool(item.get("is_completed", False)),
+                target_date=str(item.get("target_date"))
+                if item.get("target_date") not in (None, "")
+                else None,
+                description=str(item.get("description", "") or ""),
+            )
+        )
+        seen_goal_ids.add(goal_id)
+    return assets, asset_snapshots, goals
+
+
 def _load_source_dataset(
     json_path: str,
 ) -> tuple[
@@ -1444,6 +1847,9 @@ def _load_source_dataset(
     list[Budget],
     list[Debt],
     list[DebtPayment],
+    list[Asset],
+    list[AssetSnapshot],
+    list[Goal],
     list[DistributionItem],
     list[DistributionSubitem],
     list[FrozenDistributionRow],
@@ -1472,6 +1878,7 @@ def _load_source_dataset(
         os.unlink(temp_path)
 
     budgets = _load_budgets_from_json(json_path)
+    assets, asset_snapshots, goals = _load_assets_and_goals_from_json(json_path)
     distribution_items, distribution_subitems = _load_distribution_structure_from_json(json_path)
     distribution_snapshots = _load_distribution_snapshots_from_json(json_path)
     return (
@@ -1482,6 +1889,9 @@ def _load_source_dataset(
         budgets,
         debts,
         debt_payments,
+        assets,
+        asset_snapshots,
+        goals,
         distribution_items,
         distribution_subitems,
         distribution_snapshots,
@@ -1507,6 +1917,9 @@ def run_dry_run(args: argparse.Namespace) -> int:
             budgets,
             debts,
             debt_payments,
+            assets,
+            asset_snapshots,
+            goals,
             distribution_items,
             distribution_subitems,
             distribution_snapshots,
@@ -1520,6 +1933,9 @@ def run_dry_run(args: argparse.Namespace) -> int:
             budgets,
             debts,
             debt_payments,
+            assets,
+            asset_snapshots,
+            goals,
             distribution_items,
             distribution_subitems,
             distribution_snapshots,
@@ -1533,6 +1949,9 @@ def run_dry_run(args: argparse.Namespace) -> int:
         print(f"  budgets: {len(budgets)}")
         print(f"  debts: {len(debts)}")
         print(f"  debt_payments: {len(debt_payments)}")
+        print(f"  assets: {len(assets)}")
+        print(f"  asset_snapshots: {len(asset_snapshots)}")
+        print(f"  goals: {len(goals)}")
         print(f"  distribution_items: {len(distribution_items)}")
         print(f"  distribution_subitems: {len(distribution_subitems)}")
         print(f"  distribution_snapshots: {len(distribution_snapshots)}")
@@ -1563,6 +1982,9 @@ def run_migration(args: argparse.Namespace) -> int:
             budgets,
             debts,
             debt_payments,
+            assets,
+            asset_snapshots,
+            goals,
             distribution_items,
             distribution_subitems,
             distribution_snapshots,
@@ -1576,6 +1998,9 @@ def run_migration(args: argparse.Namespace) -> int:
             budgets,
             debts,
             debt_payments,
+            assets,
+            asset_snapshots,
+            goals,
             distribution_items,
             distribution_subitems,
             distribution_snapshots,
@@ -1593,6 +2018,9 @@ def run_migration(args: argparse.Namespace) -> int:
                 budgets=budgets,
                 debts=debts,
                 debt_payments=debt_payments,
+                assets=assets,
+                asset_snapshots=asset_snapshots,
+                goals=goals,
                 distribution_items=distribution_items,
                 distribution_subitems=distribution_subitems,
                 distribution_snapshots=distribution_snapshots,
@@ -1627,9 +2055,15 @@ def run_migration(args: argparse.Namespace) -> int:
             debt_map,
             record_map,
         )
-        print("[8/9] Migrating distribution structure...")
+        print("[8/12] Migrating assets...")
+        asset_map = _insert_assets(sqlite_storage, assets)
+        print("[9/12] Migrating asset_snapshots...")
+        asset_snapshot_map = _insert_asset_snapshots(sqlite_storage, asset_snapshots, asset_map)
+        print("[10/12] Migrating goals...")
+        goal_map = _insert_goals(sqlite_storage, goals)
+        print("[11/12] Migrating distribution structure...")
         _insert_distribution_structure(sqlite_storage, distribution_items, distribution_subitems)
-        print("[9/9] Migrating distribution_snapshots...")
+        print("[12/12] Migrating distribution_snapshots...")
         _insert_distribution_snapshots(sqlite_storage, distribution_snapshots)
 
         valid, errors = validate_migration(
@@ -1641,6 +2075,9 @@ def run_migration(args: argparse.Namespace) -> int:
             budgets=budgets,
             debts=debts,
             debt_payments=debt_payments,
+            assets=assets,
+            asset_snapshots=asset_snapshots,
+            goals=goals,
             distribution_items=distribution_items,
             distribution_subitems=distribution_subitems,
             distribution_snapshots=distribution_snapshots,
@@ -1650,6 +2087,9 @@ def run_migration(args: argparse.Namespace) -> int:
             mandatory_map=mandatory_map,
             debt_map=debt_map,
             debt_payment_map=debt_payment_map,
+            asset_map=asset_map,
+            asset_snapshot_map=asset_snapshot_map,
+            goal_map=goal_map,
         )
         if not valid:
             print("[error] Validation failed, rollback started")

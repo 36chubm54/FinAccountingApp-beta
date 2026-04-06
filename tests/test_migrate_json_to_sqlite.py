@@ -4,9 +4,11 @@ import json
 from argparse import Namespace
 from pathlib import Path
 
+from domain.asset import Asset, AssetCategory, AssetSnapshot
 from domain.budget import Budget
 from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
 from domain.distribution import FrozenDistributionRow
+from domain.goal import Goal
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
 from domain.transfers import Transfer
 from domain.wallets import Wallet
@@ -455,4 +457,91 @@ def test_migration_moves_debts_and_debt_payments_from_full_backup_json(tmp_path)
     assert payment_row[3] == 2500
     record_row = sqlite_storage.query_one("SELECT related_debt_id FROM records WHERE id = 10")
     assert record_row[0] == 1
+    sqlite_storage.close()
+
+
+def test_migration_moves_assets_snapshots_and_goals_from_full_backup_json(tmp_path) -> None:
+    json_path = tmp_path / "backup_with_assets_goals.json"
+    sqlite_path = tmp_path / "records.db"
+    schema_path = Path(__file__).resolve().parents[1] / "db" / "schema.sql"
+
+    asset = Asset(
+        id=1,
+        name="Deposit",
+        category=AssetCategory.BANK,
+        currency="KZT",
+        is_active=True,
+        created_at="2026-04-05",
+        description="Reserve",
+    )
+    snapshot = AssetSnapshot(
+        id=2,
+        asset_id=1,
+        snapshot_date="2026-04-06",
+        value_minor=500000,
+        currency="KZT",
+        note="Initial",
+    )
+    goal = Goal(
+        id=3,
+        title="Emergency Fund",
+        target_amount_minor=1000000,
+        currency="KZT",
+        created_at="2026-04-05",
+        target_date="2026-12-31",
+        description="Safety cushion",
+    )
+
+    export_full_backup_to_json(
+        str(json_path),
+        wallets=[
+            Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=1000.0, system=True),
+        ],
+        records=[],
+        mandatory_expenses=[],
+        assets=[asset],
+        asset_snapshots=[snapshot],
+        goals=[goal],
+        transfers=[],
+        readonly=False,
+    )
+
+    args = Namespace(
+        json_path=str(json_path),
+        sqlite_path=str(sqlite_path),
+        schema_path=str(schema_path),
+        dry_run=False,
+    )
+
+    code = run_migration(args)
+    assert code == 0
+
+    sqlite_storage = SQLiteStorage(str(sqlite_path))
+    sqlite_storage.initialize_schema(str(schema_path))
+    asset_row = sqlite_storage.query_one(
+        "SELECT name, category, currency, is_active FROM assets WHERE id = 1"
+    )
+    assert asset_row[0] == "Deposit"
+    assert asset_row[1] == "bank"
+    assert asset_row[2] == "KZT"
+    assert asset_row[3] == 1
+    snapshot_row = sqlite_storage.query_one(
+        "SELECT asset_id, snapshot_date, value_minor, note FROM asset_snapshots WHERE id = 2"
+    )
+    assert snapshot_row[0] == 1
+    assert snapshot_row[1] == "2026-04-06"
+    assert snapshot_row[2] == 500000
+    assert snapshot_row[3] == "Initial"
+    goal_row = sqlite_storage.query_one(
+        """
+        SELECT title, target_amount_minor, currency, target_date, is_completed
+        FROM goals
+        WHERE id = 3
+        """
+    )
+    assert goal_row[0] == "Emergency Fund"
+    assert goal_row[1] == 1000000
+    assert goal_row[2] == "KZT"
+    assert goal_row[3] == "2026-12-31"
+    assert goal_row[4] == 0
     sqlite_storage.close()

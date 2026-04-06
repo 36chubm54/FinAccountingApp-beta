@@ -98,6 +98,43 @@ CREATE TABLE IF NOT EXISTS debt_payments (
     )
 );
 
+CREATE TABLE IF NOT EXISTS assets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL CHECK(length(trim(name)) > 0),
+    category TEXT NOT NULL CHECK(category IN ('bank', 'crypto', 'cash', 'other')),
+    currency TEXT NOT NULL CHECK(length(trim(currency)) = 3 AND upper(trim(currency)) = trim(currency)),
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
+    created_at TEXT NOT NULL CHECK(created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+    description TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS asset_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_id INTEGER NOT NULL,
+    snapshot_date TEXT NOT NULL CHECK(
+        snapshot_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+    ),
+    value_minor INTEGER NOT NULL CHECK(value_minor >= 0),
+    currency TEXT NOT NULL CHECK(length(trim(currency)) = 3 AND upper(trim(currency)) = trim(currency)),
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(asset_id) REFERENCES assets(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    UNIQUE(asset_id, snapshot_date)
+);
+
+CREATE TABLE IF NOT EXISTS goals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL CHECK(length(trim(title)) > 0),
+    target_amount_minor INTEGER NOT NULL CHECK(target_amount_minor > 0),
+    currency TEXT NOT NULL CHECK(length(trim(currency)) = 3 AND upper(trim(currency)) = trim(currency)),
+    target_date TEXT DEFAULT NULL CHECK(
+        target_date IS NULL OR target_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+    ),
+    is_completed INTEGER NOT NULL DEFAULT 0 CHECK(is_completed IN (0, 1)),
+    created_at TEXT NOT NULL CHECK(created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+    description TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS mandatory_expenses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     wallet_id INTEGER NOT NULL,
@@ -190,9 +227,14 @@ CREATE INDEX IF NOT EXISTS idx_records_related_debt_id ON records(related_debt_i
 CREATE INDEX IF NOT EXISTS idx_transfers_date ON transfers(date);
 CREATE INDEX IF NOT EXISTS idx_transfers_wallet_from ON transfers(from_wallet_id);
 CREATE INDEX IF NOT EXISTS idx_transfers_wallet_to ON transfers(to_wallet_id);
+CREATE INDEX IF NOT EXISTS idx_assets_category ON assets(category);
+CREATE INDEX IF NOT EXISTS idx_assets_is_active ON assets(is_active);
+CREATE INDEX IF NOT EXISTS idx_asset_snapshots_asset_date ON asset_snapshots(asset_id, snapshot_date DESC);
 CREATE INDEX IF NOT EXISTS idx_mandatory_expenses_wallet_id ON mandatory_expenses(wallet_id);
 CREATE INDEX IF NOT EXISTS idx_budgets_category ON budgets(category);
 CREATE INDEX IF NOT EXISTS idx_budgets_dates ON budgets(start_date, end_date);
+CREATE INDEX IF NOT EXISTS idx_goals_completed ON goals(is_completed);
+CREATE INDEX IF NOT EXISTS idx_goals_target_date ON goals(target_date);
 CREATE INDEX IF NOT EXISTS idx_debts_contact_name ON debts(contact_name);
 CREATE INDEX IF NOT EXISTS idx_debts_status ON debts(status);
 CREATE INDEX IF NOT EXISTS idx_debt_payments_debt_id ON debt_payments(debt_id);

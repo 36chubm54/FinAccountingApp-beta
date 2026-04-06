@@ -220,14 +220,14 @@ def test_update_mandatory_wallet_and_period_persist(tmp_path: Path) -> None:
         repo.close()
 
 
-def test_audit_reports_11_checks_on_clean_db(tmp_path: Path) -> None:
+def test_audit_reports_14_checks_on_clean_db(tmp_path: Path) -> None:
     db_path = tmp_path / "mandatory_audit.db"
     repo = SQLiteRecordRepository(str(db_path), schema_path=_schema_path())
     try:
         controller = FinancialController(repo, CurrencyService(use_online=False))
         report = controller.run_audit()
-        assert len(report.findings) == 11
-        assert len(report.passed) == 10
+        assert len(report.findings) == 14
+        assert len(report.passed) == 13
     finally:
         repo.close()
 

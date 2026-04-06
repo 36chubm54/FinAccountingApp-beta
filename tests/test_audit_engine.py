@@ -23,6 +23,9 @@ def build_test_db(
     mandatory_expenses: list[dict],
     debts: list[dict] | None = None,
     debt_payments: list[dict] | None = None,
+    assets: list[dict] | None = None,
+    asset_snapshots: list[dict] | None = None,
+    goals: list[dict] | None = None,
 ) -> None:
     conn = sqlite3.connect(path)
     try:
@@ -159,6 +162,61 @@ def build_test_db(
                 ),
             )
 
+        for asset in assets or []:
+            conn.execute(
+                """
+                INSERT INTO assets (
+                    id, name, category, currency, is_active, created_at, description
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    asset["id"],
+                    asset["name"],
+                    asset["category"],
+                    asset["currency"],
+                    asset.get("is_active", 1),
+                    asset["created_at"],
+                    asset.get("description", ""),
+                ),
+            )
+
+        for snapshot in asset_snapshots or []:
+            conn.execute(
+                """
+                INSERT INTO asset_snapshots (
+                    id, asset_id, snapshot_date, value_minor, currency, note
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    snapshot["id"],
+                    snapshot["asset_id"],
+                    snapshot["snapshot_date"],
+                    snapshot["value_minor"],
+                    snapshot["currency"],
+                    snapshot.get("note", ""),
+                ),
+            )
+
+        for goal in goals or []:
+            conn.execute(
+                """
+                INSERT INTO goals (
+                    id, title, target_amount_minor, currency, target_date, is_completed,
+                    created_at, description
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    goal["id"],
+                    goal["title"],
+                    goal["target_amount_minor"],
+                    goal["currency"],
+                    goal.get("target_date"),
+                    goal.get("is_completed", 0),
+                    goal["created_at"],
+                    goal.get("description", ""),
+                ),
+            )
+
         conn.commit()
     finally:
         conn.close()
@@ -270,6 +328,48 @@ def _clean_mandatory_expenses() -> list[dict]:
     ]
 
 
+def _clean_assets() -> list[dict]:
+    return [
+        {
+            "id": 1,
+            "name": "Broker",
+            "category": "bank",
+            "currency": "KZT",
+            "is_active": 1,
+            "created_at": "2026-03-01",
+            "description": "Portfolio",
+        }
+    ]
+
+
+def _clean_asset_snapshots() -> list[dict]:
+    return [
+        {
+            "id": 1,
+            "asset_id": 1,
+            "snapshot_date": "2026-03-05",
+            "value_minor": 150000,
+            "currency": "KZT",
+            "note": "Initial",
+        }
+    ]
+
+
+def _clean_goals() -> list[dict]:
+    return [
+        {
+            "id": 1,
+            "title": "Emergency Fund",
+            "target_amount_minor": 500000,
+            "currency": "KZT",
+            "target_date": "2026-12-31",
+            "is_completed": 0,
+            "created_at": "2026-03-02",
+            "description": "",
+        }
+    ]
+
+
 def _make_controller(db_path: Path) -> tuple[SQLiteRecordRepository, FinancialController]:
     repo = SQLiteRecordRepository(str(db_path), schema_path=_schema_path())
     return repo, FinancialController(repo, CurrencyService(use_online=False))
@@ -284,6 +384,9 @@ def _run_audit(
     mandatory_expenses: list[dict] | None = None,
     debts: list[dict] | None = None,
     debt_payments: list[dict] | None = None,
+    assets: list[dict] | None = None,
+    asset_snapshots: list[dict] | None = None,
+    goals: list[dict] | None = None,
 ):
     db_path = tmp_path / "audit.db"
     build_test_db(
@@ -296,6 +399,11 @@ def _run_audit(
         ),
         debts=debts,
         debt_payments=debt_payments,
+        assets=assets if assets is not None else _clean_assets(),
+        asset_snapshots=asset_snapshots
+        if asset_snapshots is not None
+        else _clean_asset_snapshots(),
+        goals=goals if goals is not None else _clean_goals(),
     )
     repo, controller = _make_controller(db_path)
     return repo, controller.run_audit()
@@ -309,9 +417,53 @@ def test_clean_db_all_checks_pass(tmp_path: Path) -> None:
     repo, report = _run_audit(tmp_path)
     try:
         assert report.is_clean is True
-        assert len(report.findings) == 11
-        assert len(report.passed) == 11
+        assert len(report.findings) == 14
+        assert len(report.passed) == 14
         assert all(finding.severity == AuditSeverity.OK for finding in report.findings)
+    finally:
+        repo.close()
+
+
+def test_asset_snapshot_missing_asset_reports_error(tmp_path: Path) -> None:
+    asset_snapshots = _clean_asset_snapshots()
+    asset_snapshots[0]["asset_id"] = 999
+    repo, report = _run_audit(tmp_path, asset_snapshots=asset_snapshots)
+    try:
+        findings = _findings_by_check(report, "asset_snapshot_integrity")
+        assert any(finding.severity == AuditSeverity.ERROR for finding in findings)
+    finally:
+        repo.close()
+
+
+def test_asset_snapshot_currency_mismatch_reports_warning(tmp_path: Path) -> None:
+    asset_snapshots = _clean_asset_snapshots()
+    asset_snapshots[0]["currency"] = "USD"
+    repo, report = _run_audit(tmp_path, asset_snapshots=asset_snapshots)
+    try:
+        findings = _findings_by_check(report, "asset_snapshot_integrity")
+        assert any(finding.severity == AuditSeverity.WARNING for finding in findings)
+    finally:
+        repo.close()
+
+
+def test_goal_target_date_earlier_than_created_at_reports_error(tmp_path: Path) -> None:
+    goals = _clean_goals()
+    goals[0]["target_date"] = "2026-03-01"
+    repo, report = _run_audit(tmp_path, goals=goals)
+    try:
+        findings = _findings_by_check(report, "goal_integrity")
+        assert any(finding.severity == AuditSeverity.ERROR for finding in findings)
+    finally:
+        repo.close()
+
+
+def test_asset_created_at_in_future_reports_error(tmp_path: Path) -> None:
+    assets = _clean_assets()
+    assets[0]["created_at"] = "2099-01-01"
+    repo, report = _run_audit(tmp_path, assets=assets)
+    try:
+        findings = _findings_by_check(report, "asset_integrity")
+        assert any(finding.severity == AuditSeverity.ERROR for finding in findings)
     finally:
         repo.close()
 

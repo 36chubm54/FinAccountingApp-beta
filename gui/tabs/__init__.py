@@ -1,5 +1,6 @@
 from .analytics_tab import AnalyticsTabBindings, build_analytics_tab
 from .budget_tab import BudgetTabBindings, build_budget_tab
+from .dashboard_tab import DashboardTabBindings, build_dashboard_tab
 from .debts_tab import DebtsTabBindings, build_debts_tab
 from .distribution_tab import DistributionTabBindings, build_distribution_tab
 from .infographics_tab import InfographicsTabBindings, build_infographics_tab
@@ -11,12 +12,14 @@ __all__ = [
     "BudgetTabBindings",
     "DebtsTabBindings",
     "AnalyticsTabBindings",
+    "DashboardTabBindings",
     "DistributionTabBindings",
     "InfographicsTabBindings",
     "OperationsTabBindings",
     "build_budget_tab",
     "build_debts_tab",
     "build_analytics_tab",
+    "build_dashboard_tab",
     "build_distribution_tab",
     "build_infographics_tab",
     "build_operations_tab",

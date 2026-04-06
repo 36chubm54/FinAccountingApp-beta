@@ -4,8 +4,10 @@ import tempfile
 
 import pytest
 
+from domain.asset import Asset, AssetCategory, AssetSnapshot
 from domain.budget import Budget
 from domain.distribution import DistributionItem, DistributionSubitem, FrozenDistributionRow
+from domain.goal import Goal
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
 from domain.wallets import Wallet
@@ -486,6 +488,60 @@ def test_full_backup_export_includes_budgets() -> None:
         assert payload["budgets"][0]["category"] == "Food"
         assert payload["budgets"][0]["limit_kzt_minor"] == 15000000
         assert payload["budgets"][0]["include_mandatory"] is True
+    finally:
+        os.unlink(path)
+
+
+def test_full_backup_export_and_import_include_assets_snapshots_and_goals() -> None:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
+        path = tmp.name
+    try:
+        export_full_backup_to_json(
+            path,
+            wallets=[
+                Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=0.0, system=True)
+            ],
+            records=[],
+            mandatory_expenses=[],
+            assets=[
+                Asset(
+                    id=1,
+                    name="Deposit",
+                    category=AssetCategory.BANK,
+                    currency="KZT",
+                    is_active=True,
+                    created_at="2026-04-05",
+                )
+            ],
+            asset_snapshots=[
+                AssetSnapshot(
+                    id=1,
+                    asset_id=1,
+                    snapshot_date="2026-04-05",
+                    value_minor=500000,
+                    currency="KZT",
+                    note="Initial",
+                )
+            ],
+            goals=[
+                Goal(
+                    id=1,
+                    title="Emergency Fund",
+                    target_amount_minor=1000000,
+                    currency="KZT",
+                    created_at="2026-04-05",
+                    target_date="2026-12-31",
+                )
+            ],
+            readonly=False,
+        )
+        result: ImportedBackupData = import_full_backup_from_json(path)
+        assert len(result.assets) == 1
+        assert result.assets[0].name == "Deposit"
+        assert len(result.asset_snapshots) == 1
+        assert result.asset_snapshots[0].asset_id == 1
+        assert len(result.goals) == 1
+        assert result.goals[0].title == "Emergency Fund"
     finally:
         os.unlink(path)
 

@@ -3,7 +3,7 @@ from calendar import monthrange
 from dataclasses import replace
 from datetime import date as dt_date
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from app.use_case_support import (
     build_rate,
@@ -27,12 +27,16 @@ from utils.money import minor_to_money, quantize_money, to_money_float, to_rate_
 from .services import CurrencyService
 
 if TYPE_CHECKING:
+    from domain.asset import Asset, AssetSnapshot
     from domain.budget import Budget
     from domain.debt import Debt, DebtPayment
     from domain.distribution import DistributionItem, DistributionSubitem
+    from domain.goal import Goal, GoalProgress
+    from services.asset_service import AssetService
     from services.budget_service import BudgetService
     from services.debt_service import DebtService
     from services.distribution_service import DistributionService
+    from services.goal_service import GoalService
     from services.metrics_service import MetricsService
     from services.timeline_service import TimelineService
 
@@ -270,6 +274,7 @@ class CalculateNetWorth:
                 total += remaining_kzt
             else:
                 total -= remaining_kzt
+        total += self._assets_total_kzt()
         return total
 
     def execute_current(self) -> float:
@@ -296,7 +301,185 @@ class CalculateNetWorth:
                 total += converted
             else:
                 total -= abs(converted)
+        total += quantize_money(self._assets_total_kzt())
         return float(total)
+
+    def _assets_total_kzt(self) -> float:
+        if not hasattr(self._repository, "load_assets"):
+            return 0.0
+        from infrastructure.sqlite_repository import SQLiteRecordRepository
+        from services.asset_service import AssetService
+
+        sqlite_repo = cast(SQLiteRecordRepository, self._repository)
+        return AssetService(sqlite_repo, self._currency).get_total_assets_kzt()
+
+
+class CreateAsset:
+    def __init__(self, asset_service: "AssetService") -> None:
+        self._service = asset_service
+
+    def execute(
+        self,
+        *,
+        name: str,
+        category: str,
+        currency: str,
+        created_at: str,
+        description: str = "",
+        is_active: bool = True,
+    ) -> "Asset":
+        return self._service.create_asset(
+            name=name,
+            category=category,
+            currency=currency,
+            created_at=created_at,
+            description=description,
+            is_active=is_active,
+        )
+
+
+class UpdateAsset:
+    def __init__(self, asset_service: "AssetService") -> None:
+        self._service = asset_service
+
+    def execute(
+        self,
+        asset_id: int,
+        *,
+        name: str | None = None,
+        category: str | None = None,
+        currency: str | None = None,
+        created_at: str | None = None,
+        description: str | None = None,
+        is_active: bool | None = None,
+    ) -> "Asset":
+        return self._service.update_asset(
+            asset_id,
+            name=name,
+            category=category,
+            currency=currency,
+            created_at=created_at,
+            description=description,
+            is_active=is_active,
+        )
+
+
+class DeactivateAsset:
+    def __init__(self, asset_service: "AssetService") -> None:
+        self._service = asset_service
+
+    def execute(self, asset_id: int) -> None:
+        self._service.deactivate_asset(asset_id)
+
+
+class AddAssetSnapshot:
+    def __init__(self, asset_service: "AssetService") -> None:
+        self._service = asset_service
+
+    def execute(
+        self,
+        *,
+        asset_id: int,
+        snapshot_date: str,
+        value: float,
+        currency: str | None = None,
+        note: str = "",
+    ) -> "AssetSnapshot":
+        return self._service.add_snapshot(
+            asset_id=asset_id,
+            snapshot_date=snapshot_date,
+            value=value,
+            currency=currency,
+            note=note,
+        )
+
+
+class GetAssets:
+    def __init__(self, asset_service: "AssetService") -> None:
+        self._service = asset_service
+
+    def execute(self, *, active_only: bool = False) -> list["Asset"]:
+        return self._service.get_assets(active_only=active_only)
+
+
+class GetAssetHistory:
+    def __init__(self, asset_service: "AssetService") -> None:
+        self._service = asset_service
+
+    def execute(self, asset_id: int) -> list["AssetSnapshot"]:
+        return self._service.get_asset_history(asset_id)
+
+
+class GetLatestAssetSnapshots:
+    def __init__(self, asset_service: "AssetService") -> None:
+        self._service = asset_service
+
+    def execute(self, *, active_only: bool = True) -> list["AssetSnapshot"]:
+        return self._service.get_latest_snapshots(active_only=active_only)
+
+
+class CreateGoal:
+    def __init__(self, goal_service: "GoalService") -> None:
+        self._service = goal_service
+
+    def execute(
+        self,
+        *,
+        title: str,
+        target_amount: float,
+        currency: str,
+        created_at: str,
+        target_date: str | None = None,
+        description: str = "",
+    ) -> "Goal":
+        return self._service.create_goal(
+            title=title,
+            target_amount=target_amount,
+            currency=currency,
+            created_at=created_at,
+            target_date=target_date,
+            description=description,
+        )
+
+
+class SetGoalCompleted:
+    def __init__(self, goal_service: "GoalService") -> None:
+        self._service = goal_service
+
+    def execute(self, goal_id: int, completed: bool = True) -> "Goal":
+        return self._service.set_goal_completed(goal_id, completed)
+
+
+class DeleteGoal:
+    def __init__(self, goal_service: "GoalService") -> None:
+        self._service = goal_service
+
+    def execute(self, goal_id: int) -> None:
+        self._service.delete_goal(goal_id)
+
+
+class GetGoals:
+    def __init__(self, goal_service: "GoalService") -> None:
+        self._service = goal_service
+
+    def execute(self) -> list["Goal"]:
+        return self._service.get_goals()
+
+
+class GetGoalProgress:
+    def __init__(self, goal_service: "GoalService") -> None:
+        self._service = goal_service
+
+    def execute(self, goal_id: int) -> "GoalProgress":
+        return self._service.get_goal_progress(goal_id)
+
+
+class GetAllGoalProgress:
+    def __init__(self, goal_service: "GoalService") -> None:
+        self._service = goal_service
+
+    def execute(self) -> list["GoalProgress"]:
+        return self._service.get_all_goal_progress()
 
 
 class CreateTransfer:

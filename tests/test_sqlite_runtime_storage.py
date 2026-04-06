@@ -5,7 +5,9 @@ from pathlib import Path
 import pytest
 
 from app.services import CurrencyService
+from domain.asset import Asset, AssetCategory, AssetSnapshot
 from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
+from domain.goal import Goal
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
 from domain.records import ExpenseRecord, IncomeRecord
@@ -653,6 +655,94 @@ def test_sqlite_debt_delete_reindexes_ids_and_links(tmp_path: Path) -> None:
         assert debts[0].contact_name == "Bob"
         assert payments[0].debt_id == 1
         assert records[0].related_debt_id == 1
+    finally:
+        repo.close()
+
+
+def test_sqlite_repository_saves_and_loads_assets_snapshots_and_goals(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path / "assets_goals.db")
+
+    try:
+        repo.save_asset(
+            Asset(
+                id=1,
+                name="Kaspi Deposit",
+                category=AssetCategory.BANK,
+                currency="KZT",
+                is_active=True,
+                created_at="2026-04-01",
+                description="Reserve",
+            )
+        )
+        repo.save_asset(
+            Asset(
+                id=2,
+                name="Cold Wallet",
+                category=AssetCategory.CRYPTO,
+                currency="USD",
+                is_active=False,
+                created_at="2026-04-02",
+            )
+        )
+        repo.save_asset_snapshot(
+            AssetSnapshot(
+                id=1,
+                asset_id=1,
+                snapshot_date="2026-04-01",
+                value_minor=250_000,
+                currency="KZT",
+                note="Start",
+            )
+        )
+        repo.save_asset_snapshot(
+            AssetSnapshot(
+                id=2,
+                asset_id=1,
+                snapshot_date="2026-04-05",
+                value_minor=300_000,
+                currency="KZT",
+                note="Updated",
+            )
+        )
+        repo.save_asset_snapshot(
+            AssetSnapshot(
+                id=3,
+                asset_id=2,
+                snapshot_date="2026-04-05",
+                value_minor=100_000,
+                currency="USD",
+            )
+        )
+        repo.save_goal(
+            Goal(
+                id=1,
+                title="Emergency Fund",
+                target_amount_minor=1_000_000,
+                currency="KZT",
+                created_at="2026-04-05",
+                target_date="2026-12-31",
+                description="Six months of expenses",
+            )
+        )
+
+        assets = repo.load_assets()
+        active_assets = repo.load_assets(active_only=True)
+        latest_active_snapshots = repo.get_latest_asset_snapshots()
+        latest_all_snapshots = repo.get_latest_asset_snapshots(active_only=False)
+        goals = repo.load_goals()
+
+        assert [asset.name for asset in assets] == ["Kaspi Deposit", "Cold Wallet"]
+        assert [asset.name for asset in active_assets] == ["Kaspi Deposit"]
+        assert len(repo.load_asset_snapshots(asset_id=1)) == 2
+        assert [(snap.asset_id, snap.value_minor) for snap in latest_active_snapshots] == [
+            (1, 300_000)
+        ]
+        assert [(snap.asset_id, snap.value_minor) for snap in latest_all_snapshots] == [
+            (1, 300_000),
+            (2, 100_000),
+        ]
+        assert goals[0].title == "Emergency Fund"
+        assert goals[0].target_date == "2026-12-31"
     finally:
         repo.close()
 

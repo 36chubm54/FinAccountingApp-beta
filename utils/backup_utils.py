@@ -10,9 +10,11 @@ from datetime import UTC, datetime
 from datetime import date as dt_date
 from typing import Any
 
+from domain.asset import Asset, AssetCategory, AssetSnapshot
 from domain.budget import Budget
 from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
 from domain.distribution import DistributionItem, DistributionSubitem, FrozenDistributionRow
+from domain.goal import Goal
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 from domain.transfers import Transfer
@@ -34,6 +36,9 @@ class ImportedBackupData:
     summary: ImportSummary
     debts: list[Debt]
     debt_payments: list[DebtPayment]
+    assets: list[Asset]
+    asset_snapshots: list[AssetSnapshot]
+    goals: list[Goal]
 
     def __iter__(self):
         yield self.wallets
@@ -186,6 +191,42 @@ def _debt_payment_to_payload(payment: DebtPayment) -> dict[str, Any]:
         "principal_paid_minor": int(payment.principal_paid_minor),
         "is_write_off": bool(payment.is_write_off),
         "payment_date": str(payment.payment_date),
+    }
+
+
+def _asset_to_payload(asset: Asset) -> dict[str, Any]:
+    return {
+        "id": int(asset.id),
+        "name": str(asset.name),
+        "category": str(asset.category.value),
+        "currency": str(asset.currency).upper(),
+        "is_active": bool(asset.is_active),
+        "created_at": str(asset.created_at),
+        "description": str(asset.description or ""),
+    }
+
+
+def _asset_snapshot_to_payload(snapshot: AssetSnapshot) -> dict[str, Any]:
+    return {
+        "id": int(snapshot.id),
+        "asset_id": int(snapshot.asset_id),
+        "snapshot_date": str(snapshot.snapshot_date),
+        "value_minor": int(snapshot.value_minor),
+        "currency": str(snapshot.currency).upper(),
+        "note": str(snapshot.note or ""),
+    }
+
+
+def _goal_to_payload(goal: Goal) -> dict[str, Any]:
+    return {
+        "id": int(goal.id),
+        "title": str(goal.title),
+        "target_amount_minor": int(goal.target_amount_minor),
+        "currency": str(goal.currency).upper(),
+        "target_date": str(goal.target_date) if goal.target_date else None,
+        "is_completed": bool(goal.is_completed),
+        "created_at": str(goal.created_at),
+        "description": str(goal.description or ""),
     }
 
 
@@ -351,6 +392,9 @@ def export_full_backup_to_json(
     budgets: Sequence[Budget] = (),
     debts: Sequence[Debt] = (),
     debt_payments: Sequence[DebtPayment] = (),
+    assets: Sequence[Asset] = (),
+    asset_snapshots: Sequence[AssetSnapshot] = (),
+    goals: Sequence[Goal] = (),
     distribution_items: Sequence[DistributionItem] = (),
     distribution_subitems: Sequence[DistributionSubitem] = (),
     distribution_snapshots: Sequence[FrozenDistributionRow] = (),
@@ -379,6 +423,9 @@ def export_full_backup_to_json(
         "budgets": [_budget_to_payload(budget) for budget in budgets],
         "debts": [_debt_to_payload(debt) for debt in debts],
         "debt_payments": [_debt_payment_to_payload(payment) for payment in debt_payments],
+        "assets": [_asset_to_payload(asset) for asset in assets],
+        "asset_snapshots": [_asset_snapshot_to_payload(snapshot) for snapshot in asset_snapshots],
+        "goals": [_goal_to_payload(goal) for goal in goals],
         "distribution_items": [_distribution_item_to_payload(item) for item in distribution_items],
         "distribution_subitems": [
             _distribution_subitem_to_payload(subitem) for subitem in distribution_subitems
@@ -456,6 +503,9 @@ def import_full_backup_from_json(
     raw_transfers = source_payload.get("transfers", [])
     raw_debts = source_payload.get("debts", [])
     raw_debt_payments = source_payload.get("debt_payments", [])
+    raw_assets = source_payload.get("assets", [])
+    raw_asset_snapshots = source_payload.get("asset_snapshots", [])
+    raw_goals = source_payload.get("goals", [])
 
     if not isinstance(raw_records, list) or not isinstance(raw_mandatory, list):
         raise BackupFormatError(
@@ -475,6 +525,14 @@ def import_full_backup_from_json(
     if not isinstance(raw_debts, list) or not isinstance(raw_debt_payments, list):
         raise BackupFormatError(
             "Invalid backup JSON structure: debts and debt_payments must be arrays"
+        )
+    if (
+        not isinstance(raw_assets, list)
+        or not isinstance(raw_asset_snapshots, list)
+        or not isinstance(raw_goals, list)
+    ):
+        raise BackupFormatError(
+            "Invalid backup JSON structure: assets, asset_snapshots, and goals must be arrays"
         )
 
     errors: list[str] = []
@@ -704,6 +762,82 @@ def import_full_backup_from_json(
         debt_payments.append(payment)
         imported += 1
 
+    assets: list[Asset] = []
+    for idx, item in enumerate(raw_assets, start=1):
+        if not isinstance(item, dict):
+            skipped += 1
+            errors.append(f"assets[{idx}]: invalid item type")
+            continue
+        try:
+            asset = Asset(
+                id=int(item.get("id", 0)),
+                name=str(item.get("name", "") or ""),
+                category=AssetCategory(str(item.get("category", "other") or "other")),
+                currency=str(item.get("currency", "KZT") or "KZT").upper(),
+                is_active=bool(item.get("is_active", True)),
+                created_at=str(item.get("created_at", "") or ""),
+                description=str(item.get("description", "") or ""),
+            )
+        except Exception as exc:
+            skipped += 1
+            errors.append(f"assets[{idx}]: invalid asset ({exc})")
+            continue
+        assets.append(asset)
+        imported += 1
+
+    asset_ids = {int(asset.id) for asset in assets}
+    asset_snapshots: list[AssetSnapshot] = []
+    for idx, item in enumerate(raw_asset_snapshots, start=1):
+        if not isinstance(item, dict):
+            skipped += 1
+            errors.append(f"asset_snapshots[{idx}]: invalid item type")
+            continue
+        try:
+            snapshot = AssetSnapshot(
+                id=int(item.get("id", 0)),
+                asset_id=int(item.get("asset_id", 0)),
+                snapshot_date=str(item.get("snapshot_date", "") or ""),
+                value_minor=int(item.get("value_minor", 0)),
+                currency=str(item.get("currency", "KZT") or "KZT").upper(),
+                note=str(item.get("note", "") or ""),
+            )
+        except Exception as exc:
+            skipped += 1
+            errors.append(f"asset_snapshots[{idx}]: invalid asset snapshot ({exc})")
+            continue
+        if int(snapshot.asset_id) not in asset_ids:
+            skipped += 1
+            errors.append(f"asset_snapshots[{idx}]: asset not found ({snapshot.asset_id})")
+            continue
+        asset_snapshots.append(snapshot)
+        imported += 1
+
+    goals: list[Goal] = []
+    for idx, item in enumerate(raw_goals, start=1):
+        if not isinstance(item, dict):
+            skipped += 1
+            errors.append(f"goals[{idx}]: invalid item type")
+            continue
+        try:
+            goal = Goal(
+                id=int(item.get("id", 0)),
+                title=str(item.get("title", "") or ""),
+                target_amount_minor=int(item.get("target_amount_minor", 0)),
+                currency=str(item.get("currency", "KZT") or "KZT").upper(),
+                created_at=str(item.get("created_at", "") or ""),
+                is_completed=bool(item.get("is_completed", False)),
+                target_date=str(item.get("target_date"))
+                if item.get("target_date") not in (None, "")
+                else None,
+                description=str(item.get("description", "") or ""),
+            )
+        except Exception as exc:
+            skipped += 1
+            errors.append(f"goals[{idx}]: invalid goal ({exc})")
+            continue
+        goals.append(goal)
+        imported += 1
+
     logger.info(
         "JSON backup import completed: imported=%s skipped=%s file=%s legacy=%s",
         imported,
@@ -719,6 +853,9 @@ def import_full_backup_from_json(
         summary=(imported, skipped, errors),
         debts=debts,
         debt_payments=debt_payments,
+        assets=assets,
+        asset_snapshots=asset_snapshots,
+        goals=goals,
     )
 
 
@@ -731,6 +868,9 @@ def create_backup(
     budgets: Sequence[Budget] = (),
     debts: Sequence[Debt] = (),
     debt_payments: Sequence[DebtPayment] = (),
+    assets: Sequence[Asset] = (),
+    asset_snapshots: Sequence[AssetSnapshot] = (),
+    goals: Sequence[Goal] = (),
     distribution_items: Sequence[DistributionItem] = (),
     distribution_subitems: Sequence[DistributionSubitem] = (),
     distribution_snapshots: Sequence[FrozenDistributionRow] = (),
@@ -747,6 +887,9 @@ def create_backup(
         budgets=budgets,
         debts=debts,
         debt_payments=debt_payments,
+        assets=assets,
+        asset_snapshots=asset_snapshots,
+        goals=goals,
         distribution_items=distribution_items,
         distribution_subitems=distribution_subitems,
         distribution_snapshots=distribution_snapshots,

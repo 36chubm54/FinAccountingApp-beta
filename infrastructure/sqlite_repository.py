@@ -3,7 +3,9 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import date as dt_date
 
+from domain.asset import Asset, AssetCategory, AssetSnapshot
 from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
+from domain.goal import Goal
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 from domain.transfers import Transfer
 from domain.wallets import Wallet
@@ -267,6 +269,42 @@ class SQLiteRecordRepository(RecordRepository):
             principal_paid_minor=int(row["principal_paid_minor"]),
             is_write_off=bool(row["is_write_off"]),
             payment_date=str(row["payment_date"]),
+        )
+
+    @staticmethod
+    def _asset_from_row(row) -> Asset:
+        return Asset(
+            id=int(row["id"]),
+            name=str(row["name"]),
+            category=AssetCategory(str(row["category"])),
+            currency=str(row["currency"]).upper(),
+            is_active=bool(row["is_active"]),
+            created_at=str(row["created_at"]),
+            description=str(row["description"] or ""),
+        )
+
+    @staticmethod
+    def _asset_snapshot_from_row(row) -> AssetSnapshot:
+        return AssetSnapshot(
+            id=int(row["id"]),
+            asset_id=int(row["asset_id"]),
+            snapshot_date=str(row["snapshot_date"]),
+            value_minor=int(row["value_minor"]),
+            currency=str(row["currency"]).upper(),
+            note=str(row["note"] or ""),
+        )
+
+    @staticmethod
+    def _goal_from_row(row) -> Goal:
+        return Goal(
+            id=int(row["id"]),
+            title=str(row["title"]),
+            target_amount_minor=int(row["target_amount_minor"]),
+            currency=str(row["currency"]).upper(),
+            created_at=str(row["created_at"]),
+            is_completed=bool(row["is_completed"]),
+            target_date=str(row["target_date"]) if row["target_date"] is not None else None,
+            description=str(row["description"] or ""),
         )
 
     def _mandatory_from_row(self, row) -> MandatoryExpenseRecord:
@@ -540,6 +578,161 @@ class SQLiteRecordRepository(RecordRepository):
             ),
         )
         return self._require_lastrowid(cursor.lastrowid, "debt_payments")
+
+    def _insert_asset_row(self, asset: Asset) -> int:
+        cursor = self._conn.execute(
+            """
+            INSERT INTO assets (
+                name,
+                category,
+                currency,
+                is_active,
+                created_at,
+                description
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(asset.name),
+                str(asset.category.value),
+                str(asset.currency).upper(),
+                int(bool(asset.is_active)),
+                str(asset.created_at),
+                str(asset.description or ""),
+            ),
+        )
+        return self._require_lastrowid(cursor.lastrowid, "assets")
+
+    def _update_asset_row(self, asset_id: int, asset: Asset) -> None:
+        self._conn.execute(
+            """
+            UPDATE assets
+            SET
+                name = ?,
+                category = ?,
+                currency = ?,
+                is_active = ?,
+                created_at = ?,
+                description = ?
+            WHERE id = ?
+            """,
+            (
+                str(asset.name),
+                str(asset.category.value),
+                str(asset.currency).upper(),
+                int(bool(asset.is_active)),
+                str(asset.created_at),
+                str(asset.description or ""),
+                int(asset_id),
+            ),
+        )
+
+    def _insert_asset_snapshot_row(
+        self,
+        snapshot: AssetSnapshot,
+        *,
+        asset_id: int | None = None,
+    ) -> int:
+        cursor = self._conn.execute(
+            """
+            INSERT INTO asset_snapshots (
+                asset_id,
+                snapshot_date,
+                value_minor,
+                currency,
+                note
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                int(asset_id if asset_id is not None else snapshot.asset_id),
+                str(snapshot.snapshot_date),
+                int(snapshot.value_minor),
+                str(snapshot.currency).upper(),
+                str(snapshot.note or ""),
+            ),
+        )
+        return self._require_lastrowid(cursor.lastrowid, "asset_snapshots")
+
+    def _update_asset_snapshot_row(
+        self,
+        snapshot_id: int,
+        snapshot: AssetSnapshot,
+        *,
+        asset_id: int | None = None,
+    ) -> None:
+        self._conn.execute(
+            """
+            UPDATE asset_snapshots
+            SET
+                asset_id = ?,
+                snapshot_date = ?,
+                value_minor = ?,
+                currency = ?,
+                note = ?
+            WHERE id = ?
+            """,
+            (
+                int(asset_id if asset_id is not None else snapshot.asset_id),
+                str(snapshot.snapshot_date),
+                int(snapshot.value_minor),
+                str(snapshot.currency).upper(),
+                str(snapshot.note or ""),
+                int(snapshot_id),
+            ),
+        )
+
+    def _insert_goal_row(self, goal: Goal) -> int:
+        cursor = self._conn.execute(
+            """
+            INSERT INTO goals (
+                title,
+                target_amount_minor,
+                currency,
+                target_date,
+                is_completed,
+                created_at,
+                description
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(goal.title),
+                int(goal.target_amount_minor),
+                str(goal.currency).upper(),
+                str(goal.target_date) if goal.target_date else None,
+                int(bool(goal.is_completed)),
+                str(goal.created_at),
+                str(goal.description or ""),
+            ),
+        )
+        return self._require_lastrowid(cursor.lastrowid, "goals")
+
+    def _update_goal_row(self, goal_id: int, goal: Goal) -> None:
+        self._conn.execute(
+            """
+            UPDATE goals
+            SET
+                title = ?,
+                target_amount_minor = ?,
+                currency = ?,
+                target_date = ?,
+                is_completed = ?,
+                created_at = ?,
+                description = ?
+            WHERE id = ?
+            """,
+            (
+                str(goal.title),
+                int(goal.target_amount_minor),
+                str(goal.currency).upper(),
+                str(goal.target_date) if goal.target_date else None,
+                int(bool(goal.is_completed)),
+                str(goal.created_at),
+                str(goal.description or ""),
+                int(goal_id),
+            ),
+        )
 
     def _update_debt_payment_row(
         self,
@@ -858,6 +1051,235 @@ class SQLiteRecordRepository(RecordRepository):
                 allow_negative=draft.allow_negative,
                 is_active=draft.is_active,
             )
+
+    def save_asset(self, asset: Asset) -> None:
+        with self._conn:
+            row = self._conn.execute(
+                "SELECT 1 FROM assets WHERE id = ?", (int(asset.id),)
+            ).fetchone()
+            if row is not None:
+                self._update_asset_row(int(asset.id), asset)
+            else:
+                self._insert_asset_row(asset)
+
+    def load_assets(self, *, active_only: bool = False) -> list[Asset]:
+        params: tuple[object, ...] = ()
+        sql = """
+            SELECT
+                id,
+                name,
+                category,
+                currency,
+                is_active,
+                created_at,
+                description
+            FROM assets
+        """
+        if active_only:
+            sql += "\nWHERE is_active = 1"
+        sql += "\nORDER BY id"
+        rows = self._conn.execute(sql, params).fetchall()
+        return [self._asset_from_row(row) for row in rows]
+
+    def get_asset_by_id(self, asset_id: int) -> Asset:
+        row = self._conn.execute(
+            """
+            SELECT
+                id,
+                name,
+                category,
+                currency,
+                is_active,
+                created_at,
+                description
+            FROM assets
+            WHERE id = ?
+            """,
+            (int(asset_id),),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Asset not found: {asset_id}")
+        return self._asset_from_row(row)
+
+    def deactivate_asset(self, asset_id: int) -> bool:
+        with self._conn:
+            cursor = self._conn.execute(
+                "UPDATE assets SET is_active = 0 WHERE id = ?",
+                (int(asset_id),),
+            )
+        return int(cursor.rowcount or 0) > 0
+
+    def save_asset_snapshot(self, snapshot: AssetSnapshot) -> None:
+        with self._conn:
+            row = self._conn.execute(
+                "SELECT 1 FROM asset_snapshots WHERE id = ?",
+                (int(snapshot.id),),
+            ).fetchone()
+            if row is not None:
+                self._update_asset_snapshot_row(int(snapshot.id), snapshot)
+                return
+            existing = self._conn.execute(
+                """
+                SELECT id
+                FROM asset_snapshots
+                WHERE asset_id = ? AND snapshot_date = ?
+                """,
+                (int(snapshot.asset_id), str(snapshot.snapshot_date)),
+            ).fetchone()
+            if existing is not None:
+                self._update_asset_snapshot_row(int(existing["id"]), snapshot)
+            else:
+                self._insert_asset_snapshot_row(snapshot)
+
+    def load_asset_snapshots(self, asset_id: int | None = None) -> list[AssetSnapshot]:
+        if asset_id is None:
+            rows = self._conn.execute(
+                """
+                SELECT
+                    id,
+                    asset_id,
+                    snapshot_date,
+                    value_minor,
+                    currency,
+                    note,
+                    created_at
+                FROM asset_snapshots
+                ORDER BY asset_id, snapshot_date, id
+                """
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """
+                SELECT
+                    id,
+                    asset_id,
+                    snapshot_date,
+                    value_minor,
+                    currency,
+                    note,
+                    created_at
+                FROM asset_snapshots
+                WHERE asset_id = ?
+                ORDER BY snapshot_date, id
+                """,
+                (int(asset_id),),
+            ).fetchall()
+        return [self._asset_snapshot_from_row(row) for row in rows]
+
+    def get_asset_snapshot_by_id(self, snapshot_id: int) -> AssetSnapshot:
+        row = self._conn.execute(
+            """
+            SELECT
+                id,
+                asset_id,
+                snapshot_date,
+                value_minor,
+                currency,
+                note,
+                created_at
+            FROM asset_snapshots
+            WHERE id = ?
+            """,
+            (int(snapshot_id),),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Asset snapshot not found: {snapshot_id}")
+        return self._asset_snapshot_from_row(row)
+
+    def delete_asset_snapshot(self, snapshot_id: int) -> bool:
+        with self._conn:
+            cursor = self._conn.execute(
+                "DELETE FROM asset_snapshots WHERE id = ?",
+                (int(snapshot_id),),
+            )
+        return int(cursor.rowcount or 0) > 0
+
+    def get_latest_asset_snapshots(self, *, active_only: bool = True) -> list[AssetSnapshot]:
+        sql = """
+            SELECT
+                s.id,
+                s.asset_id,
+                s.snapshot_date,
+                s.value_minor,
+                s.currency,
+                s.note,
+                s.created_at
+            FROM asset_snapshots AS s
+            JOIN assets AS a
+                ON a.id = s.asset_id
+            JOIN (
+                SELECT
+                    asset_id,
+                    MAX(snapshot_date) AS latest_snapshot_date
+                FROM asset_snapshots
+                GROUP BY asset_id
+            ) AS latest
+                ON latest.asset_id = s.asset_id
+               AND latest.latest_snapshot_date = s.snapshot_date
+            WHERE s.id = (
+                SELECT MAX(s2.id)
+                FROM asset_snapshots AS s2
+                WHERE s2.asset_id = s.asset_id
+                  AND s2.snapshot_date = s.snapshot_date
+            )
+        """
+        if active_only:
+            sql += "\nAND a.is_active = 1"
+        sql += "\nORDER BY s.asset_id"
+        rows = self._conn.execute(sql).fetchall()
+        return [self._asset_snapshot_from_row(row) for row in rows]
+
+    def save_goal(self, goal: Goal) -> None:
+        with self._conn:
+            row = self._conn.execute("SELECT 1 FROM goals WHERE id = ?", (int(goal.id),)).fetchone()
+            if row is not None:
+                self._update_goal_row(int(goal.id), goal)
+            else:
+                self._insert_goal_row(goal)
+
+    def load_goals(self) -> list[Goal]:
+        rows = self._conn.execute(
+            """
+            SELECT
+                id,
+                title,
+                target_amount_minor,
+                currency,
+                target_date,
+                is_completed,
+                created_at,
+                description
+            FROM goals
+            ORDER BY id
+            """
+        ).fetchall()
+        return [self._goal_from_row(row) for row in rows]
+
+    def get_goal_by_id(self, goal_id: int) -> Goal:
+        row = self._conn.execute(
+            """
+            SELECT
+                id,
+                title,
+                target_amount_minor,
+                currency,
+                target_date,
+                is_completed,
+                created_at,
+                description
+            FROM goals
+            WHERE id = ?
+            """,
+            (int(goal_id),),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Goal not found: {goal_id}")
+        return self._goal_from_row(row)
+
+    def delete_goal(self, goal_id: int) -> bool:
+        with self._conn:
+            cursor = self._conn.execute("DELETE FROM goals WHERE id = ?", (int(goal_id),))
+        return int(cursor.rowcount or 0) > 0
 
     def save_debt(self, debt: Debt) -> None:
         with self._conn:
