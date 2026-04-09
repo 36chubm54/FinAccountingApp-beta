@@ -855,6 +855,15 @@ class CreateMandatoryExpenseRecord:
             period=period,  # type: ignore[arg-type]
         )
         self._repository.save(record)
+        logging.info(
+            "Mandatory expense added to Records "
+            "amount=%s category=%s description=%s period=%s date=%s",
+            amount,
+            category,
+            description,
+            period,
+            date,
+        )
 
 
 class GetMandatoryExpenses:

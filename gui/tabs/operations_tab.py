@@ -7,17 +7,19 @@ import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
-from tkinter import VERTICAL, filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 from typing import Any, Protocol
 
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
 from gui.helpers import open_in_file_manager
+from gui.i18n import tr
 from gui.tabs.operations_support import (
     refresh_operation_views,
     safe_destroy,
     show_import_preview_dialog,
 )
+from gui.ui_helpers import ask_confirm, attach_treeview_scrollbars, show_error, show_info
 
 
 class OperationsTabContext(Protocol):
@@ -42,7 +44,7 @@ class OperationsTabContext(Protocol):
         *,
         on_success: Callable[[Any], None],
         on_error: Callable[[BaseException], None] | None = None,
-        busy_message: str = "Processing...",
+        busy_message: str = tr("app.busy.default", "Выполняется операция..."),
     ) -> None: ...
 
     def _import_policy_from_ui(self, mode_label: str) -> ImportPolicy: ...
@@ -60,51 +62,64 @@ def build_operations_tab(
     context: OperationsTabContext,
     import_formats: dict[str, dict[str, str]],
 ) -> OperationsTabBindings:
-    parent.grid_columnconfigure(0, weight=0)
-    parent.grid_columnconfigure(1, weight=1)
+    parent.grid_columnconfigure(0, weight=2, uniform="operations")
+    parent.grid_columnconfigure(1, weight=5, uniform="operations")
     parent.grid_rowconfigure(0, weight=1)
 
-    left_frame = tk.Frame(parent)
-    left_frame.grid(row=0, column=0, sticky="nsw", padx=10, pady=10)
+    left_frame = ttk.Frame(parent)
+    left_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+    left_frame.grid_columnconfigure(0, weight=1)
 
-    form_frame = ttk.LabelFrame(left_frame, text="Add operation")
+    form_frame = ttk.LabelFrame(left_frame, text=tr("operations.new", "Новая операция"))
     form_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
     form_frame.grid_columnconfigure(1, weight=1)
 
-    ttk.Label(form_frame, text="Type:").grid(row=0, column=0, sticky="w", padx=6, pady=4)
-    type_var = tk.StringVar(value="Income")
-    ttk.OptionMenu(form_frame, type_var, "Income", "Income", "Expense").grid(
+    income_label = tr("operations.type.income", "Доход")
+    expense_label = tr("operations.type.expense", "Расход")
+    ttk.Label(form_frame, text=tr("common.type", "Тип:")).grid(
+        row=0, column=0, sticky="w", padx=6, pady=4
+    )
+    type_var = tk.StringVar(value=income_label)
+    ttk.OptionMenu(form_frame, type_var, income_label, income_label, expense_label).grid(
         row=0, column=1, sticky="ew", padx=6, pady=4
     )
 
-    ttk.Label(form_frame, text="Date (YYYY-MM-DD):").grid(
+    ttk.Label(form_frame, text=tr("common.date", "Дата:")).grid(
         row=1, column=0, sticky="w", padx=6, pady=4
     )
     date_entry = ttk.Entry(form_frame)
     date_entry.grid(row=1, column=1, sticky="ew", padx=6, pady=4)
     date_entry.insert(0, date.today().isoformat())
 
-    ttk.Label(form_frame, text="Amount:").grid(row=2, column=0, sticky="w", padx=6, pady=4)
+    ttk.Label(form_frame, text=tr("common.amount", "Сумма:")).grid(
+        row=2, column=0, sticky="w", padx=6, pady=4
+    )
     amount_entry = ttk.Entry(form_frame)
     amount_entry.grid(row=2, column=1, sticky="ew", padx=6, pady=4)
 
-    ttk.Label(form_frame, text="Currency:").grid(row=3, column=0, sticky="w", padx=6, pady=4)
+    ttk.Label(form_frame, text=tr("common.currency", "Валюта:")).grid(
+        row=3, column=0, sticky="w", padx=6, pady=4
+    )
     currency_entry = ttk.Entry(form_frame)
     currency_entry.insert(0, "KZT")
     currency_entry.grid(row=3, column=1, sticky="ew", padx=6, pady=4)
 
-    ttk.Label(form_frame, text="Category:").grid(row=4, column=0, sticky="w", padx=6, pady=4)
+    ttk.Label(form_frame, text=tr("common.category", "Категория:")).grid(
+        row=4, column=0, sticky="w", padx=6, pady=4
+    )
     category_combo = ttk.Combobox(form_frame, state="normal")
     category_combo.insert(0, "General")
     category_combo.grid(row=4, column=1, sticky="ew", padx=6, pady=4)
 
-    ttk.Label(form_frame, text="Description (optional):").grid(
+    ttk.Label(form_frame, text=tr("common.description", "Описание:")).grid(
         row=5, column=0, sticky="w", padx=6, pady=4
     )
     description_entry = ttk.Entry(form_frame)
     description_entry.grid(row=5, column=1, sticky="ew", padx=6, pady=4)
 
-    ttk.Label(form_frame, text="Wallet:").grid(row=6, column=0, sticky="w", padx=6, pady=4)
+    ttk.Label(form_frame, text=tr("common.wallet", "Кошелек:")).grid(
+        row=6, column=0, sticky="w", padx=6, pady=4
+    )
     operation_wallet_var = tk.StringVar(value="")
     operation_wallet_menu = ttk.OptionMenu(form_frame, operation_wallet_var, "")
     operation_wallet_menu.grid(row=6, column=1, sticky="ew", padx=6, pady=4)
@@ -112,7 +127,7 @@ def build_operations_tab(
 
     def _refresh_category_combo() -> None:
         try:
-            if type_var.get() == "Income":
+            if type_var.get() == income_label:
                 category_combo["values"] = context.controller.get_income_categories()
             else:
                 category_combo["values"] = context.controller.get_expense_categories()
@@ -141,7 +156,7 @@ def build_operations_tab(
 
     refresh_operation_wallet_menu()
 
-    list_frame = ttk.LabelFrame(parent, text="List of operations")
+    list_frame = ttk.LabelFrame(parent, text=tr("operations.journal", "Журнал операций"))
     list_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
     list_frame.grid_rowconfigure(0, weight=1)
     list_frame.grid_columnconfigure(0, weight=1)
@@ -162,27 +177,25 @@ def build_operations_tab(
         ),
     )
     for col, text, width, minwidth, stretch, anchor in (
-        ("index", "#", 40, 50, False, "e"),
-        ("date", "Date", 80, 90, False, "w"),
-        ("type", "Type", 120, 110, False, "w"),
-        ("category", "Category", 160, 140, True, "w"),
-        ("amount", "Amount", 70, 90, False, "e"),
-        ("currency", "Cur", 60, 50, False, "center"),
+        ("index", "#", 50, 50, False, "e"),
+        ("date", tr("common.date", "Дата"), 100, 100, False, "w"),
+        ("type", tr("common.type_short", "Тип"), 110, 110, False, "w"),
+        ("category", tr("common.category_short", "Категория"), 180, 180, True, "w"),
+        ("amount", tr("common.amount", "Сумма"), 90, 90, False, "e"),
+        ("currency", tr("operations.currency_short", "Вал."), 60, 60, False, "center"),
         ("kzt", "KZT", 100, 90, False, "e"),
-        ("wallets", "Wallets", 80, 110, False, "center"),
+        ("wallets", tr("operations.wallets", "Кошельки"), 120, 110, False, "center"),
     ):
         records_tree.heading(col, text=text)
         records_tree.column(col, width=width, minwidth=minwidth, stretch=stretch, anchor=anchor)  # type: ignore[arg-type]
     records_tree.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
 
-    scrollbar = ttk.Scrollbar(list_frame, orient=VERTICAL, command=records_tree.yview)
-    scrollbar.grid(row=0, column=1, sticky="ns", pady=6)
-    records_tree.config(yscrollcommand=scrollbar.set)
+    attach_treeview_scrollbars(list_frame, records_tree, row=0, column=0, horizontal=True, pady=6)
 
     def save_record() -> None:
         date_str = date_entry.get().strip()
         if not date_str:
-            messagebox.showerror("Error", "Date is required.")
+            show_error(tr("operations.error.date_required", "Укажите дату."))
             return
         try:
             from domain.validation import ensure_not_future, parse_ymd
@@ -190,17 +203,23 @@ def build_operations_tab(
             entered_date = parse_ymd(date_str)
             ensure_not_future(entered_date)
         except ValueError as error:
-            messagebox.showerror("Error", f"Invalid date: {str(error)}. Use YYYY-MM-DD.")
+            show_error(
+                tr(
+                    "operations.error.invalid_date",
+                    "Некорректная дата: {error}. Используйте формат ГГГГ-ММ-ДД.",
+                    error=error,
+                )
+            )
             return
 
         amount_str = amount_entry.get().strip()
         if not amount_str:
-            messagebox.showerror("Error", "Amount is required.")
+            show_error(tr("operations.error.amount_required", "Укажите сумму."))
             return
         try:
             amount = float(amount_str)
         except ValueError:
-            messagebox.showerror("Error", "Invalid amount.")
+            show_error(tr("operations.error.amount_number", "Сумма должна быть числом."))
             return
 
         currency = (currency_entry.get() or "KZT").strip()
@@ -208,11 +227,11 @@ def build_operations_tab(
         description = description_entry.get().strip()
         wallet_id = operation_wallet_map.get(operation_wallet_var.get())
         if wallet_id is None:
-            messagebox.showerror("Error", "Wallet is required.")
+            show_error(tr("operations.error.wallet_required", "Выберите кошелек."))
             return
 
         try:
-            if type_var.get() == "Income":
+            if type_var.get() == income_label:
                 context.controller.create_income(
                     date=date_str,
                     wallet_id=wallet_id,
@@ -221,7 +240,7 @@ def build_operations_tab(
                     category=category,
                     description=description,
                 )
-                messagebox.showinfo("Success", "Income record added.")
+                show_info(tr("operations.save_success.income", "Доход успешно добавлен."))
             else:
                 context.controller.create_expense(
                     date=date_str,
@@ -231,7 +250,7 @@ def build_operations_tab(
                     category=category,
                     description=description,
                 )
-                messagebox.showinfo("Success", "Expense record added.")
+                show_info(tr("operations.save_success.expense", "Расход успешно добавлен."))
 
             amount_entry.delete(0, tk.END)
             category_combo.delete(0, tk.END)
@@ -239,62 +258,94 @@ def build_operations_tab(
             _refresh_category_combo()
             refresh_operation_views(context)
         except Exception as error:
-            messagebox.showerror("Error", f"Failed to add record: {str(error)}")
+            show_error(
+                tr(
+                    "operations.error.save_failed",
+                    "Не удалось сохранить операцию: {error}",
+                    error=error,
+                )
+            )
 
-    ttk.Button(form_frame, text="Save", command=save_record).grid(
-        row=7, column=0, columnspan=2, pady=8
-    )
+    ttk.Button(
+        form_frame,
+        text=tr("common.save", "Сохранить"),
+        style="Primary.TButton",
+        command=save_record,
+    ).grid(row=7, column=0, columnspan=2, pady=8)
 
     def delete_selected() -> None:
         selection = records_tree.selection()
         if not selection:
-            messagebox.showerror("Error", "Please select a record to delete.")
+            show_error(tr("operations.error.select_first", "Сначала выберите запись."))
             return
         record_id = selection[0]
         repository_index = context._record_id_to_repo_index.get(record_id)
         if repository_index is None:
-            messagebox.showerror("Error", "Selected record is no longer available.")
+            show_error(tr("operations.error.unavailable", "Выбранная запись больше недоступна."))
             context._refresh_list()
             return
         try:
             transfer_id = context.controller.transfer_id_by_repository_index(repository_index)
             if transfer_id is not None:
                 context.controller.delete_transfer(transfer_id)
-                messagebox.showinfo("Success", f"Deleted transfer #{transfer_id}.")
+                show_info(
+                    tr("operations.transfer.deleted", "Перевод #{id} удален.", id=transfer_id)
+                )
             elif context.controller.delete_record(repository_index):
-                messagebox.showinfo("Success", "Deleted record.")
+                show_info(tr("operations.deleted", "Запись удалена."))
             else:
-                messagebox.showerror("Error", "Failed to delete record.")
+                show_error(tr("operations.error.delete_failed", "Не удалось удалить запись."))
                 return
             refresh_operation_views(context)
         except Exception as error:
-            messagebox.showerror("Error", f"Failed to delete: {str(error)}")
+            show_error(
+                tr(
+                    "operations.error.delete_failed_with_error",
+                    "Не удалось удалить запись: {error}",
+                    error=error,
+                )
+            )
 
-    edit_panel_state: dict[str, ttk.Frame | None] = {"panel": None}
+    edit_panel_state: dict[str, ttk.Widget | None] = {"panel": None}
 
     def edit_selected_record_inline() -> None:
         selection = records_tree.selection()
         if not selection:
-            messagebox.showerror("Error", "Please select a record to edit.")
+            show_error(tr("operations.error.select_first", "Сначала выберите запись."))
             return
 
         ui_record_id = selection[0]
         domain_record_id = context._record_id_to_domain_id.get(ui_record_id)
         if domain_record_id is None:
-            messagebox.showerror("Error", "Selected record cannot be edited.")
+            show_error(tr("operations.error.edit_forbidden", "Эту запись нельзя редактировать."))
             return
 
         try:
             record = context.controller.get_record_for_edit(domain_record_id)
         except Exception:
-            messagebox.showerror("Error", "Cannot load record for editing.")
+            show_error(
+                tr(
+                    "operations.error.edit_load_failed",
+                    "Не удалось загрузить запись для редактирования.",
+                )
+            )
             return
 
         if record.transfer_id is not None:
-            messagebox.showerror("Error", "Transfer-linked records cannot be edited.")
+            show_error(
+                tr(
+                    "operations.error.transfer_edit_forbidden",
+                    "Записи, связанные с переводом, редактировать нельзя.",
+                )
+            )
             return
         if str(getattr(record, "category", "") or "").strip().lower() == "transfer":
-            messagebox.showerror("Error", "Transfer records cannot be edited.")
+            show_error(
+                tr(
+                    "operations.error.transfer_row_edit_forbidden",
+                    "Строки перевода редактировать нельзя.",
+                )
+            )
             return
 
         if edit_panel_state["panel"] is not None:
@@ -304,28 +355,34 @@ def build_operations_tab(
                 pass
             edit_panel_state["panel"] = None
 
-        edit_panel = ttk.Frame(list_frame)
-        edit_panel.grid(row=2, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 6))
+        edit_panel = ttk.Frame(list_frame, style="InlinePanel.TFrame", padding=(8, 6))
+        edit_panel.grid(row=3, column=0, columnspan=2, padx=6, sticky="ew")
         edit_panel_state["panel"] = edit_panel
 
-        ttk.Label(edit_panel, text="Amount (KZT):").grid(row=0, column=0, sticky="w", padx=4)
+        ttk.Label(edit_panel, text=tr("operations.edit.amount", "Сумма (KZT):")).grid(
+            row=0, column=0, sticky="w"
+        )
         amount_entry = ttk.Entry(edit_panel)
-        amount_entry.grid(row=0, column=1, sticky="ew", padx=4)
-        ttk.Label(edit_panel, text="Date (YYYY-MM-DD):").grid(row=1, column=0, sticky="w", padx=4)
+        amount_entry.grid(row=0, column=1, sticky="ew")
+        ttk.Label(edit_panel, text=tr("common.date", "Дата:")).grid(row=1, column=0, sticky="w")
         date_edit_entry = ttk.Entry(edit_panel)
-        date_edit_entry.grid(row=1, column=1, sticky="ew", padx=4)
-        ttk.Label(edit_panel, text="Wallet:").grid(row=2, column=0, sticky="w", padx=4)
+        date_edit_entry.grid(row=1, column=1, sticky="ew")
+        ttk.Label(edit_panel, text=tr("common.wallet", "Кошелек:")).grid(
+            row=2, column=0, sticky="w"
+        )
         wallet_edit_var = tk.StringVar(value="")
         wallet_edit_menu = ttk.OptionMenu(edit_panel, wallet_edit_var, "")
-        wallet_edit_menu.grid(row=2, column=1, sticky="ew", padx=4)
-        ttk.Label(edit_panel, text="Category:").grid(row=3, column=0, sticky="w", padx=4)
+        wallet_edit_menu.grid(row=2, column=1, sticky="ew")
+        ttk.Label(edit_panel, text=tr("common.category", "Категория:")).grid(
+            row=3, column=0, sticky="w"
+        )
         category_edit_combo = ttk.Combobox(edit_panel, state="normal")
-        category_edit_combo.grid(row=3, column=1, sticky="ew", padx=4)
-        ttk.Label(edit_panel, text="Description (optional):").grid(
-            row=4, column=0, sticky="w", padx=4
+        category_edit_combo.grid(row=3, column=1, sticky="ew")
+        ttk.Label(edit_panel, text=tr("common.description", "Описание:")).grid(
+            row=4, column=0, sticky="w"
         )
         description_edit_entry = ttk.Entry(edit_panel)
-        description_edit_entry.grid(row=4, column=1, sticky="ew", padx=4)
+        description_edit_entry.grid(row=4, column=1, sticky="ew")
         edit_panel.grid_columnconfigure(1, weight=1)
 
         # Fill the fields with post data
@@ -370,19 +427,19 @@ def build_operations_tab(
             try:
                 new_amount_kzt = float(amount_entry.get().strip())
             except ValueError:
-                messagebox.showerror("Error", "Invalid amount.")
+                show_error(tr("operations.error.amount_number", "Сумма должна быть числом."))
                 return
             new_date = date_edit_entry.get().strip()
             if not new_date:
-                messagebox.showerror("Error", "Date is required.")
+                show_error(tr("operations.error.date_required", "Укажите дату."))
                 return
             new_category = category_edit_combo.get().strip()
             if not new_category:
-                messagebox.showerror("Error", "Category is required.")
+                show_error(tr("operations.error.category_required", "Укажите категорию."))
                 return
             new_wallet_id = wallet_edit_map.get(wallet_edit_var.get())
             if new_wallet_id is None:
-                messagebox.showerror("Error", "Wallet is required.")
+                show_error(tr("operations.error.wallet_required", "Выберите кошелек."))
                 return
             try:
                 context.controller.update_record_inline(
@@ -393,77 +450,110 @@ def build_operations_tab(
                     new_date=new_date,
                     new_wallet_id=new_wallet_id,
                 )
-                messagebox.showinfo(
-                    "Success",
-                    "Record updated. date, wallet, amount_kzt, category, "
-                    "and description were saved.",
-                )
+                show_info(tr("operations.updated", "Запись обновлена."))
                 refresh_operation_views(context)
                 cancel_edit()
             except Exception as error:
-                messagebox.showerror("Error", f"Failed to update record: {str(error)}")
+                show_error(
+                    tr(
+                        "operations.error.update_failed",
+                        "Не удалось обновить запись: {error}",
+                        error=error,
+                    )
+                )
 
         def cancel_edit() -> None:
             if edit_panel_state["panel"] is not None:
                 safe_destroy(edit_panel_state["panel"])
                 edit_panel_state["panel"] = None
 
-        ttk.Button(edit_panel, text="Save", command=save_edit).grid(row=5, column=2, padx=4)
-        ttk.Button(edit_panel, text="Cancel", command=cancel_edit).grid(row=5, column=3, padx=4)
+        edit_buttons = ttk.Frame(edit_panel, style="InlinePanel.TFrame")
+        edit_buttons.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        edit_buttons.grid_columnconfigure(0, weight=1)
+        edit_buttons.grid_columnconfigure(1, weight=1)
+        ttk.Button(
+            edit_buttons,
+            text=tr("common.save", "Сохранить"),
+            style="Primary.TButton",
+            command=save_edit,
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ttk.Button(edit_buttons, text=tr("common.cancel", "Отмена"), command=cancel_edit).grid(
+            row=0, column=1, sticky="ew", padx=(6, 0)
+        )
 
     def delete_all() -> None:
-        confirm = messagebox.askyesno(
-            "Confirm Delete All",
-            "Are you sure you want to delete ALL records? This action cannot be undone.",
+        confirm = ask_confirm(
+            tr(
+                "operations.delete_all.confirm",
+                "Удалить все записи? Это действие нельзя отменить.",
+            ),
+            title=tr("operations.delete_all.title", "Подтвердите удаление"),
         )
         if confirm:
             context.controller.delete_all_records()
-            messagebox.showinfo("Success", "All records have been deleted.")
+            show_info(tr("operations.deleted_all_done", "Все записи удалены."))
             refresh_operation_views(context)
 
     wallet_id_map: dict[str, int] = {}
 
-    transfer_frame = ttk.LabelFrame(left_frame, text="Transfer")
+    transfer_frame = ttk.LabelFrame(
+        left_frame,
+        text=tr("operations.transfer", "Перевод между кошельками"),
+    )
     transfer_frame.grid(row=1, column=0, sticky="ew")
     transfer_frame.grid_columnconfigure(1, weight=1)
 
-    ttk.Label(transfer_frame, text="From wallet:").grid(row=0, column=0, sticky="w", padx=4, pady=2)
+    ttk.Label(transfer_frame, text=tr("operations.transfer.from", "Из кошелька:")).grid(
+        row=0, column=0, sticky="w", padx=4, pady=2
+    )
     transfer_from_var = tk.StringVar(value="")
     transfer_from_menu = ttk.OptionMenu(transfer_frame, transfer_from_var, "")
     transfer_from_menu.grid(row=0, column=1, sticky="ew", padx=4, pady=2)
 
-    ttk.Label(transfer_frame, text="To wallet:").grid(row=1, column=0, sticky="w", padx=4, pady=2)
+    ttk.Label(transfer_frame, text=tr("operations.transfer.to", "В кошелек:")).grid(
+        row=1, column=0, sticky="w", padx=4, pady=2
+    )
     transfer_to_var = tk.StringVar(value="")
     transfer_to_menu = ttk.OptionMenu(transfer_frame, transfer_to_var, "")
     transfer_to_menu.grid(row=1, column=1, sticky="ew", padx=4, pady=2)
 
-    ttk.Label(transfer_frame, text="Date:").grid(row=2, column=0, sticky="w", padx=4, pady=2)
+    ttk.Label(transfer_frame, text=tr("common.date", "Дата:")).grid(
+        row=2, column=0, sticky="w", padx=4, pady=2
+    )
     transfer_date_entry = ttk.Entry(transfer_frame)
     transfer_date_entry.grid(row=2, column=1, sticky="ew", padx=4, pady=2)
     transfer_date_entry.insert(0, date.today().isoformat())
 
-    ttk.Label(transfer_frame, text="Amount:").grid(row=3, column=0, sticky="w", padx=4, pady=2)
+    ttk.Label(transfer_frame, text=tr("common.amount", "Сумма:")).grid(
+        row=3, column=0, sticky="w", padx=4, pady=2
+    )
     transfer_amount_entry = ttk.Entry(transfer_frame)
     transfer_amount_entry.grid(row=3, column=1, sticky="ew", padx=4, pady=2)
 
-    ttk.Label(transfer_frame, text="Currency:").grid(row=4, column=0, sticky="w", padx=4, pady=2)
+    ttk.Label(transfer_frame, text=tr("common.currency", "Валюта:")).grid(
+        row=4, column=0, sticky="w", padx=4, pady=2
+    )
     transfer_currency_entry = ttk.Entry(transfer_frame)
     transfer_currency_entry.insert(0, "KZT")
     transfer_currency_entry.grid(row=4, column=1, sticky="ew", padx=4, pady=2)
 
-    ttk.Label(transfer_frame, text="Commission:").grid(row=5, column=0, sticky="w", padx=4, pady=2)
+    ttk.Label(transfer_frame, text=tr("operations.transfer.commission", "Комиссия:")).grid(
+        row=5, column=0, sticky="w", padx=4, pady=2
+    )
     transfer_commission_entry = ttk.Entry(transfer_frame)
     transfer_commission_entry.insert(0, "0")
     transfer_commission_entry.grid(row=5, column=1, sticky="ew", padx=4, pady=2)
 
-    ttk.Label(transfer_frame, text="Commission currency:").grid(
-        row=6, column=0, sticky="w", padx=4, pady=2
-    )
+    ttk.Label(
+        transfer_frame, text=tr("operations.transfer.commission_currency", "Валюта комиссии:")
+    ).grid(row=6, column=0, sticky="w", padx=4, pady=2)
     transfer_commission_currency_entry = ttk.Entry(transfer_frame)
     transfer_commission_currency_entry.insert(0, "KZT")
     transfer_commission_currency_entry.grid(row=6, column=1, sticky="ew", padx=4, pady=2)
 
-    ttk.Label(transfer_frame, text="Description:").grid(row=7, column=0, sticky="w", padx=4, pady=2)
+    ttk.Label(transfer_frame, text=tr("common.description", "Описание:")).grid(
+        row=7, column=0, sticky="w", padx=4, pady=2
+    )
     transfer_description_entry = ttk.Entry(transfer_frame)
     transfer_description_entry.grid(row=7, column=1, sticky="ew", padx=4, pady=2)
 
@@ -493,12 +583,17 @@ def build_operations_tab(
         from_wallet_id = wallet_id_map.get(transfer_from_var.get())
         to_wallet_id = wallet_id_map.get(transfer_to_var.get())
         if from_wallet_id is None or to_wallet_id is None:
-            messagebox.showerror("Error", "Please select source and destination wallets.")
+            show_error(
+                tr(
+                    "operations.transfer.error.wallets_required",
+                    "Выберите кошелек отправителя и получателя.",
+                )
+            )
             return
 
         date_str = transfer_date_entry.get().strip()
         if not date_str:
-            messagebox.showerror("Error", "Transfer date is required.")
+            show_error(tr("operations.transfer.error.date_required", "Укажите дату перевода."))
             return
         try:
             from domain.validation import ensure_not_future, parse_ymd
@@ -506,19 +601,30 @@ def build_operations_tab(
             entered_date = parse_ymd(date_str)
             ensure_not_future(entered_date)
         except ValueError as error:
-            messagebox.showerror("Error", f"Invalid date: {str(error)}. Use YYYY-MM-DD.")
+            show_error(
+                tr(
+                    "operations.error.invalid_date",
+                    "Некорректная дата: {error}. Используйте формат ГГГГ-ММ-ДД.",
+                    error=error,
+                )
+            )
             return
 
         amount_str = transfer_amount_entry.get().strip()
         if not amount_str:
-            messagebox.showerror("Error", "Transfer amount is required.")
+            show_error(tr("operations.transfer.error.amount_required", "Укажите сумму перевода."))
             return
 
         try:
             transfer_amount = float(amount_str)
             commission_amount = float((transfer_commission_entry.get() or "0").strip())
         except ValueError:
-            messagebox.showerror("Error", "Transfer amount/commission must be numeric.")
+            show_error(
+                tr(
+                    "operations.transfer.error.amount_number",
+                    "Сумма перевода и комиссия должны быть числами.",
+                )
+            )
             return
 
         try:
@@ -532,21 +638,32 @@ def build_operations_tab(
                 commission_amount=commission_amount,
                 commission_currency=(transfer_commission_currency_entry.get() or "").strip(),
             )
-            messagebox.showinfo("Success", f"Transfer created (id={transfer_id}).")
+            show_info(
+                tr("operations.transfer.created", "Перевод создан (id={id}).", id=transfer_id)
+            )
             transfer_amount_entry.delete(0, tk.END)
             transfer_description_entry.delete(0, tk.END)
             transfer_commission_entry.delete(0, tk.END)
             transfer_commission_entry.insert(0, "0")
             refresh_operation_views(context)
         except Exception as error:
-            messagebox.showerror("Error", f"Failed to create transfer: {str(error)}")
+            show_error(
+                tr(
+                    "operations.transfer.error.create_failed",
+                    "Не удалось создать перевод: {error}",
+                    error=error,
+                )
+            )
 
-    ttk.Button(transfer_frame, text="Create transfer", command=create_transfer).grid(
-        row=8, column=0, columnspan=2, pady=6
-    )
+    ttk.Button(
+        transfer_frame,
+        text=tr("operations.transfer.create", "Создать перевод"),
+        command=create_transfer,
+        style="Primary.TButton",
+    ).grid(row=8, column=0, columnspan=2, pady=6)
     refresh_transfer_wallet_menus()
 
-    import_mode_var = tk.StringVar(value="Full Backup")
+    import_mode_var = tk.StringVar(value=tr("operations.mode.replace", "Полная замена"))
     import_format_var = tk.StringVar(value="CSV")
 
     def import_records_data() -> None:
@@ -554,21 +671,34 @@ def build_operations_tab(
         fmt = import_format_var.get()
         cfg = import_formats.get(fmt)
         if not cfg:
-            messagebox.showerror("Error", f"Unsupported import format: {fmt}")
+            show_error(
+                tr(
+                    "operations.error.import_format",
+                    "Неподдерживаемый формат импорта: {fmt}",
+                    fmt=fmt,
+                )
+            )
             return
 
         filepath = filedialog.askopenfilename(
             defaultextension=cfg["ext"],
             filetypes=[(f"{fmt} files", f"*{cfg['ext']}"), ("All files", "*.*")],
-            title=f"Select {cfg['desc']} file to import",
+            title=tr(
+                "operations.import.select_file",
+                "Выберите файл {format} для импорта",
+                format=cfg["desc"],
+            ),
         )
         if not filepath:
             return
 
         if policy == ImportPolicy.CURRENT_RATE:
             messagebox.showwarning(
-                "Current Rate Import",
-                "For CURRENT_RATE mode, exchange rates will be fixed at import time.",
+                tr("operations.import.current_rate.title", "Импорт по текущему курсу"),
+                tr(
+                    "operations.import.current_rate.body",
+                    "В режиме CURRENT_RATE курсы валют будут зафиксированы на момент импорта.",
+                ),
             )
 
         def preview_task() -> ImportResult:
@@ -580,21 +710,35 @@ def build_operations_tab(
         def on_commit_success(result: ImportResult) -> None:
             details = ""
             if result.skipped or result.errors:
-                details = f"\nSkipped: {result.skipped} rows.\nFirst errors:\n- " + "\n- ".join(
+                details = f"\nПропущено строк: {result.skipped}.\nПервые ошибки:\n- " + "\n- ".join(
                     result.errors[:5]
                 )
             messagebox.showinfo(
-                "Success",
-                f"Successfully imported {result.imported} records from {cfg['desc']} file."
-                "\nAll existing records have been replaced." + details,
+                tr("common.done", "Готово"),
+                tr(
+                    "operations.import.success",
+                    "Импортировано записей: {count} ({format}).\nТекущие записи были заменены.",
+                    count=result.imported,
+                    format=cfg["desc"],
+                )
+                + details,
             )
             refresh_operation_views(context)
 
         def on_error(exc: BaseException) -> None:
             if isinstance(exc, FileNotFoundError):
-                messagebox.showerror("Error", f"File not found: {filepath}")
+                show_error(
+                    tr("common.file_not_found", "Файл не найден: {filepath}", filepath=filepath)
+                )
                 return
-            messagebox.showerror("Error", f"Failed to import {cfg['desc']}: {str(exc)}")
+            show_error(
+                tr(
+                    "operations.import.error",
+                    "Не удалось импортировать {format}: {error}",
+                    format=cfg["desc"],
+                    error=exc,
+                )
+            )
 
         def on_preview_success(preview: ImportResult) -> None:
             confirmed = show_import_preview_dialog(
@@ -610,26 +754,41 @@ def build_operations_tab(
                 commit_task,
                 on_success=on_commit_success,
                 on_error=on_error,
-                busy_message=f"Importing {cfg['desc']}...",
+                busy_message=tr(
+                    "operations.busy.import",
+                    "Импортируем {format}...",
+                    format=cfg["desc"],
+                ),
             )
 
         context._run_background(
             preview_task,
             on_success=on_preview_success,
             on_error=on_error,
-            busy_message=f"Validating {cfg['desc']} import...",
+            busy_message=tr(
+                "operations.busy.validate",
+                "Проверяем импорт {format}...",
+                format=cfg["desc"],
+            ),
         )
 
     def export_records_data() -> None:
         fmt = import_format_var.get()
         cfg = import_formats.get(fmt)
         if not cfg or fmt == "JSON":
-            messagebox.showerror("Error", "Unsupported export format for records.")
+            show_error(
+                tr(
+                    "operations.export.unsupported",
+                    "Этот формат не поддерживается для экспорта операций.",
+                )
+            )
             return
         filepath = filedialog.asksaveasfilename(
             defaultextension=cfg["ext"],
             filetypes=[(f"{cfg['desc']} files", f"*{cfg['ext']}"), ("All files", "*.*")],
-            title=f"Save records as {cfg['desc']}",
+            title=tr(
+                "operations.export.save_as", "Сохранить операции как {format}", format=cfg["desc"]
+            ),
         )
         if not filepath:
             return
@@ -643,40 +802,83 @@ def build_operations_tab(
             export_records(records, filepath, fmt.lower(), transfers=transfers)
 
         def on_success(_: Any) -> None:
-            messagebox.showinfo("Success", f"Records exported to {filepath}")
+            show_info(
+                tr(
+                    "operations.export.success",
+                    "Операции экспортированы в:\n{filepath}",
+                    filepath=filepath,
+                )
+            )
             open_in_file_manager(os.path.dirname(filepath))
 
         context._run_background(
             task,
             on_success=on_success,
-            busy_message=f"Exporting {cfg['desc']}...",
+            busy_message=tr(
+                "operations.busy.export",
+                "Экспортируем {format}...",
+                format=cfg["desc"],
+            ),
         )
 
-    btn_frame = tk.Frame(list_frame)
-    btn_frame.grid(row=1, column=0, columnspan=2, pady=6)
+    actions_frame = ttk.Frame(list_frame)
+    actions_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=6)
+    actions_frame.grid_columnconfigure(0, weight=1)
+    actions_frame.grid_columnconfigure(1, weight=1)
 
-    ttk.Button(btn_frame, text="Delete Selected", command=delete_selected).pack(
-        side=tk.LEFT, padx=6
-    )
-    ttk.Button(btn_frame, text="Edit", command=edit_selected_record_inline).pack(
-        side=tk.LEFT, padx=6
-    )
-    ttk.Button(btn_frame, text="Delete All", command=delete_all).pack(side=tk.LEFT, padx=6)
-    ttk.Button(btn_frame, text="Refresh", command=context._refresh_list).pack(side=tk.LEFT, padx=6)
+    primary_actions = ttk.Frame(actions_frame)
+    primary_actions.grid(row=0, column=0, sticky="ew", pady=(0, 6), padx=(0, 6))
+    import_actions = ttk.Frame(actions_frame)
+    import_actions.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+    for idx in range(4):
+        primary_actions.grid_columnconfigure(idx, weight=1)
+    for idx in range(6):
+        import_actions.grid_columnconfigure(idx, weight=1)
 
+    ttk.Button(
+        primary_actions,
+        text=tr("common.delete", "Удалить"),
+        command=delete_selected,
+    ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+    ttk.Button(
+        primary_actions,
+        text=tr("common.edit", "Редактировать"),
+        command=edit_selected_record_inline,
+    ).grid(row=0, column=1, sticky="ew", padx=6)
+    ttk.Button(
+        primary_actions,
+        text=tr("common.refresh", "Обновить"),
+        command=context._refresh_list,
+    ).grid(row=0, column=2, sticky="ew", padx=6)
+    ttk.Button(
+        primary_actions,
+        text=tr("operations.delete_all", "Удалить все"),
+        command=delete_all,
+    ).grid(row=0, column=3, sticky="ew", padx=(6, 0))
+
+    ttk.Label(import_actions, text=tr("common.format", "Формат:")).grid(row=0, column=0, sticky="w")
+    ttk.OptionMenu(import_actions, import_format_var, "CSV", "CSV", "XLSX").grid(
+        row=0, column=1, sticky="ew", padx=(6, 8)
+    )
+    ttk.Label(import_actions, text=tr("common.mode", "Режим:")).grid(row=0, column=2, sticky="w")
     ttk.OptionMenu(
-        btn_frame,
+        import_actions,
         import_mode_var,
-        "Full Backup",
-        "Full Backup",
-        "Current Rate",
-        "Legacy Import",
-    ).pack(side=tk.LEFT, padx=6)
-    ttk.OptionMenu(btn_frame, import_format_var, "CSV", "CSV", "XLSX").pack(side=tk.LEFT, padx=6)
-    ttk.Button(btn_frame, text="Import", command=import_records_data).pack(side=tk.LEFT, padx=6)
-    ttk.Button(btn_frame, text="Export Data", command=export_records_data).pack(
-        side=tk.LEFT, padx=6
-    )
+        tr("operations.mode.replace", "Полная замена"),
+        tr("operations.mode.replace", "Полная замена"),
+        tr("operations.mode.current_rate", "По текущему курсу"),
+        tr("operations.mode.legacy", "Наследуемый импорт"),
+    ).grid(row=0, column=3, sticky="ew", padx=(6, 8))
+    ttk.Button(
+        import_actions,
+        text=tr("operations.import", "Импорт"),
+        command=import_records_data,
+    ).grid(row=0, column=4, sticky="ew", padx=(0, 6))
+    ttk.Button(
+        import_actions,
+        text=tr("operations.export", "Экспорт"),
+        command=export_records_data,
+    ).grid(row=0, column=5, sticky="ew")
 
     context._refresh_list()
 

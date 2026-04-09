@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 KIND_TO_FOREGROUND: dict[str, str] = {
-    "income": "#166534",
-    "expense": "#b91c1c",
-    "mandatory": "#b6ad13",
-    "transfer": "#1d4ed8",
+    "income": "#378977",
+    "expense": "#b93748",
+    "mandatory": "#c5a742",
+    "transfer": "#2f6fed",
 }
 
 

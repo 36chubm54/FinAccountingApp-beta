@@ -10,6 +10,8 @@ from tkinter import messagebox, ttk
 from typing import Any, Protocol
 
 from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment
+from gui.i18n import tr
+from gui.ui_helpers import attach_treeview_scrollbars
 
 
 class DebtsTabContext(Protocol):
@@ -73,7 +75,7 @@ def _draw_debt_progress(canvas: tk.Canvas, debt: Debt | None, payments: list[Deb
         canvas.create_text(
             width // 2,
             height // 2,
-            text="Select a debt to view progress",
+            text=tr("debts.progress.empty", "Выберите долг, чтобы увидеть прогресс"),
             fill="#6b7280",
             font=("Segoe UI", 10),
         )
@@ -139,7 +141,13 @@ def _draw_debt_progress(canvas: tk.Canvas, debt: Debt | None, payments: list[Deb
         x0,
         y0 + bar_h + 14,
         anchor="w",
-        text=f"Paid: {paid / 100:.2f}   Written off: {forgiven / 100:.2f}   Remaining: {remaining / 100:.2f}",  # noqa: E501
+        text=tr(
+            "debts.progress.summary",
+            "Погашено: {paid}   Списано: {forgiven}   Осталось: {remaining}",
+            paid=f"{paid / 100:.2f}",
+            forgiven=f"{forgiven / 100:.2f}",
+            remaining=f"{remaining / 100:.2f}",
+        ),
         fill="#374151",
         font=("Segoe UI", 9),
     )
@@ -150,66 +158,90 @@ def build_debts_tab(
     *,
     context: DebtsTabContext,
 ) -> DebtsTabBindings:
-    parent.grid_columnconfigure(0, weight=0)
-    parent.grid_columnconfigure(1, weight=1)
+    parent.grid_columnconfigure(0, weight=2, uniform="debts")
+    parent.grid_columnconfigure(1, weight=5, uniform="debts")
     parent.grid_rowconfigure(0, weight=1)
 
     left = ttk.Frame(parent)
-    left.grid(row=0, column=0, sticky="nsw", padx=10, pady=10)
+    left.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+    left.grid_columnconfigure(0, weight=1)
     right = ttk.Frame(parent)
     right.grid(row=0, column=1, sticky="nsew", padx=(0, 10), pady=10)
     right.grid_columnconfigure(0, weight=1)
     right.grid_rowconfigure(0, weight=1)
     right.grid_rowconfigure(1, weight=0)
-    right.grid_rowconfigure(2, weight=1)
+    right.grid_rowconfigure(2, weight=0)
+    right.grid_rowconfigure(3, weight=1)
 
-    create_frame = ttk.LabelFrame(left, text="New Debt / Loan")
+    create_frame = ttk.LabelFrame(left, text=tr("debts.create.title", "Новый долг / заем"))
     create_frame.grid(row=0, column=0, sticky="ew")
     create_frame.grid_columnconfigure(1, weight=1)
 
-    ttk.Label(create_frame, text="Kind:").grid(row=0, column=0, sticky="w", padx=6, pady=4)
-    kind_var = tk.StringVar(value="Debt")
-    ttk.OptionMenu(create_frame, kind_var, "Debt", "Debt", "Loan").grid(
+    ttk.Label(create_frame, text=tr("common.type", "Тип:")).grid(
+        row=0, column=0, sticky="w", padx=6, pady=4
+    )
+    debt_label = tr("debts.kind.debt", "Долг")
+    loan_label = tr("debts.kind.loan", "Заем")
+    kind_var = tk.StringVar(value=debt_label)
+    ttk.OptionMenu(create_frame, kind_var, debt_label, debt_label, loan_label).grid(
         row=0, column=1, sticky="ew", padx=6, pady=4
     )
 
-    ttk.Label(create_frame, text="Contact:").grid(row=1, column=0, sticky="w", padx=6, pady=4)
+    ttk.Label(create_frame, text=tr("debts.contact", "Контакт:")).grid(
+        row=1, column=0, sticky="w", padx=6, pady=4
+    )
     contact_entry = ttk.Entry(create_frame)
     contact_entry.grid(row=1, column=1, sticky="ew", padx=6, pady=4)
 
-    ttk.Label(create_frame, text="Amount (KZT):").grid(row=2, column=0, sticky="w", padx=6, pady=4)
+    ttk.Label(create_frame, text=tr("debts.amount", "Сумма (KZT):")).grid(
+        row=2, column=0, sticky="w", padx=6, pady=4
+    )
     amount_entry = ttk.Entry(create_frame)
     amount_entry.grid(row=2, column=1, sticky="ew", padx=6, pady=4)
 
-    ttk.Label(create_frame, text="Date:").grid(row=3, column=0, sticky="w", padx=6, pady=4)
+    ttk.Label(create_frame, text=tr("common.date", "Дата:")).grid(
+        row=3, column=0, sticky="w", padx=6, pady=4
+    )
     date_entry = ttk.Entry(create_frame)
     date_entry.grid(row=3, column=1, sticky="ew", padx=6, pady=4)
     date_entry.insert(0, date.today().isoformat())
 
-    ttk.Label(create_frame, text="Wallet:").grid(row=4, column=0, sticky="w", padx=6, pady=4)
+    ttk.Label(create_frame, text=tr("common.wallet", "Кошелек:")).grid(
+        row=4, column=0, sticky="w", padx=6, pady=4
+    )
     wallet_var = tk.StringVar(value="")
     wallet_menu = ttk.OptionMenu(create_frame, wallet_var, "")
     wallet_menu.grid(row=4, column=1, sticky="ew", padx=6, pady=4)
     wallet_map: dict[str, int] = {}
 
-    ttk.Label(create_frame, text="Description:").grid(row=5, column=0, sticky="w", padx=6, pady=4)
+    ttk.Label(create_frame, text=tr("common.description", "Описание:")).grid(
+        row=5, column=0, sticky="w", padx=6, pady=4
+    )
     description_entry = ttk.Entry(create_frame)
     description_entry.grid(row=5, column=1, sticky="ew", padx=6, pady=4)
 
-    actions_frame = ttk.LabelFrame(left, text="Selected Debt Actions")
+    actions_frame = ttk.LabelFrame(
+        left, text=tr("debts.actions.title", "Действия по выбранному долгу")
+    )
     actions_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
     actions_frame.grid_columnconfigure(1, weight=1)
 
-    ttk.Label(actions_frame, text="Amount (KZT):").grid(row=0, column=0, sticky="w", padx=6, pady=4)
+    ttk.Label(actions_frame, text=tr("debts.amount", "Сумма (KZT):")).grid(
+        row=0, column=0, sticky="w", padx=6, pady=4
+    )
     action_amount_entry = ttk.Entry(actions_frame)
     action_amount_entry.grid(row=0, column=1, sticky="ew", padx=6, pady=4)
 
-    ttk.Label(actions_frame, text="Date:").grid(row=1, column=0, sticky="w", padx=6, pady=4)
+    ttk.Label(actions_frame, text=tr("common.date", "Дата:")).grid(
+        row=1, column=0, sticky="w", padx=6, pady=4
+    )
     action_date_entry = ttk.Entry(actions_frame)
     action_date_entry.grid(row=1, column=1, sticky="ew", padx=6, pady=4)
     action_date_entry.insert(0, date.today().isoformat())
 
-    ttk.Label(actions_frame, text="Wallet:").grid(row=2, column=0, sticky="w", padx=6, pady=4)
+    ttk.Label(actions_frame, text=tr("common.wallet", "Кошелек:")).grid(
+        row=2, column=0, sticky="w", padx=6, pady=4
+    )
     action_wallet_var = tk.StringVar(value="")
     action_wallet_menu = ttk.OptionMenu(actions_frame, action_wallet_var, "")
     action_wallet_menu.grid(row=2, column=1, sticky="ew", padx=6, pady=4)
@@ -222,25 +254,35 @@ def build_debts_tab(
     )
     for col, label, width, anchor in (
         ("id", "#", 45, "e"),
-        ("contact", "Contact", 160, "w"),
-        ("kind", "Kind", 80, "center"),
-        ("total", "Total", 95, "e"),
-        ("remaining", "Remaining", 95, "e"),
-        ("status", "Status", 85, "center"),
-        ("created", "Created", 95, "center"),
+        ("contact", tr("debts.contact_short", "Контакт"), 140, "w"),
+        ("kind", tr("common.type_short", "Тип"), 80, "center"),
+        ("total", tr("debts.total", "Сумма"), 95, "e"),
+        ("remaining", tr("debts.remaining", "Остаток"), 110, "e"),
+        ("status", tr("common.status", "Статус"), 85, "center"),
+        ("created", tr("debts.created", "Создан"), 95, "center"),
     ):
         debt_tree.heading(col, text=label)
         debt_tree.column(col, width=width, minwidth=width, anchor=anchor, stretch=col == "contact")  # type: ignore[arg-type]
     debt_tree.grid(row=0, column=0, sticky="nsew")
-    debt_scroll = ttk.Scrollbar(right, orient="vertical", command=debt_tree.yview)
-    debt_scroll.grid(row=0, column=1, sticky="ns")
-    debt_tree.configure(yscrollcommand=debt_scroll.set)
+    attach_treeview_scrollbars(right, debt_tree, row=0, column=0, horizontal=True)
 
     progress_canvas = tk.Canvas(right, height=72, bg="white", highlightthickness=0)
-    progress_canvas.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 8))
+    progress_canvas.grid(row=2, column=0, sticky="ew", pady=(8, 8))
 
-    history_frame = ttk.LabelFrame(right, text="History")
-    history_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
+    current_debt: Debt | None = None
+    current_payments: list[DebtPayment] = []
+
+    def _redraw_progress_on_resize(event=None):
+        """Перерисовать прогрессбар при изменении размера canvas."""
+        if current_debt is not None:
+            _draw_debt_progress(progress_canvas, current_debt, current_payments)
+        else:
+            _draw_debt_progress(progress_canvas, None, [])
+
+    progress_canvas.bind("<Configure>", _redraw_progress_on_resize)
+
+    history_frame = ttk.LabelFrame(right, text=tr("common.history", "История"))
+    history_frame.grid(row=3, column=0, columnspan=2, sticky="nsew")
     history_frame.grid_columnconfigure(0, weight=1)
     history_frame.grid_rowconfigure(0, weight=1)
 
@@ -251,11 +293,11 @@ def build_debts_tab(
         height=8,
     )
     for col, label, width, anchor in (
-        ("date", "Date", 95, "center"),
-        ("operation", "Operation", 120, "w"),
-        ("amount", "Amount", 90, "e"),
-        ("write_off", "Write-off", 80, "center"),
-        ("record", "Record ID", 80, "center"),
+        ("date", tr("common.date", "Дата"), 95, "center"),
+        ("operation", tr("common.operation", "Операция"), 100, "w"),
+        ("amount", tr("common.amount", "Сумма"), 90, "e"),
+        ("write_off", tr("debts.write_off_short", "Списание"), 100, "center"),
+        ("record", tr("debts.record_id", "ID записи"), 100, "center"),
     ):
         history_tree.heading(col, text=label)
         history_tree.column(
@@ -266,9 +308,7 @@ def build_debts_tab(
             stretch=col == "operation",
         )
     history_tree.grid(row=0, column=0, sticky="nsew")
-    history_scroll = ttk.Scrollbar(history_frame, orient="vertical", command=history_tree.yview)
-    history_scroll.grid(row=0, column=1, sticky="ns")
-    history_tree.configure(yscrollcommand=history_scroll.set)
+    attach_treeview_scrollbars(history_frame, history_tree, row=0, column=0, horizontal=True)
     history_tree.tag_configure("writeoff", foreground="#6b7280")
 
     status_label = ttk.Label(left, text="")
@@ -304,12 +344,17 @@ def build_debts_tab(
         )
 
     def _refresh_history() -> None:
+        nonlocal current_debt, current_payments
         history_tree.delete(*history_tree.get_children())
         debt = _selected_debt()
         if debt is None:
+            current_debt = None
+            current_payments = []
             _draw_debt_progress(progress_canvas, None, [])
             return
         history = context.controller.get_debt_history(debt.id)
+        current_debt = debt
+        current_payments = history
         for payment in history:
             tag = ("writeoff",) if payment.is_write_off else ()
             history_tree.insert(
@@ -319,7 +364,7 @@ def build_debts_tab(
                     payment.payment_date,
                     payment.operation_type.value,
                     f"{payment.principal_paid_minor / 100:.2f}",
-                    "Yes" if payment.is_write_off else "No",
+                    tr("common.yes", "Да") if payment.is_write_off else tr("common.no", "Нет"),
                     "" if payment.record_id is None else str(payment.record_id),
                 ),
                 tags=tag,
@@ -331,6 +376,20 @@ def build_debts_tab(
         debts = context.controller.get_debts()
         current_selection = debt_tree.selection()
         debt_tree.delete(*debt_tree.get_children())
+
+        def _display_kind(kind: DebtKind) -> str:
+            return {
+                DebtKind.DEBT: tr("debts.kind.debt", "Долг"),
+                DebtKind.LOAN: tr("debts.kind.loan", "Заем"),
+            }.get(kind, str(kind.value))
+
+        def _display_status(status: Any) -> str:
+            raw = str(getattr(status, "value", status))
+            return {
+                "open": tr("debts.status.open", "Открыт"),
+                "closed": tr("debts.status.closed", "Закрыт"),
+            }.get(raw, raw)
+
         for debt in debts:
             debt_tree.insert(
                 "",
@@ -339,10 +398,10 @@ def build_debts_tab(
                 values=(
                     debt.id,
                     debt.contact_name,
-                    debt.kind.value,
+                    _display_kind(debt.kind),
                     f"{debt.total_amount_minor / 100:.2f}",
                     f"{debt.remaining_amount_minor / 100:.2f}",
-                    debt.status.value,
+                    _display_status(debt.status),
                     debt.created_at,
                 ),
             )
@@ -351,7 +410,12 @@ def build_debts_tab(
         elif debts:
             debt_tree.selection_set(str(debts[0].id))
         status_label.config(
-            text=f"{len(context.controller.get_open_debts())} open / {len(debts)} total"
+            text=tr(
+                "debts.status.summary",
+                "{open_count} открыто / {total_count} всего",
+                open_count=len(context.controller.get_open_debts()),
+                total_count=len(debts),
+            )
         )
         _refresh_history()
 
@@ -363,13 +427,19 @@ def build_debts_tab(
         try:
             amount_kzt = float(amount_entry.get().strip().replace(",", "."))
         except ValueError:
-            messagebox.showerror("Error", "Amount must be a number.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr("debts.error.amount_number", "Сумма должна быть числом."),
+            )
             return
         if wallet_id is None:
-            messagebox.showerror("Error", "Wallet is required.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr("debts.error.wallet_required", "Кошелек обязателен."),
+            )
             return
         try:
-            if kind_var.get() == "Debt":
+            if kind_var.get() == debt_label:
                 context.controller.create_debt(
                     contact_name=contact,
                     wallet_id=wallet_id,
@@ -391,7 +461,7 @@ def build_debts_tab(
             _refresh()
             refresh_debts_views(context)
         except Exception as error:
-            messagebox.showerror("Debt Error", str(error))
+            messagebox.showerror(tr("debts.error.create_title", "Ошибка долга"), str(error))
 
     def _run_on_selected(
         self_name: str,
@@ -401,17 +471,26 @@ def build_debts_tab(
     ) -> None:
         debt = _selected_debt()
         if debt is None:
-            messagebox.showerror("Error", "Select a debt first.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr("debts.error.select_first", "Сначала выберите долг."),
+            )
             return
         date_text = action_date_entry.get().strip()
         try:
             amount_kzt = float(action_amount_entry.get().strip().replace(",", "."))
         except ValueError:
-            messagebox.showerror("Error", "Amount must be a number.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr("debts.error.amount_number", "Сумма должна быть числом."),
+            )
             return
         wallet_id = wallet_map.get(action_wallet_var.get())
         if not wallet_optional and wallet_id is None:
-            messagebox.showerror("Error", "Wallet is required.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr("debts.error.wallet_required", "Кошелек обязателен."),
+            )
             return
         wallet_id_arg: int | None = wallet_id
         if not wallet_optional and wallet_id_arg is not None:
@@ -424,7 +503,7 @@ def build_debts_tab(
 
     def _pay() -> None:
         _run_on_selected(
-            "Payment Error",
+            tr("debts.error.payment_title", "Ошибка погашения"),
             lambda debt, amount, date_text, wallet_id: context.controller.register_debt_payment(
                 debt_id=debt.id,
                 wallet_id=int(wallet_id),  # type: ignore[arg-type]
@@ -436,7 +515,7 @@ def build_debts_tab(
 
     def _write_off() -> None:
         _run_on_selected(
-            "Write-off Error",
+            tr("debts.error.writeoff_title", "Ошибка списания"),
             lambda debt, amount, date_text, _wallet_id: context.controller.register_debt_write_off(
                 debt_id=debt.id,
                 amount_kzt=amount,
@@ -448,11 +527,17 @@ def build_debts_tab(
     def _close() -> None:
         debt = _selected_debt()
         if debt is None:
-            messagebox.showerror("Error", "Select a debt first.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr("debts.error.select_first", "Сначала выберите долг."),
+            )
             return
         wallet_id = wallet_map.get(action_wallet_var.get())
         if wallet_id is None and debt.kind is DebtKind.DEBT:
-            messagebox.showerror("Error", "Wallet is required.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr("debts.error.wallet_required", "Кошелек обязателен."),
+            )
             return
         try:
             context.controller.close_debt(
@@ -464,19 +549,24 @@ def build_debts_tab(
             _refresh()
             refresh_debts_views(context)
         except Exception as error:
-            messagebox.showerror("Close Error", str(error))
+            messagebox.showerror(tr("debts.error.close_title", "Ошибка закрытия"), str(error))
 
     def _delete() -> None:
         debt = _selected_debt()
         if debt is None:
-            messagebox.showerror("Error", "Select a debt first.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr("debts.error.select_first", "Сначала выберите долг."),
+            )
             return
         if not messagebox.askyesno(
-            "Confirm Delete",
-            (
-                f"Delete debt for '{debt.contact_name}'?\n\n"
-                "This removes the debt card and payment history only.\n"
-                "Linked income/expense records and wallet balances will stay unchanged."
+            tr("common.confirm", "Подтверждение"),
+            tr(
+                "debts.confirm.delete",
+                "Удалить долг для '{contact}'?\n"
+                "\nЭто удалит только карточку долга и историю платежей."
+                "\nСвязанные записи доходов/расходов и балансы кошельков останутся без изменений.",
+                contact=debt.contact_name,
             ),
         ):
             return
@@ -484,24 +574,27 @@ def build_debts_tab(
             context.controller.delete_debt(debt.id)
             _refresh()
         except Exception as error:
-            messagebox.showerror("Delete Error", str(error))
+            messagebox.showerror(tr("debts.error.delete_title", "Ошибка удаления"), str(error))
 
-    ttk.Button(create_frame, text="Save", command=_create).grid(
-        row=6, column=0, columnspan=2, sticky="ew", padx=6, pady=8
-    )
-    ttk.Button(actions_frame, text="Pay", command=_pay).grid(
+    ttk.Button(
+        create_frame,
+        text=tr("debts.save", "Сохранить"),
+        style="Primary.TButton",
+        command=_create,
+    ).grid(row=6, column=0, columnspan=2, sticky="ew", padx=6, pady=8)
+    ttk.Button(actions_frame, text=tr("debts.pay", "Погасить"), command=_pay).grid(
         row=3, column=0, sticky="ew", padx=6, pady=6
     )
-    ttk.Button(actions_frame, text="Write off", command=_write_off).grid(
+    ttk.Button(actions_frame, text=tr("debts.write_off", "Списать"), command=_write_off).grid(
         row=3, column=1, sticky="ew", padx=6, pady=6
     )
-    ttk.Button(actions_frame, text="Close", command=_close).grid(
+    ttk.Button(actions_frame, text=tr("debts.close", "Закрыть"), command=_close).grid(
         row=4, column=0, sticky="ew", padx=6, pady=(0, 6)
     )
-    ttk.Button(actions_frame, text="Delete", command=_delete).grid(
+    ttk.Button(actions_frame, text=tr("debts.delete", "Удалить"), command=_delete).grid(
         row=4, column=1, sticky="ew", padx=6, pady=(0, 6)
     )
-    ttk.Button(actions_frame, text="Refresh", command=_refresh).grid(
+    ttk.Button(actions_frame, text=tr("common.refresh", "Обновить"), command=_refresh).grid(
         row=5, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 6)
     )
 

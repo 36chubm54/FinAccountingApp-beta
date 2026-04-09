@@ -2,7 +2,7 @@
 
 Graphical application for personal financial accounting with multicurrency support, import/export, budgets, debts, assets, and goals.
 
-The current `v1.10.1` release hardens the `Assets / Goals / Dashboard` layer introduced in `v1.10.0`: it strengthens import/backup/migration paths, fixes rollback and link normalization issues, makes batch/file writes more atomic, and validates malformed JSON payloads earlier before they reach persistent storage.
+The current `v1.11.0` release focuses on UI and localization polish: the app now uses a unified soft-blue minimal theme, external language packs (`ru/en`) are wired through a shared i18n loader, translation coverage is expanded across tabs/dialogs (including enum status labels in `Budget/Debts`), table/chart layouts behave better at compact window sizes, and Windows startup now applies HiDPI awareness for Tk and native file dialogs.
 
 ## 🚀 Quick Start
 
@@ -59,6 +59,8 @@ The app starts a Tkinter GUI on top of SQLite runtime storage. Core tabs can be 
 - Wealth layer: `Assets`, `Goals`, and a dedicated wealth `Dashboard`
 - Full backup / import / migration for `JSON` ↔ `SQLite`
 - Read-only Data Audit Engine for runtime consistency checks
+- External `locales/*.txt` language packs with a shared i18n loader and fallback chain
+- Custom window icon support (`.ico` + `iconphoto` fallback) with forward compatibility for packaged `exe` icon usage
 
 ## 🖥️ Application Tabs
 
@@ -86,6 +88,7 @@ Also important:
 
 - `utils` — import/export formats, PDF/XLSX helpers, money helpers, charting
 - `tests` — regression and contract coverage for domain/app/services/gui/import-export flows
+- `.gitattributes` — normalized source/text line endings (`LF`) to reduce cross-platform diff noise
 
 ## 🔌 Key Extension Points
 

@@ -14,6 +14,8 @@ from domain.asset import Asset
 from domain.dashboard import DashboardAllocationSlice, DashboardPayload, DashboardTrendPoint
 from domain.goal import GoalProgress
 from domain.validation import ensure_not_future, parse_ymd
+from gui.i18n import tr
+from gui.ui_helpers import bind_label_wrap, center_dialog, show_error, show_info
 
 logger = logging.getLogger(__name__)
 
@@ -262,7 +264,7 @@ def _draw_trend(canvas: tk.Canvas, data: list[DashboardTrendPoint]) -> None:
         canvas.create_text(
             width // 2,
             height // 2,
-            text="No trend data yet",
+            text=tr("dashboard.trend.empty", "Пока нет данных по динамике"),
             fill="#6b7280",
             font=("Segoe UI", 11),
         )
@@ -271,11 +273,21 @@ def _draw_trend(canvas: tk.Canvas, data: list[DashboardTrendPoint]) -> None:
     values = [float(point.balance) for point in data]
     min_value = min(values)
     max_value = max(values)
-    span = (max_value - min_value) or 1.0
+    span = max_value - min_value
+    padding_value = max(span * 0.08, abs(max_value or min_value or 1.0) * 0.02, 1.0)
+    if span <= 0:
+        chart_min = min_value - padding_value
+        chart_max = max_value + padding_value
+    else:
+        chart_min = min_value - padding_value
+        chart_max = max_value + padding_value
+    chart_span = (chart_max - chart_min) or 1.0
 
     def to_xy(index: int, value: float) -> tuple[float, float]:
         x = pad["left"] + (width - pad["left"] - pad["right"]) * index / max(1, len(data) - 1)
-        y = pad["top"] + (height - pad["top"] - pad["bottom"]) * (1 - (value - min_value) / span)
+        y = pad["top"] + (height - pad["top"] - pad["bottom"]) * (
+            1 - (value - chart_min) / chart_span
+        )
         return x, y
 
     canvas.create_rectangle(
@@ -287,7 +299,17 @@ def _draw_trend(canvas: tk.Canvas, data: list[DashboardTrendPoint]) -> None:
         width=1,
     )
 
-    if min_value < 0 < max_value:
+    # Keep the baseline visible on wide canvases where the border gets visually lost.
+    canvas.create_line(
+        pad["left"],
+        height - pad["bottom"],
+        width - pad["right"],
+        height - pad["bottom"],
+        fill="#cbd5e1",
+        width=1,
+    )
+
+    if chart_min < 0 < chart_max:
         _, zero_y = to_xy(0, 0.0)
         canvas.create_line(
             pad["left"],
@@ -350,7 +372,7 @@ def _draw_allocation(canvas: tk.Canvas, data: list[DashboardAllocationSlice]) ->
         canvas.create_text(
             width // 2,
             height // 2,
-            text="No assets yet",
+            text=tr("dashboard.allocation.empty_assets", "Активы пока не добавлены"),
             fill="#6b7280",
             font=("Segoe UI", 11),
         )
@@ -361,7 +383,7 @@ def _draw_allocation(canvas: tk.Canvas, data: list[DashboardAllocationSlice]) ->
         canvas.create_text(
             width // 2,
             height // 2,
-            text="No allocation data",
+            text=tr("dashboard.allocation.empty", "Нет данных для структуры активов"),
             fill="#6b7280",
             font=("Segoe UI", 11),
         )
@@ -396,7 +418,7 @@ def _draw_allocation(canvas: tk.Canvas, data: list[DashboardAllocationSlice]) ->
     canvas.create_text(
         center_x,
         center_y - 8,
-        text="Assets",
+        text=tr("dashboard.assets", "Активы"),
         fill="#6b7280",
         font=("Segoe UI", 9),
     )
@@ -447,7 +469,11 @@ def _render_goals_with_actions(
         child.destroy()
 
     if not goals:
-        empty = ttk.Label(container, text="No goals yet", foreground="#6b7280")
+        empty = ttk.Label(
+            container,
+            text=tr("dashboard.goals.empty", "Цели пока не добавлены"),
+            foreground="#6b7280",
+        )
         empty.grid(row=0, column=0, sticky="w", padx=6, pady=6)
         return
 
@@ -458,7 +484,11 @@ def _render_goals_with_actions(
         card.grid_columnconfigure(0, weight=1)
 
         title = str(item.goal.title)
-        status = "Completed" if item.is_completed else f"{item.progress_pct:.1f}%"
+        status = (
+            tr("dashboard.goal.completed", "Завершена")
+            if item.is_completed
+            else f"{item.progress_pct:.1f}%"
+        )
         ttk.Label(card, text=title, font=("Segoe UI", 10, "bold")).grid(
             row=0,
             column=0,
@@ -485,7 +515,11 @@ def _render_goals_with_actions(
         progress["value"] = max(0.0, min(100.0, float(item.progress_pct)))
 
         if on_toggle_completed is not None:
-            action_text = "Reopen" if item.is_completed else "Complete"
+            action_text = (
+                tr("dashboard.goal.reopen", "Открыть снова")
+                if item.is_completed
+                else tr("dashboard.goal.complete", "Завершить")
+            )
             ttk.Button(
                 card,
                 text=action_text,
@@ -494,14 +528,16 @@ def _render_goals_with_actions(
         if on_delete_goal is not None:
             ttk.Button(
                 card,
-                text="Delete",
+                text=tr("dashboard.goal.delete", "Удалить"),
                 command=lambda goal_progress=item: on_delete_goal(goal_progress),
             ).grid(row=0, column=3, sticky="e", padx=(8, 0))
 
         if item.goal.target_date:
             ttk.Label(
                 card,
-                text=f"Target date: {item.goal.target_date}",
+                text=tr(
+                    "dashboard.goal.target_date", "Целевая дата: {date}", date=item.goal.target_date
+                ),
                 foreground="#6b7280",
             ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
@@ -514,7 +550,11 @@ def show_bulk_asset_snapshot_dialog(
 ) -> None:
     assets = list(context.controller.get_assets(active_only=True))
     if not assets:
-        messagebox.showinfo("Bulk update", "There are no active assets to update.", parent=parent)
+        show_info(
+            tr("dashboard.bulk.no_assets", "Нет активных активов для обновления."),
+            title=tr("dashboard.bulk.title", "Массовое обновление"),
+            parent=parent,
+        )
         return
 
     latest_map = {
@@ -523,7 +563,7 @@ def show_bulk_asset_snapshot_dialog(
     }
 
     dialog = tk.Toplevel(parent)
-    dialog.title("Bulk Asset Snapshot Update")
+    dialog.title(tr("dashboard.bulk.title", "Массовое обновление"))
     dialog.transient(parent.winfo_toplevel())
     dialog.minsize(900, 500)
     dialog.resizable(True, True)
@@ -535,14 +575,21 @@ def show_bulk_asset_snapshot_dialog(
     content.grid_columnconfigure(0, weight=1)
     content.grid_rowconfigure(3, weight=1)
 
-    ttk.Label(content, text="Bulk Asset Snapshot Update", font=("Segoe UI", 11, "bold")).grid(
+    ttk.Label(
+        content,
+        text=tr("dashboard.bulk.title", "Массовое обновление"),
+        font=("Segoe UI", 11, "bold"),
+    ).grid(
         row=0,
         column=0,
         sticky="w",
     )
     ttk.Label(
         content,
-        text="Fill only the assets you want to update. Empty rows will be skipped.",
+        text=tr(
+            "dashboard.bulk.hint",
+            "Заполняйте только те активы, которые нужно обновить. Пустые строки будут пропущены.",
+        ),
         foreground="#6b7280",
     ).grid(row=1, column=0, sticky="w", pady=(4, 10))
 
@@ -550,12 +597,20 @@ def show_bulk_asset_snapshot_dialog(
     header.grid(row=2, column=0, sticky="ew")
     header.grid_columnconfigure(3, weight=1)
 
-    ttk.Label(header, text="Snapshot date:").grid(row=0, column=0, sticky="w")
+    ttk.Label(header, text=tr("dashboard.bulk.snapshot_date", "Дата снимка:")).grid(
+        row=0, column=0, sticky="w"
+    )
     snapshot_date_var = tk.StringVar(value=date.today().isoformat())
     snapshot_date_entry = ttk.Entry(header, width=14, textvariable=snapshot_date_var)
     snapshot_date_entry.grid(row=0, column=1, sticky="w", padx=(6, 16))
 
-    ttk.Label(header, text="Date applies to all filled rows.", foreground="#6b7280").grid(
+    ttk.Label(
+        header,
+        text=tr(
+            "dashboard.bulk.snapshot_date_hint", "Эта дата применяется ко всем заполненным строкам."
+        ),
+        foreground="#6b7280",
+    ).grid(
         row=0,
         column=2,
         sticky="w",
@@ -581,11 +636,11 @@ def show_bulk_asset_snapshot_dialog(
     rows.grid_columnconfigure(4, weight=1, minsize=260)
 
     titles = [
-        ("Asset", 0),
-        ("Current", 1),
-        ("Currency", 2),
-        ("New value", 3),
-        ("Note", 4),
+        (tr("dashboard.asset", "Актив"), 0),
+        (tr("dashboard.asset.current_value", "Текущее значение"), 1),
+        (tr("common.currency", "Валюта"), 2),
+        (tr("dashboard.asset.new_value", "Новое значение"), 3),
+        (tr("common.note", "Примечание"), 4),
     ]
     for title, column in titles:
         ttk.Label(rows, text=title, font=("Segoe UI", 9, "bold")).grid(
@@ -602,7 +657,7 @@ def show_bulk_asset_snapshot_dialog(
     for row_index, asset in enumerate(assets, start=1):
         visual_row = row_index * 2 - 1
         latest = latest_map.get(int(asset.id))
-        current_text = "No snapshot"
+        current_text = tr("dashboard.asset.no_snapshot", "Снимка нет")
         initial_value = ""
         if latest is not None:
             current_text = f"{_minor_to_money_text(int(latest.value_minor))} {latest.currency}"
@@ -668,7 +723,11 @@ def show_bulk_asset_snapshot_dialog(
 
     ttk.Label(
         content,
-        text="Tip: empty rows are ignored, so you can update only the assets you touched.",
+        text=tr(
+            "dashboard.bulk.tip",
+            "Подсказка: пустые строки игнорируются, поэтому можно обновлять только те активы, "
+            "которые вы изменяли.",
+        ),
         foreground="#6b7280",
     ).grid(row=4, column=0, sticky="w", pady=(14, 0))
 
@@ -699,23 +758,39 @@ def show_bulk_asset_snapshot_dialog(
                 note_by_asset_id={asset_id: var.get() for asset_id, var in note_vars.items()},
             )
             if not entries:
-                raise ValueError("Fill at least one value to save snapshots")
+                raise ValueError(
+                    tr(
+                        "dashboard.bulk.error.empty",
+                        "Заполните хотя бы одно значение для сохранения снимков.",
+                    )
+                )
             saved = context.controller.bulk_upsert_asset_snapshots(entries)
         except Exception as error:
             logger.warning("Bulk asset snapshot save error: %s", error)
-            messagebox.showerror("Bulk update error", str(error), parent=dialog)
+            show_error(
+                str(error),
+                title=tr("dashboard.bulk.error_title", "Ошибка массового обновления"),
+                parent=dialog,
+            )
             return
 
-        messagebox.showinfo(
-            "Bulk update",
-            f"Saved {len(saved)} snapshot(s).",
+        show_info(
+            tr("dashboard.bulk.saved", "Сохранено снимков: {count}.", count=len(saved)),
+            title=tr("dashboard.bulk.title", "Массовое обновление"),
             parent=dialog,
         )
         dialog.destroy()
         on_saved()
 
-    ttk.Button(buttons, text="Cancel", command=_close).pack(side=tk.LEFT, padx=(0, 8))
-    save_button = ttk.Button(buttons, text="Save snapshots", command=_save)
+    ttk.Button(buttons, text=tr("common.cancel", "Отмена"), command=_close).pack(
+        side=tk.LEFT, padx=(0, 8)
+    )
+    save_button = ttk.Button(
+        buttons,
+        text=tr("dashboard.bulk.save", "Сохранить снимки"),
+        style="Primary.TButton",
+        command=_save,
+    )
     save_button.pack(side=tk.LEFT)
 
     snapshot_date_var.trace_add("write", _validate_form)
@@ -728,16 +803,7 @@ def show_bulk_asset_snapshot_dialog(
     dialog.protocol("WM_DELETE_WINDOW", _close)
     dialog.update_idletasks()
 
-    parent_window = parent.winfo_toplevel()
-    parent_x = parent_window.winfo_rootx()
-    parent_y = parent_window.winfo_rooty()
-    parent_w = parent_window.winfo_width()
-    parent_h = parent_window.winfo_height()
-    width = max(dialog.winfo_width(), 760)
-    height = max(dialog.winfo_height(), 420)
-    pos_x = parent_x + max((parent_w - width) // 2, 0)
-    pos_y = parent_y + max((parent_h - height) // 2, 0)
-    dialog.geometry(f"{width}x{height}+{pos_x}+{pos_y}")
+    center_dialog(dialog, parent, min_width=760, min_height=420)
     dialog.grab_set()
     snapshot_date_entry.focus_set()
     parent.wait_window(dialog)
@@ -750,18 +816,21 @@ def show_create_goal_dialog(
     on_saved: Callable[[], None],
 ) -> None:
     dialog = tk.Toplevel(parent)
-    dialog.title("Create Goal")
+    dialog.title(tr("dashboard.goal.dialog.title", "Создание цели"))
     dialog.transient(parent.winfo_toplevel())
-    dialog.resizable(False, False)
+    dialog.grid_columnconfigure(0, weight=1)
+    dialog.grid_rowconfigure(0, weight=1)
 
     content = ttk.Frame(dialog, padding=12)
     content.grid(row=0, column=0, sticky="nsew")
     for column in (1, 3):
         content.grid_columnconfigure(column, weight=1)
 
-    ttk.Label(content, text="Create Goal", font=("Segoe UI", 11, "bold")).grid(
-        row=0, column=0, columnspan=4, sticky="w"
-    )
+    ttk.Label(
+        content,
+        text=tr("dashboard.goal.dialog.title", "Создание цели"),
+        font=("Segoe UI", 11, "bold"),
+    ).grid(row=0, column=0, columnspan=4, sticky="w")
 
     title_var = tk.StringVar()
     amount_var = tk.StringVar()
@@ -770,27 +839,37 @@ def show_create_goal_dialog(
     target_date_var = tk.StringVar()
     description_var = tk.StringVar()
 
-    ttk.Label(content, text="Title").grid(row=1, column=0, sticky="w", pady=(10, 0))
+    ttk.Label(content, text=tr("dashboard.goal.field.title", "Название")).grid(
+        row=1, column=0, sticky="w", pady=(10, 0)
+    )
     title_entry = ttk.Entry(content, textvariable=title_var, width=28)
     title_entry.grid(row=2, column=0, columnspan=2, sticky="ew", padx=(0, 10))
 
-    ttk.Label(content, text="Target amount").grid(row=1, column=2, sticky="w", pady=(10, 0))
+    ttk.Label(content, text=tr("dashboard.goal.field.amount", "Целевая сумма")).grid(
+        row=1, column=2, sticky="w", pady=(10, 0)
+    )
     amount_entry = ttk.Entry(content, textvariable=amount_var, width=16)
     amount_entry.grid(row=2, column=2, sticky="ew", padx=(0, 10))
 
-    ttk.Label(content, text="Currency").grid(row=1, column=3, sticky="w", pady=(10, 0))
+    ttk.Label(content, text=tr("dashboard.goal.field.currency", "Валюта")).grid(
+        row=1, column=3, sticky="w", pady=(10, 0)
+    )
     currency_entry = ttk.Entry(content, textvariable=currency_var, width=8)
     currency_entry.grid(row=2, column=3, sticky="ew")
 
-    ttk.Label(content, text="Created at").grid(row=3, column=0, sticky="w", pady=(10, 0))
+    ttk.Label(content, text=tr("dashboard.goal.field.created", "Дата создания")).grid(
+        row=3, column=0, sticky="w", pady=(10, 0)
+    )
     created_at_entry = ttk.Entry(content, textvariable=created_at_var, width=16)
     created_at_entry.grid(row=4, column=0, sticky="ew", padx=(0, 10))
 
-    ttk.Label(content, text="Target date").grid(row=3, column=1, sticky="w", pady=(10, 0))
+    ttk.Label(content, text=tr("dashboard.goal.field.target", "Целевая дата")).grid(
+        row=3, column=1, sticky="w", pady=(10, 0)
+    )
     target_date_entry = ttk.Entry(content, textvariable=target_date_var, width=16)
     target_date_entry.grid(row=4, column=1, sticky="ew", padx=(0, 10))
 
-    ttk.Label(content, text="Description").grid(
+    ttk.Label(content, text=tr("dashboard.goal.field.description", "Описание")).grid(
         row=3, column=2, columnspan=2, sticky="w", pady=(10, 0)
     )
     description_entry = ttk.Entry(content, textvariable=description_var)
@@ -798,7 +877,10 @@ def show_create_goal_dialog(
 
     ttk.Label(
         content,
-        text="Dates use YYYY-MM-DD. Target date may be empty.",
+        text=tr(
+            "dashboard.goal.dialog.hint",
+            "Используйте формат ГГГГ-ММ-ДД. Целевую дату можно не заполнять.",
+        ),
         foreground="#6b7280",
     ).grid(row=5, column=0, columnspan=4, sticky="w", pady=(8, 0))
     form_status = ttk.Label(content, foreground="#b45309")
@@ -835,13 +917,20 @@ def show_create_goal_dialog(
             context.controller.create_goal(**payload)
         except Exception as error:
             logger.warning("Goal create error: %s", error)
-            messagebox.showerror("Goal create error", str(error), parent=dialog)
+            show_error(str(error), title=tr("common.error", "Ошибка"), parent=dialog)
             return
         dialog.destroy()
         on_saved()
 
-    ttk.Button(buttons, text="Cancel", command=_close).pack(side=tk.LEFT, padx=(0, 8))
-    save_button = ttk.Button(buttons, text="Create goal", command=_save)
+    ttk.Button(buttons, text=tr("common.cancel", "Отмена"), command=_close).pack(
+        side=tk.LEFT, padx=(0, 8)
+    )
+    save_button = ttk.Button(
+        buttons,
+        text=tr("dashboard.create_goal", "Создать цель"),
+        style="Primary.TButton",
+        command=_save,
+    )
     save_button.pack(side=tk.LEFT)
 
     for var in (
@@ -858,16 +947,7 @@ def show_create_goal_dialog(
     dialog.protocol("WM_DELETE_WINDOW", _close)
     dialog.update_idletasks()
 
-    parent_window = parent.winfo_toplevel()
-    parent_x = parent_window.winfo_rootx()
-    parent_y = parent_window.winfo_rooty()
-    parent_w = parent_window.winfo_width()
-    parent_h = parent_window.winfo_height()
-    width = max(dialog.winfo_width(), 560)
-    height = max(dialog.winfo_height(), 220)
-    pos_x = parent_x + max((parent_w - width) // 2, 0)
-    pos_y = parent_y + max((parent_h - height) // 2, 0)
-    dialog.geometry(f"{width}x{height}+{pos_x}+{pos_y}")
+    center_dialog(dialog, parent, min_width=560, min_height=220)
     dialog.grab_set()
     title_entry.focus_set()
     parent.wait_window(dialog)
@@ -881,9 +961,14 @@ def show_asset_editor_dialog(
     on_saved: Callable[[], None],
 ) -> None:
     dialog = tk.Toplevel(parent)
-    dialog.title("Edit Asset" if initial_asset is not None else "Create Asset")
+    dialog.title(
+        tr("dashboard.asset.edit_title", "Редактирование актива")
+        if initial_asset is not None
+        else tr("dashboard.asset.create_title", "Создание актива")
+    )
     dialog.transient(parent.winfo_toplevel())
-    dialog.resizable(False, False)
+    dialog.grid_columnconfigure(0, weight=1)
+    dialog.grid_rowconfigure(0, weight=1)
 
     content = ttk.Frame(dialog, padding=12)
     content.grid(row=0, column=0, sticky="nsew")
@@ -908,15 +993,23 @@ def show_asset_editor_dialog(
 
     ttk.Label(
         content,
-        text="Edit Asset" if initial_asset is not None else "Create Asset",
+        text=(
+            tr("dashboard.asset.edit_title", "Редактирование актива")
+            if initial_asset is not None
+            else tr("dashboard.asset.create_title", "Создание актива")
+        ),
         font=("Segoe UI", 11, "bold"),
     ).grid(row=0, column=0, columnspan=4, sticky="w")
 
-    ttk.Label(content, text="Name").grid(row=1, column=0, sticky="w", pady=(10, 0))
+    ttk.Label(content, text=tr("common.name", "Название")).grid(
+        row=1, column=0, sticky="w", pady=(10, 0)
+    )
     name_entry = ttk.Entry(content, textvariable=name_var, width=28)
     name_entry.grid(row=2, column=0, columnspan=2, sticky="ew", padx=(0, 10))
 
-    ttk.Label(content, text="Category").grid(row=1, column=2, sticky="w", pady=(10, 0))
+    ttk.Label(content, text=tr("common.category_short", "Категория")).grid(
+        row=1, column=2, sticky="w", pady=(10, 0)
+    )
     category_combo = ttk.Combobox(
         content,
         textvariable=category_var,
@@ -926,17 +1019,21 @@ def show_asset_editor_dialog(
     )
     category_combo.grid(row=2, column=2, sticky="ew", padx=(0, 10))
 
-    ttk.Label(content, text="Currency").grid(row=1, column=3, sticky="w", pady=(10, 0))
+    ttk.Label(content, text=tr("common.currency", "Валюта")).grid(
+        row=1, column=3, sticky="w", pady=(10, 0)
+    )
     currency_entry = ttk.Entry(content, textvariable=currency_var, width=8)
     currency_entry.grid(row=2, column=3, sticky="ew")
 
-    ttk.Label(content, text="Created at").grid(row=3, column=0, sticky="w", pady=(10, 0))
+    ttk.Label(content, text=tr("common.created_at", "Дата создания")).grid(
+        row=3, column=0, sticky="w", pady=(10, 0)
+    )
     created_at_entry = ttk.Entry(content, textvariable=created_at_var, width=16)
     created_at_entry.grid(row=4, column=0, sticky="ew", padx=(0, 10))
     if initial_asset is not None:
         created_at_entry.state(["readonly"])
 
-    ttk.Label(content, text="Description").grid(
+    ttk.Label(content, text=tr("common.description", "Описание")).grid(
         row=3, column=1, columnspan=3, sticky="w", pady=(10, 0)
     )
     description_entry = ttk.Entry(content, textvariable=description_var)
@@ -945,9 +1042,12 @@ def show_asset_editor_dialog(
     ttk.Label(
         content,
         text=(
-            "Created at uses YYYY-MM-DD."
+            tr("dashboard.asset.created_hint", "Дата создания в формате ГГГГ-ММ-ДД.")
             if initial_asset is None
-            else "Created at is locked for existing assets."
+            else tr(
+                "dashboard.asset.created_readonly",
+                "Для существующего актива дата создания не редактируется.",
+            )
         ),
         foreground="#6b7280",
     ).grid(row=5, column=0, columnspan=4, sticky="w", pady=(8, 0))
@@ -980,7 +1080,10 @@ def show_asset_editor_dialog(
             != str(initial_asset.currency).strip().upper()
         ):
             currency_warning_var.set(
-                "Changing asset currency requires saving a new snapshot in the new currency."
+                tr(
+                    "dashboard.asset.currency_warning",
+                    "При смене валюты актива нужно сохранить новый снимок в новой валюте.",
+                )
             )
         else:
             currency_warning_var.set("")
@@ -1005,13 +1108,24 @@ def show_asset_editor_dialog(
                 context.controller.update_asset(initial_asset.id, **payload)
         except Exception as error:
             logger.warning("Asset save error: %s", error)
-            messagebox.showerror("Asset save error", str(error), parent=dialog)
+            show_error(
+                str(error),
+                title=tr("dashboard.asset.error.save_title", "Ошибка сохранения актива"),
+                parent=dialog,
+            )
             return
         dialog.destroy()
         on_saved()
 
-    ttk.Button(buttons, text="Cancel", command=_close).pack(side=tk.LEFT, padx=(0, 8))
-    save_button = ttk.Button(buttons, text="Save asset", command=_save)
+    ttk.Button(buttons, text=tr("common.cancel", "Отмена"), command=_close).pack(
+        side=tk.LEFT, padx=(0, 8)
+    )
+    save_button = ttk.Button(
+        buttons,
+        text=tr("dashboard.asset.save", "Сохранить актив"),
+        style="Primary.TButton",
+        command=_save,
+    )
     save_button.pack(side=tk.LEFT)
 
     tracked_vars = [name_var, category_var, currency_var, description_var]
@@ -1024,16 +1138,7 @@ def show_asset_editor_dialog(
     dialog.protocol("WM_DELETE_WINDOW", _close)
     dialog.update_idletasks()
 
-    parent_window = parent.winfo_toplevel()
-    parent_x = parent_window.winfo_rootx()
-    parent_y = parent_window.winfo_rooty()
-    parent_w = parent_window.winfo_width()
-    parent_h = parent_window.winfo_height()
-    width = max(dialog.winfo_width(), 560)
-    height = max(dialog.winfo_height(), 220)
-    pos_x = parent_x + max((parent_w - width) // 2, 0)
-    pos_y = parent_y + max((parent_h - height) // 2, 0)
-    dialog.geometry(f"{width}x{height}+{pos_x}+{pos_y}")
+    center_dialog(dialog, parent, min_width=560, min_height=220)
     dialog.grab_set()
     name_entry.focus_set()
     parent.wait_window(dialog)
@@ -1046,18 +1151,22 @@ def show_manage_assets_dialog(
     on_saved: Callable[[], None],
 ) -> None:
     dialog = tk.Toplevel(parent)
-    dialog.title("Manage Assets")
+    dialog.title(tr("dashboard.assets.manage_title", "Управление активами"))
     dialog.transient(parent.winfo_toplevel())
     dialog.minsize(760, 360)
+    dialog.grid_columnconfigure(0, weight=1)
+    dialog.grid_rowconfigure(0, weight=1)
 
     content = ttk.Frame(dialog, padding=12)
     content.grid(row=0, column=0, sticky="nsew")
     content.grid_columnconfigure(0, weight=1)
     content.grid_rowconfigure(1, weight=1)
 
-    ttk.Label(content, text="Manage Assets", font=("Segoe UI", 11, "bold")).grid(
-        row=0, column=0, sticky="w"
-    )
+    ttk.Label(
+        content,
+        text=tr("dashboard.assets.manage_title", "Управление активами"),
+        font=("Segoe UI", 11, "bold"),
+    ).grid(row=0, column=0, sticky="w")
 
     tree = ttk.Treeview(
         content,
@@ -1066,11 +1175,11 @@ def show_manage_assets_dialog(
         height=10,
     )
     tree.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
-    tree.heading("name", text="Name")
-    tree.heading("category", text="Category")
-    tree.heading("currency", text="Currency")
-    tree.heading("created_at", text="Created")
-    tree.heading("status", text="Status")
+    tree.heading("name", text=tr("common.name", "Название"))
+    tree.heading("category", text=tr("common.category_short", "Категория"))
+    tree.heading("currency", text=tr("common.currency", "Валюта"))
+    tree.heading("created_at", text=tr("common.created_short", "Создан"))
+    tree.heading("status", text=tr("common.status", "Статус"))
     tree.column("name", width=220)
     tree.column("category", width=100)
     tree.column("currency", width=80, anchor="center")
@@ -1081,8 +1190,23 @@ def show_manage_assets_dialog(
     actions.grid(row=2, column=0, sticky="ew", pady=(12, 0))
 
     assets_by_id: dict[str, Asset] = {}
-    edit_button = ttk.Button(actions, text="Edit", command=lambda: _edit_asset())
-    deactivate_button = ttk.Button(actions, text="Deactivate", command=lambda: _deactivate_asset())
+    edit_button = ttk.Button(
+        actions, text=tr("common.edit", "Редактировать"), command=lambda: _edit_asset()
+    )
+    deactivate_button = ttk.Button(
+        actions,
+        text=tr("dashboard.asset.deactivate", "Деактивировать"),
+        command=lambda: _deactivate_asset(),
+    )
+
+    def _block_separator_resize(event: tk.Event) -> str | None:
+        if isinstance(event.widget, ttk.Treeview):
+            region = event.widget.identify_region(event.x, event.y)
+            if region == "separator":
+                return "break"
+        return None
+
+    tree.bind("<Button-1>", _block_separator_resize)
 
     def _selected_asset() -> Asset | None:
         selected = tree.selection()
@@ -1110,7 +1234,9 @@ def show_manage_assets_dialog(
                     str(asset.category.value),
                     str(asset.currency),
                     str(asset.created_at),
-                    "Active" if bool(asset.is_active) else "Inactive",
+                    tr("common.active", "Активен")
+                    if bool(asset.is_active)
+                    else tr("common.inactive", "Неактивен"),
                 ),
             )
         _refresh_action_state()
@@ -1123,7 +1249,11 @@ def show_manage_assets_dialog(
     def _edit_asset() -> None:
         asset = _selected_asset()
         if asset is None:
-            messagebox.showinfo("Manage Assets", "Select an asset to edit.", parent=dialog)
+            show_info(
+                tr("dashboard.asset.select_edit", "Сначала выберите актив для редактирования."),
+                title=tr("dashboard.assets.manage_title", "Управление активами"),
+                parent=dialog,
+            )
             return
         show_asset_editor_dialog(
             dialog, context=context, initial_asset=asset, on_saved=_after_change
@@ -1132,16 +1262,22 @@ def show_manage_assets_dialog(
     def _deactivate_asset() -> None:
         asset = _selected_asset()
         if asset is None:
-            messagebox.showinfo("Manage Assets", "Select an asset to deactivate.", parent=dialog)
+            show_info(
+                tr("dashboard.asset.select_deactivate", "Сначала выберите актив для деактивации."),
+                title=tr("dashboard.assets.manage_title", "Управление активами"),
+                parent=dialog,
+            )
             return
         if not bool(asset.is_active):
-            messagebox.showinfo(
-                "Manage Assets", "Selected asset is already inactive.", parent=dialog
+            show_info(
+                tr("dashboard.asset.already_inactive", "Выбранный актив уже неактивен."),
+                title=tr("dashboard.assets.manage_title", "Управление активами"),
+                parent=dialog,
             )
             return
         confirmed = messagebox.askyesno(
-            "Deactivate Asset",
-            f"Deactivate asset '{asset.name}'?",
+            "Деактивация актива",
+            f"Деактивировать актив '{asset.name}'?",
             parent=dialog,
         )
         if not confirmed:
@@ -1150,7 +1286,7 @@ def show_manage_assets_dialog(
             context.controller.deactivate_asset(asset.id)
         except Exception as error:
             logger.warning("Asset deactivate error: %s", error)
-            messagebox.showerror("Asset deactivate error", str(error), parent=dialog)
+            show_error(str(error), title="Ошибка деактивации актива", parent=dialog)
             return
         _after_change()
 
@@ -1158,25 +1294,23 @@ def show_manage_assets_dialog(
         _refresh_assets()
         on_saved()
 
-    ttk.Button(actions, text="Create", command=_create_asset).pack(side=tk.LEFT)
+    ttk.Button(
+        actions,
+        text=tr("common.create", "Создать"),
+        style="Primary.TButton",
+        command=_create_asset,
+    ).pack(side=tk.LEFT)
     edit_button.pack(side=tk.LEFT, padx=(8, 0))
     deactivate_button.pack(side=tk.LEFT, padx=(8, 0))
-    ttk.Button(actions, text="Close", command=dialog.destroy).pack(side=tk.RIGHT)
+    ttk.Button(actions, text=tr("debts.close", "Закрыть"), command=dialog.destroy).pack(
+        side=tk.RIGHT
+    )
 
     tree.bind("<<TreeviewSelect>>", _refresh_action_state)
     _refresh_assets()
     dialog.update_idletasks()
 
-    parent_window = parent.winfo_toplevel()
-    parent_x = parent_window.winfo_rootx()
-    parent_y = parent_window.winfo_rooty()
-    parent_w = parent_window.winfo_width()
-    parent_h = parent_window.winfo_height()
-    width = max(dialog.winfo_width(), 760)
-    height = max(dialog.winfo_height(), 360)
-    pos_x = parent_x + max((parent_w - width) // 2, 0)
-    pos_y = parent_y + max((parent_h - height) // 2, 0)
-    dialog.geometry(f"{width}x{height}+{pos_x}+{pos_y}")
+    center_dialog(dialog, parent, min_width=760, min_height=360)
     dialog.grab_set()
     parent.wait_window(dialog)
 
@@ -1187,90 +1321,124 @@ def build_dashboard_tab(
     context: DashboardTabContext,
 ) -> DashboardTabBindings:
     parent.grid_columnconfigure(0, weight=1)
-    parent.grid_rowconfigure(1, weight=1)
-    parent.grid_rowconfigure(2, weight=1)
+    parent.grid_rowconfigure(1, weight=5, minsize=390)
+    parent.grid_rowconfigure(2, weight=1, minsize=170)
 
     toolbar = ttk.Frame(parent)
     toolbar.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 6))
-    toolbar.grid_columnconfigure(5, weight=1)
+    toolbar.grid_columnconfigure(0, weight=1)
 
-    ttk.Label(toolbar, text="Strategic Dashboard", font=("Segoe UI", 12, "bold")).grid(
-        row=0, column=0, sticky="w"
-    )
     ttk.Label(
         toolbar,
-        text="Quick actions:",
+        text=tr("dashboard.title", "Дашборд активов и целей"),
+        font=("Segoe UI", 12, "bold"),
+    ).grid(row=0, column=0, sticky="w")
+    action_row = ttk.Frame(toolbar)
+    action_row.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+    ttk.Label(
+        action_row,
+        text=tr("dashboard.quick_actions", "Быстрые действия:"),
         foreground="#6b7280",
-    ).grid(row=0, column=1, sticky="e", padx=(16, 8))
-    create_asset_button = ttk.Button(toolbar, text="Create Asset")
-    create_asset_button.grid(row=0, column=2, sticky="e", padx=(0, 8))
-    manage_assets_button = ttk.Button(toolbar, text="Manage Assets")
-    manage_assets_button.grid(row=0, column=3, sticky="e", padx=(0, 8))
-    create_goal_button = ttk.Button(toolbar, text="Create Goal")
-    create_goal_button.grid(row=0, column=4, sticky="e", padx=(0, 8))
-    bulk_update_button = ttk.Button(toolbar, text="Bulk Update Assets")
-    bulk_update_button.grid(row=0, column=5, sticky="e", padx=(0, 8))
-    refresh_button = ttk.Button(toolbar, text="Refresh")
-    refresh_button.grid(row=0, column=6, sticky="e")
+    ).pack(side=tk.LEFT)
+    create_asset_button = ttk.Button(
+        action_row,
+        text=tr("dashboard.create_asset", "Создать актив"),
+        style="Primary.TButton",
+    )
+    create_asset_button.pack(side=tk.LEFT, padx=(12, 8))
+    manage_assets_button = ttk.Button(
+        action_row,
+        text=tr("dashboard.manage_assets", "Управление активами"),
+    )
+    manage_assets_button.pack(side=tk.LEFT, padx=(0, 8))
+    create_goal_button = ttk.Button(action_row, text=tr("dashboard.create_goal", "Создать цель"))
+    create_goal_button.pack(side=tk.LEFT, padx=(0, 8))
+    bulk_update_button = ttk.Button(
+        action_row,
+        text=tr("dashboard.bulk_update", "Обновить активы"),
+    )
+    bulk_update_button.pack(side=tk.LEFT, padx=(0, 8))
+    refresh_button = ttk.Button(action_row, text=tr("common.refresh", "Обновить"))
+    refresh_button.pack(side=tk.LEFT)
 
-    summary_frame = ttk.LabelFrame(parent, text="Overview")
+    summary_frame = ttk.LabelFrame(parent, text=tr("dashboard.overview", "Обзор"))
     summary_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 8))
     for column in range(3):
         summary_frame.grid_columnconfigure(column, weight=1)
+    summary_frame.grid_rowconfigure(4, weight=1)
 
     net_worth_label = ttk.Label(
         summary_frame,
-        text="Net worth: -",
+        text=tr("dashboard.net_worth", "Чистый капитал: {amount}", amount="-"),
         font=("Segoe UI", 14, "bold"),
     )
     net_worth_label.grid(row=0, column=0, sticky="w", padx=12, pady=(12, 4))
 
     assets_total_label = ttk.Label(
         summary_frame,
-        text="Assets total: -",
+        text=tr("dashboard.assets_total", "Активы всего: {amount}", amount="-"),
         font=("Segoe UI", 14, "bold"),
     )
     assets_total_label.grid(row=0, column=1, sticky="w", padx=12, pady=(12, 4))
 
     goals_status_label = ttk.Label(
         summary_frame,
-        text="Goals: -",
+        text=tr(
+            "dashboard.goals_status",
+            "Цели: {completed} / {total} завершено",
+            completed="-",
+            total="-",
+        ),
         font=("Segoe UI", 14, "bold"),
     )
     goals_status_label.grid(row=0, column=2, sticky="w", padx=12, pady=(12, 4))
 
     assets_status_label = ttk.Label(
         summary_frame,
-        text="Assets: -",
+        text=tr(
+            "dashboard.assets_status",
+            "Активы: {active} активных / {total} всего",
+            active="-",
+            total="-",
+        ),
         foreground="#6b7280",
     )
     assets_status_label.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 4))
 
-    trend_label = ttk.Label(summary_frame, text="Net Worth Trend", font=("Segoe UI", 10, "bold"))
+    trend_label = ttk.Label(
+        summary_frame,
+        text=tr("dashboard.trend.title", "Динамика капитала"),
+        font=("Segoe UI", 10, "bold"),
+    )
     trend_label.grid(row=2, column=0, columnspan=2, sticky="w", padx=12, pady=(8, 0))
     ttk.Label(
         summary_frame,
-        text="Compact monthly path for fast capital check.",
+        text=tr("dashboard.trend.hint", "Краткая помесячная динамика капитала."),
         foreground="#6b7280",
     ).grid(row=3, column=0, columnspan=2, sticky="w", padx=12)
 
     allocation_label = ttk.Label(
-        summary_frame, text="Asset Allocation", font=("Segoe UI", 10, "bold")
+        summary_frame,
+        text=tr("dashboard.allocation.title", "Структура активов"),
+        font=("Segoe UI", 10, "bold"),
     )
     allocation_label.grid(row=2, column=2, sticky="w", padx=12, pady=(8, 0))
     ttk.Label(
         summary_frame,
-        text="Active assets grouped by category.",
+        text=tr(
+            "dashboard.allocation.hint",
+            "Активные активы, сгруппированные по категориям.",
+        ),
         foreground="#6b7280",
     ).grid(row=3, column=2, sticky="w", padx=12)
 
-    trend_canvas = tk.Canvas(summary_frame, height=220, bg="white", highlightthickness=0)
+    trend_canvas = tk.Canvas(summary_frame, height=260, bg="white", highlightthickness=0)
     trend_canvas.grid(row=4, column=0, columnspan=2, sticky="nsew", padx=(12, 6), pady=(6, 12))
 
-    allocation_canvas = tk.Canvas(summary_frame, height=220, bg="white", highlightthickness=0)
+    allocation_canvas = tk.Canvas(summary_frame, height=260, bg="white", highlightthickness=0)
     allocation_canvas.grid(row=4, column=2, sticky="nsew", padx=(6, 12), pady=(6, 12))
 
-    goals_frame = ttk.LabelFrame(parent, text="Goals")
+    goals_frame = ttk.LabelFrame(parent, text=tr("dashboard.goals.title", "Цели"))
     goals_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
     goals_frame.grid_columnconfigure(0, weight=1)
     goals_frame.grid_rowconfigure(1, weight=1)
@@ -1278,11 +1446,16 @@ def build_dashboard_tab(
     goals_header = ttk.Frame(goals_frame)
     goals_header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 0))
     goals_header.grid_columnconfigure(0, weight=1)
-    ttk.Label(
+    goals_hint_label = ttk.Label(
         goals_header,
-        text="Track progress and complete goals directly from this view.",
+        text=tr(
+            "dashboard.goals.hint",
+            "Следите за прогрессом и меняйте статус целей прямо отсюда.",
+        ),
         foreground="#6b7280",
-    ).grid(row=0, column=0, sticky="w")
+    )
+    goals_hint_label.grid(row=0, column=0, sticky="ew")
+    bind_label_wrap(goals_hint_label, goals_header, max_width=720)
 
     goals_canvas = tk.Canvas(goals_frame, bg="white", highlightthickness=0)
     goals_canvas.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=10)
@@ -1330,19 +1503,34 @@ def build_dashboard_tab(
             all_assets = list(context.controller.get_assets(active_only=False))
             active_assets = [asset for asset in all_assets if bool(asset.is_active)]
             net_worth_label.config(
-                text=f"Net worth: {_format_money(payload.summary.net_worth_kzt)}"
+                text=tr(
+                    "dashboard.net_worth",
+                    "Чистый капитал: {amount}",
+                    amount=_format_money(payload.summary.net_worth_kzt),
+                )
             )
             assets_total_label.config(
-                text=f"Assets total: {_format_money(payload.summary.assets_total_kzt)}"
+                text=tr(
+                    "dashboard.assets_total",
+                    "Активы всего: {amount}",
+                    amount=_format_money(payload.summary.assets_total_kzt),
+                )
             )
             goals_status_label.config(
-                text=(
-                    f"Goals: {payload.summary.goals_completed} / "
-                    f"{payload.summary.goals_total} completed"
+                text=tr(
+                    "dashboard.goals_status",
+                    "Цели: {completed} / {total} завершено",
+                    completed=payload.summary.goals_completed,
+                    total=payload.summary.goals_total,
                 )
             )
             assets_status_label.config(
-                text=f"Assets: {len(active_assets)} active / {len(all_assets)} total"
+                text=tr(
+                    "dashboard.assets_status",
+                    "Активы: {active} активных / {total} всего",
+                    active=len(active_assets),
+                    total=len(all_assets),
+                )
             )
             _render_goals_with_actions(
                 goals_inner,
@@ -1354,7 +1542,7 @@ def build_dashboard_tab(
             _redraw()
         except Exception as error:
             logger.warning("Dashboard refresh error: %s", error)
-            messagebox.showerror("Dashboard error", str(error))
+            show_error(str(error), title="Ошибка дашборда")
 
     def _toggle_goal_completed(goal_progress: GoalProgress) -> None:
         goal = goal_progress.goal
@@ -1363,15 +1551,15 @@ def build_dashboard_tab(
             context.controller.set_goal_completed(goal.id, completed)
         except Exception as error:
             logger.warning("Goal completion toggle error: %s", error)
-            messagebox.showerror("Goal update error", str(error), parent=parent)
+            show_error(str(error), title="Ошибка обновления цели", parent=parent)
             return
         _refresh()
 
     def _delete_goal(goal_progress: GoalProgress) -> None:
         goal = goal_progress.goal
         confirmed = messagebox.askyesno(
-            "Delete Goal",
-            f"Delete goal '{goal.title}'?",
+            tr("common.confirm", "Подтверждение"),
+            tr("dashboard.goal.delete.confirm", "Удалить цель '{title}'?", title=goal.title),
             parent=parent,
         )
         if not confirmed:
@@ -1380,7 +1568,7 @@ def build_dashboard_tab(
             context.controller.delete_goal(goal.id)
         except Exception as error:
             logger.warning("Goal delete error: %s", error)
-            messagebox.showerror("Goal delete error", str(error), parent=parent)
+            show_error(str(error), title="Ошибка удаления цели", parent=parent)
             return
         _refresh()
 

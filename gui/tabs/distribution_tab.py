@@ -12,6 +12,7 @@ from tkinter import messagebox, simpledialog, ttk
 from typing import Any, Protocol
 
 from domain.distribution import DistributionItem, FrozenDistributionRow, MonthlyDistribution
+from gui.i18n import tr
 from gui.tooltip import Tooltip
 
 logger = logging.getLogger(__name__)
@@ -56,9 +57,11 @@ def build_distribution_tab(
     right_frame.grid_columnconfigure(0, weight=1)
     right_frame.grid_rowconfigure(1, weight=1)
 
-    ttk.Label(left_frame, text="Distribution Structure", font=("Segoe UI", 11, "bold")).grid(
-        row=0, column=0, sticky="w", padx=8, pady=(0, 6)
-    )
+    ttk.Label(
+        left_frame,
+        text=tr("distribution.structure.title", "Структура распределения"),
+        font=("Segoe UI", 11, "bold"),
+    ).grid(row=0, column=0, sticky="w", padx=8, pady=(0, 6))
 
     structure_wrap = ttk.Frame(left_frame)
     structure_wrap.grid(row=1, column=0, sticky="nsew", padx=8)
@@ -71,12 +74,12 @@ def build_distribution_tab(
         show="tree headings",
         height=18,
     )
-    structure_tree.heading("#0", text="Name")
+    structure_tree.heading("#0", text=tr("common.name", "Название"))
     structure_tree.heading("pct", text="%")
-    structure_tree.heading("group", text="Group")
+    structure_tree.heading("group", text=tr("common.group", "Группа"))
     structure_tree.column("#0", width=240, anchor="w", stretch=False)
     structure_tree.column("pct", width=70, anchor="center", stretch=False)
-    structure_tree.column("group", width=140, anchor="w", stretch=False)
+    structure_tree.column("group", width=180, minwidth=160, anchor="w", stretch=True)
     structure_tree.tag_configure("group_header", foreground="#1f4e79", font=("Segoe UI", 9, "bold"))
     structure_tree.tag_configure("item", foreground="#111827")
     structure_tree.tag_configure("subitem", foreground="#2563eb")
@@ -99,18 +102,20 @@ def build_distribution_tab(
     title_row = ttk.Frame(right_frame)
     title_row.grid(row=0, column=0, sticky="ew", padx=8, pady=(0, 6))
     title_row.grid_columnconfigure(0, weight=1)
-    ttk.Label(title_row, text="Distribution Table", font=("Segoe UI", 11, "bold")).grid(
-        row=0, column=0, sticky="w"
-    )
+    ttk.Label(
+        title_row,
+        text=tr("distribution.table.title", "Таблица распределения"),
+        font=("Segoe UI", 11, "bold"),
+    ).grid(row=0, column=0, sticky="w")
 
     toolbar = ttk.Frame(title_row)
     toolbar.grid(row=0, column=1, sticky="e")
     period_from_var = tk.StringVar(value=_default_start())
     period_to_var = tk.StringVar(value=_default_end())
 
-    ttk.Label(toolbar, text="From:").pack(side=tk.LEFT)
+    ttk.Label(toolbar, text=tr("common.from_short", "С:")).pack(side=tk.LEFT)
     ttk.Entry(toolbar, textvariable=period_from_var, width=9).pack(side=tk.LEFT, padx=(4, 8))
-    ttk.Label(toolbar, text="To:").pack(side=tk.LEFT)
+    ttk.Label(toolbar, text=tr("common.to_short", "По:")).pack(side=tk.LEFT)
     ttk.Entry(toolbar, textvariable=period_to_var, width=9).pack(side=tk.LEFT, padx=(4, 8))
 
     results_wrap = ttk.Frame(right_frame)
@@ -143,16 +148,17 @@ def build_distribution_tab(
     footer_row = ttk.Frame(right_frame)
     footer_row.grid(row=2, column=0, sticky="ew", padx=8, pady=(6, 0))
     footer_row.grid_columnconfigure(1, weight=1)
-    fix_button = ttk.Button(footer_row, text="Fix Row")
+    fix_button = ttk.Button(footer_row, text=tr("distribution.fix", "Зафиксировать строку"))
     fix_button.grid(row=0, column=0, sticky="w")
     status_label = ttk.Label(footer_row, text="")
     status_label.grid(row=0, column=1, sticky="w", padx=(12, 0))
     Tooltip(
         status_label,
-        (
-            "Shows the visible month range and how many rows are currently fixed.\n"
-            "Closed past months are auto-fixed when snapshots are queried.\n"
-            "Auto-fixed rows are protected and cannot be unfixed manually."
+        tr(
+            "distribution.tooltip.status",
+            "Показывает видимый диапазон месяцев и количество зафиксированных строк.\n"
+            "Закрытые прошлые месяцы автоматически фиксируются при запросе снимков.\n"
+            "Автофиксированные строки защищены и не снимаются вручную.",
         ),
     )
 
@@ -165,6 +171,50 @@ def build_distribution_tab(
 
     def _bind_fixed_width_columns(tree: ttk.Treeview) -> None:
         tree.bind("<Button-1>", _block_separator_resize, add="+")
+
+    def _fit_structure_columns(_event: tk.Event | None = None) -> None:
+        total_width = max(structure_tree.winfo_width(), 0)
+        if total_width <= 1:
+            return
+        name_width = 240
+        pct_width = 70
+        slack = 6
+        group_width = max(160, total_width - name_width - pct_width - slack)
+        structure_tree.column("#0", width=name_width, minwidth=name_width, stretch=False)
+        structure_tree.column("pct", width=pct_width, minwidth=pct_width, stretch=False)
+        structure_tree.column("group", width=group_width, minwidth=160, anchor="w", stretch=False)
+
+    def _fit_results_columns(_event: tk.Event | None = None) -> None:
+        column_ids = list(results_tree.cget("columns"))
+        total_width = max(results_tree.winfo_width(), 0)
+        if total_width <= 1 or not column_ids:
+            return
+
+        base_widths: dict[str, int] = {}
+        for column_id in column_ids:
+            if column_id == "month":
+                base_widths[column_id] = 84
+            elif column_id == "fixed":
+                base_widths[column_id] = 72
+            elif column_id == "net_income":
+                base_widths[column_id] = 130
+            elif column_id.startswith("sub_"):
+                base_widths[column_id] = 92
+            else:
+                base_widths[column_id] = 96
+
+        if len(column_ids) == 1:
+            results_tree.column(column_ids[0], width=max(total_width - 6, 80), stretch=False)
+            return
+
+        slack = 6
+        trailing_id = column_ids[-1]
+        fixed_total = sum(base_widths[column_id] for column_id in column_ids[:-1])
+        trailing_width = max(base_widths[trailing_id], total_width - fixed_total - slack)
+
+        for column_id in column_ids[:-1]:
+            results_tree.column(column_id, width=base_widths[column_id], stretch=False)
+        results_tree.column(trailing_id, width=trailing_width, stretch=False)
 
     def _accelerated_units(delta: int, *, multiplier: int = 10) -> int:
         if delta == 0:
@@ -196,14 +246,16 @@ def build_distribution_tab(
         widget.bind("<Shift-Button-5>", _on_results_shift_button5, add="+")
 
     _bind_fixed_width_columns(structure_tree)
-    _bind_fixed_width_columns(results_tree)
+    # _bind_fixed_width_columns(results_tree)
+    structure_tree.bind("<Configure>", _fit_structure_columns, add="+")
+    results_tree.bind("<Configure>", _fit_results_columns, add="+")
 
     def _build_live_column_meta(items: list[DistributionItem]) -> tuple[list[str], dict[str, str]]:
         column_ids = ["month", "fixed", "net_income"]
         headings = {
-            "month": "Month",
-            "fixed": "Fixed",
-            "net_income": "Net income",
+            "month": tr("common.month", "Месяц"),
+            "fixed": tr("distribution.fixed", "Фиксация"),
+            "net_income": tr("distribution.net_income", "Чистый доход"),
         }
         for item in items:
             item_key = f"item_{item.id}"
@@ -244,7 +296,10 @@ def build_distribution_tab(
         errors = context.controller.validate_distribution()
         if not errors:
             validation_label.config(
-                text="Structure is valid: top-level items and subitems sum to 100.00%",
+                text=tr(
+                    "distribution.validation.ok",
+                    "Структура корректна: верхний уровень и подэлементы суммарно дают 100.00%",
+                ),
                 foreground="#166534",
             )
             return
@@ -264,12 +319,12 @@ def build_distribution_tab(
 
         grouped: dict[str, list[DistributionItem]] = defaultdict(list)
         for item in items:
-            grouped[item.group_name or "Ungrouped"].append(item)
+            grouped[item.group_name or tr("common.ungrouped", "Без группы")].append(item)
 
         for group_name in sorted(grouped, key=str.casefold):
             group_items = grouped[group_name]
             parent_iid = ""
-            if len(group_items) > 1 or group_name != "Ungrouped":
+            if len(group_items) > 1 or group_name != tr("common.ungrouped", "Без группы"):
                 parent_iid = structure_tree.insert(
                     "",
                     "end",
@@ -298,6 +353,7 @@ def build_distribution_tab(
                         tags=("subitem",),
                     )
 
+        _fit_structure_columns()
         _refresh_validation()
 
     def _configure_results_columns(column_ids: list[str], headings: dict[str, str]) -> None:
@@ -310,6 +366,7 @@ def build_distribution_tab(
             anchor = "center" if is_fixed else ("w" if is_month else "e")
             results_tree.heading(column_id, text=headings[column_id])
             results_tree.column(column_id, width=width, anchor=anchor, stretch=False)
+        _fit_results_columns()
 
     def _distribution_row_values_map(
         distribution: MonthlyDistribution,
@@ -367,17 +424,24 @@ def build_distribution_tab(
                 columns=("month", "fixed", "net_income"),
                 displaycolumns=("month", "fixed", "net_income"),
             )
-            results_tree.heading("month", text="Month")
-            results_tree.heading("fixed", text="Fixed")
-            results_tree.heading("net_income", text="Net income")
-            results_tree.column("month", width=60, anchor="w", stretch=False)
-            results_tree.column("fixed", width=50, anchor="center", stretch=False)
-            results_tree.column("net_income", width=90, anchor="e", stretch=False)
+            results_tree.heading("month", text=tr("common.month", "Месяц"))
+            results_tree.heading("fixed", text=tr("distribution.fixed", "Фиксация"))
+            results_tree.heading("net_income", text=tr("distribution.net_income", "Чистый доход"))
+            results_tree.column("month", width=80, minwidth=80, anchor="w", stretch=False)
+            results_tree.column("fixed", width=80, minwidth=80, anchor="center", stretch=False)
+            results_tree.column("net_income", width=130, minwidth=130, anchor="e", stretch=False)
+            _fit_results_columns()
             status_label.config(
-                text="No distribution items yet. Add structure on the left to populate the table.",
+                text=tr(
+                    "distribution.empty",
+                    "Элементов распределения пока нет. "
+                    "Добавьте структуру слева, чтобы заполнить таблицу.",
+                ),
                 foreground="",
             )
-            fix_button.configure(state=tk.DISABLED, text="Fix Row")
+            fix_button.configure(
+                state=tk.DISABLED, text=tr("distribution.fix", "Зафиксировать строку")
+            )
             return
 
         column_ids, headings = _compose_column_meta(items, visible_fixed_rows)
@@ -407,9 +471,17 @@ def build_distribution_tab(
             )
 
         fixed_count = sum(1 for row in visible_fixed_rows if row.month in visible_months)
-        status_text = f"Showing {len(visible_months)} month(s) from {start_month} to {end_month}"
+        status_text = tr(
+            "distribution.status.range",
+            "Показано месяцев: {count}, период {start} — {end}",
+            count=len(visible_months),
+            start=start_month,
+            end=end_month,
+        )
         if fixed_count:
-            status_text += f" | fixed: {fixed_count}"
+            status_text += tr(
+                "distribution.status.fixed", " | зафиксировано: {count}", count=fixed_count
+            )
         status_label.config(text=f"{status_text} ⓘ", foreground="")
         _update_fix_button_state()
 
@@ -422,25 +494,32 @@ def build_distribution_tab(
     def _update_fix_button_state(_event: tk.Event | None = None) -> None:
         month = _selected_result_month()
         if month is None:
-            fix_button.configure(text="Fix Row", state=tk.DISABLED)
+            fix_button.configure(
+                text=tr("distribution.fix", "Зафиксировать строку"), state=tk.DISABLED
+            )
             return
         if context.controller.is_distribution_month_auto_fixed(month):
-            fix_button.configure(text="Auto Fixed", state=tk.DISABLED)
+            fix_button.configure(text=tr("distribution.auto_fixed", "Автофикс"), state=tk.DISABLED)
             return
         button_text = (
-            "Unfix Row" if context.controller.is_distribution_month_fixed(month) else "Fix Row"
+            tr("distribution.unfix", "Снять фиксацию")
+            if context.controller.is_distribution_month_fixed(month)
+            else tr("distribution.fix", "Зафиксировать строку")
         )
         fix_button.configure(text=button_text, state=tk.NORMAL)
 
     def _toggle_fixed_row() -> None:
         month = _selected_result_month()
         if month is None:
-            messagebox.showerror("Selection Required", "Select a month row in the table first.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr("distribution.error.select_month", "Сначала выберите месяц в таблице."),
+            )
             return
         try:
             context.controller.toggle_distribution_month_fixed(month)
         except ValueError as exc:
-            messagebox.showinfo("Distribution", str(exc), parent=parent)
+            messagebox.showinfo(tr("tab.distribution", "Распределение"), str(exc), parent=parent)
             _update_fix_button_state()
             return
         _refresh_results()
@@ -461,15 +540,31 @@ def build_distribution_tab(
         try:
             return float(normalized)
         except ValueError:
-            messagebox.showerror("Invalid Percentage", "Percentage must be a number.")
+            messagebox.showerror(
+                tr("distribution.error.percent_title", "Некорректный процент"),
+                tr("distribution.error.percent_number", "Процент должен быть числом."),
+            )
             return None
 
     def _add_item() -> None:
-        name = simpledialog.askstring("New Item", "Item name:", parent=parent)
+        name = simpledialog.askstring(
+            tr("distribution.dialog.new_item", "Новый элемент"),
+            tr("distribution.dialog.item_name", "Название элемента:"),
+            parent=parent,
+        )
         if not name:
             return
-        group_name = simpledialog.askstring("Group", "Optional group name:", parent=parent)
-        pct = _ask_pct("Percentage", "Percent of total monthly cashflow:")
+        group_name = simpledialog.askstring(
+            tr("common.group", "Группа"),
+            tr("distribution.dialog.group_name", "Необязательное имя группы:"),
+            parent=parent,
+        )
+        pct = _ask_pct(
+            tr("distribution.dialog.percent", "Процент"),
+            tr(
+                "distribution.dialog.percent_total", "Процент от общего месячного денежного потока:"
+            ),
+        )
         if pct is None:
             return
         try:
@@ -479,41 +574,65 @@ def build_distribution_tab(
                 pct=pct,
             )
         except ValueError as exc:
-            messagebox.showerror("Distribution Error", str(exc))
+            messagebox.showerror(tr("tab.distribution", "Распределение"), str(exc))
             return
         _refresh_all()
 
     def _add_subitem() -> None:
         item_id = _selected_item_id()
         if item_id is None:
-            messagebox.showerror("Selection Required", "Select a top-level item first.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr(
+                    "distribution.error.select_top_level",
+                    "Сначала выберите элемент верхнего уровня.",
+                ),
+            )
             return
-        name = simpledialog.askstring("New Subitem", "Subitem name:", parent=parent)
+        name = simpledialog.askstring(
+            tr("distribution.dialog.new_subitem", "Новый подэлемент"),
+            tr("distribution.dialog.subitem_name", "Название подэлемента:"),
+            parent=parent,
+        )
         if not name:
             return
-        pct = _ask_pct("Percentage", "Percent of the parent item:")
+        pct = _ask_pct(
+            tr("distribution.dialog.percent", "Процент"),
+            tr("distribution.dialog.percent_parent", "Процент от родительского элемента:"),
+        )
         if pct is None:
             return
         try:
             context.controller.create_distribution_subitem(item_id, name, pct=pct)
         except ValueError as exc:
-            messagebox.showerror("Distribution Error", str(exc))
+            messagebox.showerror(tr("tab.distribution", "Распределение"), str(exc))
             return
         _refresh_all()
 
     def _edit_pct() -> None:
         selection = structure_tree.selection()
         if not selection:
-            messagebox.showerror("Selection Required", "Select an item or subitem first.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr("distribution.error.select_item", "Сначала выберите элемент или подэлемент."),
+            )
             return
         iid = selection[0]
         if not (iid.startswith("item_") or iid.startswith("sub_")):
             messagebox.showerror(
-                "Selection Required", "Select an item or subitem, not a group header."
+                tr("common.error", "Ошибка"),
+                tr(
+                    "distribution.error.select_not_group",
+                    "Выберите элемент или подэлемент, а не заголовок группы.",
+                ),
             )
             return
         current_value = str(structure_tree.item(iid, "values")[0]).rstrip("%").strip() or "0.00"
-        pct = _ask_pct("Edit Percentage", "New percentage:", initialvalue=current_value)
+        pct = _ask_pct(
+            tr("distribution.dialog.edit_percent", "Изменить процент"),
+            tr("distribution.dialog.new_percent", "Новый процент:"),
+            initialvalue=current_value,
+        )
         if pct is None:
             return
         try:
@@ -522,19 +641,32 @@ def build_distribution_tab(
             else:
                 context.controller.update_distribution_subitem_pct(int(iid.split("_", 1)[1]), pct)
         except ValueError as exc:
-            messagebox.showerror("Distribution Error", str(exc))
+            messagebox.showerror(
+                tr("distribution.error.title", "Ошибка распределения"),
+                str(exc),
+            )
             return
         _refresh_all()
 
     def _rename() -> None:
         selection = structure_tree.selection()
         if not selection:
-            messagebox.showerror("Selection Required", "Select an item or subitem first.")
+            messagebox.showerror(
+                tr("distribution.error.selection_title", "Требуется выбор"),
+                tr(
+                    "distribution.error.selection_item_or_subitem",
+                    "Сначала выберите элемент или подэлемент.",
+                ),
+            )
             return
         iid = selection[0]
         if not (iid.startswith("item_") or iid.startswith("sub_")):
             messagebox.showerror(
-                "Selection Required", "Select an item or subitem, not a group header."
+                tr("distribution.error.selection_title", "Требуется выбор"),
+                tr(
+                    "distribution.error.selection_not_group_header",
+                    "Выберите элемент или подэлемент, а не заголовок группы.",
+                ),
             )
             return
         current_name = structure_tree.item(iid, "text").strip()
@@ -557,24 +689,46 @@ def build_distribution_tab(
                     new_name,
                 )
         except ValueError as exc:
-            messagebox.showerror("Distribution Error", str(exc))
+            messagebox.showerror(
+                tr("distribution.error.title", "Ошибка распределения"),
+                str(exc),
+            )
             return
         _refresh_all()
 
     def _delete_selected() -> None:
         selection = structure_tree.selection()
         if not selection:
-            messagebox.showerror("Selection Required", "Select an item or subitem to delete.")
+            messagebox.showerror(
+                tr("distribution.error.selection_title", "Требуется выбор"),
+                tr(
+                    "distribution.error.selection_delete_item",
+                    "Выберите элемент или подэлемент для удаления.",
+                ),
+            )
             return
         iid = selection[0]
         if not (iid.startswith("item_") or iid.startswith("sub_")):
-            messagebox.showerror("Selection Required", "Group headers cannot be deleted directly.")
+            messagebox.showerror(
+                tr("distribution.error.selection_title", "Требуется выбор"),
+                tr(
+                    "distribution.error.delete_group_header_forbidden",
+                    "Заголовки групп нельзя удалять напрямую.",
+                ),
+            )
             return
         name = structure_tree.item(iid, "text").strip()
-        message = f"Delete '{name}'?"
+        message = tr("distribution.confirm.delete_item", "Удалить '{name}'?", name=name)
         if iid.startswith("item_"):
-            message += "\nAll child subitems will be deleted as well."
-        if not messagebox.askyesno("Confirm Delete", message, parent=parent):
+            message += "\n" + tr(
+                "distribution.confirm.delete_item_with_children",
+                "Все дочерние подэлементы также будут удалены.",
+            )
+        if not messagebox.askyesno(
+            tr("distribution.confirm.delete_title", "Подтвердите удаление"),
+            message,
+            parent=parent,
+        ):
             return
         try:
             if iid.startswith("item_"):
@@ -582,16 +736,43 @@ def build_distribution_tab(
             else:
                 context.controller.delete_distribution_subitem(int(iid.split("_", 1)[1]))
         except ValueError as exc:
-            messagebox.showerror("Distribution Error", str(exc))
+            messagebox.showerror(
+                tr("distribution.error.title", "Ошибка распределения"),
+                str(exc),
+            )
             return
         _refresh_all()
 
-    ttk.Button(buttons, text="+ Item", command=_add_item).pack(side=tk.LEFT, padx=(0, 4))
-    ttk.Button(buttons, text="+ Subitem", command=_add_subitem).pack(side=tk.LEFT, padx=4)
-    ttk.Button(buttons, text="Edit %", command=_edit_pct).pack(side=tk.LEFT, padx=4)
-    ttk.Button(buttons, text="Rename", command=_rename).pack(side=tk.LEFT, padx=4)
-    ttk.Button(buttons, text="Delete", command=_delete_selected).pack(side=tk.LEFT, padx=4)
-    ttk.Button(toolbar, text="Refresh", command=_refresh_all).pack(side=tk.LEFT, padx=(4, 0))
+    ttk.Button(
+        buttons,
+        text=tr("distribution.button.add_item", "+ Элемент"),
+        command=_add_item,
+    ).pack(side=tk.LEFT, padx=(0, 4))
+    ttk.Button(
+        buttons,
+        text=tr("distribution.button.add_subitem", "+ Подэлемент"),
+        command=_add_subitem,
+    ).pack(side=tk.LEFT, padx=4)
+    ttk.Button(
+        buttons,
+        text=tr("distribution.button.edit_percent", "Изменить %"),
+        command=_edit_pct,
+    ).pack(side=tk.LEFT, padx=4)
+    ttk.Button(
+        buttons,
+        text=tr("distribution.button.rename", "Переименовать"),
+        command=_rename,
+    ).pack(side=tk.LEFT, padx=4)
+    ttk.Button(
+        buttons,
+        text=tr("distribution.button.delete", "Удалить"),
+        command=_delete_selected,
+    ).pack(side=tk.LEFT, padx=4)
+    ttk.Button(
+        toolbar,
+        text=tr("distribution.button.refresh", "Обновить"),
+        command=_refresh_all,
+    ).pack(side=tk.LEFT, padx=(4, 0))
     fix_button.configure(command=_toggle_fixed_row, state=tk.DISABLED)
     results_tree.bind("<<TreeviewSelect>>", _update_fix_button_state, add="+")
 

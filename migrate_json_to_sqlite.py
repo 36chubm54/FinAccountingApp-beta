@@ -1154,7 +1154,7 @@ def _mandatory_signatures_from_sqlite(sqlite_storage: SQLiteStorage) -> list[tup
     return [
         (
             int(row[0]),
-            str(row[1]),
+            str(row[1] or ""),
             int(row[2]),
             int(row[3]),
             str(row[4]).upper(),

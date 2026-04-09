@@ -2,7 +2,7 @@
 
 Графическое приложение для персонального финансового учёта с мультивалютностью, импортом/экспортом, бюджетами, долгами, активами и целями.
 
-Текущий релиз `v1.10.1` закрепляет `Assets / Goals / Dashboard` как стабильный слой: поверх `v1.10.0` он усиливает import/backup/migration paths, исправляет rollback и нормализацию связей, делает batch/file writes атомарнее и жёстче валидирует битые JSON payloads до записи в хранилище.
+Текущий релиз `v1.11.0` фокусируется на полировке интерфейса и локализации: обновлена единая blue-minimal тема, добавлены внешние языковые пакеты (`ru/en`), расширено покрытие переводов по вкладкам/диалогам (включая enum-статусы в `Budget/Debts`), улучшена адаптивность таблиц/графиков при компактных размерах окна, а запуск на Windows получил HiDPI-aware поведение для Tk и системных file dialogs.
 
 ## 🚀 Быстрый старт
 
@@ -59,6 +59,8 @@ python main.py
 - Wealth layer: `Assets`, `Goals`, wealth `Dashboard`
 - Full backup / import / migration для `JSON` ↔ `SQLite`
 - Read-only Data Audit Engine для проверки консистентности данных
+- Внешние языковые пакеты `locales/*.txt` и единый i18n-loader с fallback-цепочкой
+- Поддержка пользовательской иконки окна (`.ico` + `iconphoto` fallback) и подготовка к иконке будущего `exe`
 
 ## 🖥️ Вкладки приложения
 
@@ -86,6 +88,7 @@ python main.py
 
 - `utils` — форматы импорта/экспорта, PDF/XLSX helpers, money helpers, charting
 - `tests` — regression и contract coverage для domain/app/services/gui/import-export flows
+- `.gitattributes` — нормализация line endings (`LF`) для снижения шума в кроссплатформенных диффах
 
 ## 🔌 Ключевые точки расширения
 
