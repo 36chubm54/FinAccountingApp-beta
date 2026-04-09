@@ -100,7 +100,7 @@ def test_debts_tab_create_and_pay_flow(tmp_path: Path) -> None:
             patch("gui.tabs.debts_tab.messagebox.showerror"),
             patch("gui.tabs.debts_tab.messagebox.askyesno", return_value=True),
         ):
-            save_button = _find_button(parent, "Save")
+            save_button = _find_button(parent, "Сохранить")
             assert save_button is not None
             save_button.invoke()
             root.update_idletasks()
@@ -115,7 +115,7 @@ def test_debts_tab_create_and_pay_flow(tmp_path: Path) -> None:
             action_amount_entry.insert(0, "100")
             action_date_entry.delete(0, tk.END)
             action_date_entry.insert(0, "2026-03-02")
-            pay_button = _find_button(parent, "Pay")
+            pay_button = _find_button(parent, "Погасить")
             assert pay_button is not None
             pay_button.invoke()
             root.update_idletasks()
@@ -154,15 +154,15 @@ def test_debts_tab_delete_confirmation_explains_records_are_kept(tmp_path: Path)
             patch("gui.tabs.debts_tab.messagebox.showerror"),
             patch("gui.tabs.debts_tab.messagebox.askyesno", return_value=False) as askyesno,
         ):
-            delete_button = _find_button(parent, "Delete")
+            delete_button = _find_button(parent, "Удалить")
             assert delete_button is not None
             delete_button.invoke()
             root.update_idletasks()
 
         askyesno.assert_called_once()
         _, prompt = askyesno.call_args.args
-        assert "payment history only" in prompt
-        assert "Linked income/expense records and wallet balances will stay unchanged." in prompt
+        assert "историю платежей" in prompt
+        assert "останутся без изменений" in prompt
         assert len(controller.get_debts()) == 1
     finally:
         repo.close()

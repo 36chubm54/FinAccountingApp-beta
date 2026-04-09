@@ -423,12 +423,12 @@ def test_analytics_tab_net_worth_uses_period_end_date() -> None:
         refresh_button = next(
             child
             for child in parent.winfo_children()[0].winfo_children()
-            if isinstance(child, ttk.Button) and child.cget("text") == "Refresh"
+            if isinstance(child, ttk.Button) and child.cget("text") == "Обновить"
         )
         refresh_button.invoke()
         context.update()
 
         assert context.controller.total_balance_dates[-1] == "2026-01-31"
-        assert bindings.net_worth_label.cget("text") == "Net worth:  1,234 KZT"
+        assert bindings.net_worth_label.cget("text") == "Чистый капитал:  1,234 KZT"
     finally:
         context.destroy()

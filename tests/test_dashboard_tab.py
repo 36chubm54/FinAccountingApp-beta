@@ -239,10 +239,10 @@ def test_dashboard_tab_refresh_renders_payload() -> None:
         context.update()
 
         assert context.controller.called >= 1
-        assert bindings.net_worth_label.cget("text") == "Net worth: 1,250,000 KZT"
-        assert bindings.assets_total_label.cget("text") == "Assets total: 450,000 KZT"
-        assert bindings.goals_status_label.cget("text") == "Goals: 0 / 1 completed"
-        assert bindings.assets_status_label.cget("text") == "Assets: 1 active / 2 total"
+        assert bindings.net_worth_label.cget("text") == "Чистый капитал: 1,250,000 KZT"
+        assert bindings.assets_total_label.cget("text") == "Активы всего: 450,000 KZT"
+        assert bindings.goals_status_label.cget("text") == "Цели: 0 / 1 завершено"
+        assert bindings.assets_status_label.cget("text") == "Активы: 1 активных / 2 всего"
         assert len(bindings.trend_canvas.find_all()) > 0
         assert len(bindings.allocation_canvas.find_all()) > 0
         assert bindings.goals_canvas.cget("yscrollcommand")
@@ -267,16 +267,16 @@ def test_dashboard_tab_goal_complete_button_updates_goal_state() -> None:
         bindings.refresh()
         context.update()
 
-        goal_buttons = _find_buttons(bindings.goals_canvas, "Complete")
+        goal_buttons = _find_buttons(bindings.goals_canvas, "Завершить")
         assert len(goal_buttons) == 1
 
         goal_buttons[0].invoke()
         context.update()
 
         assert context.controller.goal_toggle_calls == [(1, True)]
-        assert bindings.goals_status_label.cget("text") == "Goals: 1 / 1 completed"
+        assert bindings.goals_status_label.cget("text") == "Цели: 1 / 1 завершено"
 
-        reopen_buttons = _find_buttons(bindings.goals_canvas, "Reopen")
+        reopen_buttons = _find_buttons(bindings.goals_canvas, "Открыть снова")
         assert len(reopen_buttons) == 1
     finally:
         context.destroy()
@@ -590,9 +590,9 @@ def test_dashboard_create_goal_button_is_wired() -> None:
         parent = ttk.Frame(context)
         parent.grid()
         bindings = build_dashboard_tab(parent, context=context)
-        assert bindings.create_goal_button.cget("text") == "Create Goal"
-        assert bindings.create_asset_button.cget("text") == "Create Asset"
-        assert bindings.manage_assets_button.cget("text") == "Manage Assets"
+        assert bindings.create_goal_button.cget("text") == "Создать цель"
+        assert bindings.create_asset_button.cget("text") == "Создать актив"
+        assert bindings.manage_assets_button.cget("text") == "Управление активами"
     finally:
         context.destroy()
 
@@ -614,7 +614,7 @@ def test_dashboard_tab_goal_delete_button_is_rendered() -> None:
         bindings.refresh()
         context.update()
 
-        delete_buttons = _find_buttons(bindings.goals_canvas, "Delete")
+        delete_buttons = _find_buttons(bindings.goals_canvas, "Удалить")
 
         assert len(delete_buttons) == 1
     finally:
