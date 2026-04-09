@@ -174,6 +174,47 @@ def test_migration_moves_all_data_and_preserves_ids(tmp_path) -> None:
     sqlite_storage.close()
 
 
+def test_migration_accepts_empty_mandatory_dates_as_equivalent(tmp_path) -> None:
+    json_path = tmp_path / "data_empty_mandatory_date.json"
+    sqlite_path = tmp_path / "records_empty_mandatory_date.db"
+    schema_path = Path(__file__).resolve().parents[1] / "db" / "schema.sql"
+
+    repo = JsonFileRecordRepository(str(json_path))
+    repo.replace_all_data(
+        initial_balance=0.0,
+        wallets=[
+            Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=0.0, system=True)
+        ],
+        records=[],
+        mandatory_expenses=[
+            MandatoryExpenseRecord(
+                id=1,
+                date="",
+                wallet_id=1,
+                amount_original=50.0,
+                currency="KZT",
+                rate_at_operation=1.0,
+                amount_kzt=50.0,
+                category="Mandatory",
+                description="No date",
+                period="monthly",
+                auto_pay=False,
+            )
+        ],
+        transfers=[],
+    )
+
+    args = Namespace(
+        json_path=str(json_path),
+        sqlite_path=str(sqlite_path),
+        schema_path=str(schema_path),
+        dry_run=False,
+    )
+
+    code = run_migration(args)
+    assert code == 0
+
+
 def test_migration_is_safe_to_rerun_on_equivalent_dataset(tmp_path) -> None:
     json_path = tmp_path / "records.json"
     sqlite_path = tmp_path / "records.db"

@@ -12,6 +12,7 @@ from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStat
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
 from domain.reports import Report
 from domain.transfers import Transfer
+from domain.wallets import Wallet
 from gui import exporters, importers
 
 
@@ -305,7 +306,7 @@ def test_import_full_backup_exposes_debts_and_payments_without_breaking_legacy_u
             is_write_off=False,
             payment_date="2026-04-02",
         )
-        record = IncomeRecord(
+        sample_record = IncomeRecord(
             id=1,
             date="2026-04-02",
             wallet_id=1,
@@ -320,7 +321,7 @@ def test_import_full_backup_exposes_debts_and_payments_without_breaking_legacy_u
         exporters.export_full_backup(
             str(json_path),
             wallets=[],
-            records=[record],
+            records=[sample_record],
             mandatory_expenses=[],
             debts=[debt],
             debt_payments=[payment],
@@ -336,6 +337,7 @@ def test_import_full_backup_exposes_debts_and_payments_without_breaking_legacy_u
         wallets, records, mandatory, transfers, summary = imported
 
         assert len(wallets) == 1
+        assert isinstance(wallets[0], Wallet)
         assert wallets[0].system is True
         assert len(records) == 1
         assert mandatory == []

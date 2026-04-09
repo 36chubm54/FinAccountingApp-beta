@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 from unittest.mock import patch
 
@@ -190,6 +191,59 @@ def test_export_to_json_can_skip_autofreeze_for_background_export(tmp_path) -> N
 
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["distribution_snapshots"] == []
+
+
+def test_export_to_json_uses_consistent_sqlite_snapshot(tmp_path, monkeypatch) -> None:
+    sqlite_path = tmp_path / "finance_snapshot.db"
+    json_path = tmp_path / "data.json"
+    schema = _schema_path()
+
+    repo = SQLiteRecordRepository(str(sqlite_path), schema_path=schema)
+    repo.save_wallet(
+        Wallet(
+            id=1,
+            name="Main wallet",
+            currency="KZT",
+            initial_balance=0.0,
+            system=True,
+            allow_negative=False,
+            is_active=True,
+        )
+    )
+    repo.commit()
+    repo.close()
+
+    original_load_assets = SQLiteRecordRepository.load_assets
+    mutated = False
+
+    def _load_assets_and_mutate(self, *args, **kwargs):
+        nonlocal mutated
+        result = original_load_assets(self, *args, **kwargs)
+        if not mutated:
+            mutated = True
+            conn = sqlite3.connect(sqlite_path)
+            try:
+                conn.execute("PRAGMA foreign_keys = OFF")
+                conn.execute(
+                    """
+                    INSERT INTO asset_snapshots (
+                        id, asset_id, snapshot_date, value_minor, currency, note
+                    )
+                    VALUES (1, 999, '2026-04-01', 100, 'KZT', 'late write')
+                    """
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        return result
+
+    monkeypatch.setattr(SQLiteRecordRepository, "load_assets", _load_assets_and_mutate)
+
+    export_to_json(str(sqlite_path), str(json_path), schema_path=schema)
+
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["assets"] == []
+    assert payload["asset_snapshots"] == []
 
 
 def test_prune_backups(tmp_path):

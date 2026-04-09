@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import shutil
+import sqlite3
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -95,43 +96,66 @@ def export_to_json(
     from services.distribution_service import DistributionService
 
     sqlite_repo = SQLiteRecordRepository(sqlite_path, schema_path=schema_path)
+    snapshot_path = None
     try:
-        budget_service = BudgetService(sqlite_repo)
-        distribution_service = DistributionService(sqlite_repo)
+        live_distribution_service = DistributionService(sqlite_repo)
         if autofreeze_closed_months:
-            distribution_service.freeze_closed_months()
-        distribution_items, distribution_subitems_by_item = distribution_service.export_structure()
-        wallets = sqlite_repo.load_wallets()
-        records = sqlite_repo.load_all()
-        transfers = sqlite_repo.load_transfers()
-        mandatory_expenses = sqlite_repo.load_mandatory_expenses()
-        debts = sqlite_repo.load_debts()
-        debt_payments = sqlite_repo.load_debt_payments()
-        assets = sqlite_repo.load_assets()
-        asset_snapshots = sqlite_repo.load_asset_snapshots()
-        goals = sqlite_repo.load_goals()
-        export_full_backup_to_json(
-            json_path,
-            wallets=wallets,
-            records=records,
-            mandatory_expenses=mandatory_expenses,
-            budgets=budget_service.get_budgets(),
-            debts=debts,
-            debt_payments=debt_payments,
-            assets=assets,
-            asset_snapshots=asset_snapshots,
-            goals=goals,
-            distribution_items=distribution_items,
-            distribution_subitems=[
-                subitem
-                for item_id in sorted(distribution_subitems_by_item)
-                for subitem in distribution_subitems_by_item[item_id]
-            ],
-            distribution_snapshots=distribution_service.get_frozen_rows(),
-            transfers=transfers,
-            readonly=False,
-            storage_mode="sqlite",
-        )
+            live_distribution_service.freeze_closed_months()
+
+        snapshot_fd, snapshot_path = tempfile.mkstemp(suffix=".db")
+        os.close(snapshot_fd)
+        snapshot_conn = sqlite3.connect(snapshot_path)
+        try:
+            sqlite_repo._conn.backup(snapshot_conn)
+            snapshot_conn.commit()
+        finally:
+            snapshot_conn.close()
+
+        snapshot_repo = SQLiteRecordRepository(snapshot_path, schema_path=schema_path)
+        try:
+            budget_service = BudgetService(snapshot_repo)
+            distribution_service = DistributionService(snapshot_repo)
+            distribution_items, distribution_subitems_by_item = (
+                distribution_service.export_structure()
+            )
+            wallets = snapshot_repo.load_wallets()
+            records = snapshot_repo.load_all()
+            transfers = snapshot_repo.load_transfers()
+            mandatory_expenses = snapshot_repo.load_mandatory_expenses()
+            debts = snapshot_repo.load_debts()
+            debt_payments = snapshot_repo.load_debt_payments()
+            assets = snapshot_repo.load_assets()
+            asset_snapshots = snapshot_repo.load_asset_snapshots()
+            goals = snapshot_repo.load_goals()
+            export_full_backup_to_json(
+                json_path,
+                wallets=wallets,
+                records=records,
+                mandatory_expenses=mandatory_expenses,
+                budgets=budget_service.get_budgets(),
+                debts=debts,
+                debt_payments=debt_payments,
+                assets=assets,
+                asset_snapshots=asset_snapshots,
+                goals=goals,
+                distribution_items=distribution_items,
+                distribution_subitems=[
+                    subitem
+                    for item_id in sorted(distribution_subitems_by_item)
+                    for subitem in distribution_subitems_by_item[item_id]
+                ],
+                distribution_snapshots=distribution_service.get_frozen_rows(),
+                transfers=transfers,
+                readonly=False,
+                storage_mode="sqlite",
+            )
+        finally:
+            snapshot_repo.close()
         logger.info("SQLite exported to JSON: %s", json_path)
     finally:
         sqlite_repo.close()
+        if snapshot_path is not None:
+            try:
+                Path(snapshot_path).unlink(missing_ok=True)
+            except Exception:
+                logger.exception("Failed to remove SQLite export snapshot: %s", snapshot_path)
