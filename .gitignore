@@ -6,11 +6,20 @@ tests/_tmp/
 .pytest_tmp/
 .obsidian/
 .vscode/
+
+# Icons
 *.png
+!app.png
+*.ico
+!app.ico
+
+# Data files
 *.csv
 *.xlsx
 *.pdf
 *.json
+
+# Database files
 *.db
 *.db-shm
 *.db-wal

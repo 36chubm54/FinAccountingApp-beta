@@ -7,6 +7,48 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.11.0] - 2026-04-08
+
+### Added
+
+- Added external localization packs in `locales/ru.txt` and `locales/en.txt` with unified `tr(...)` lookups for shell/tabs/dialogs
+- Added `gui/i18n.py` language loader with safe fallback behavior (`selected language -> ru -> default`)
+- Added shared GUI theming/util modules: `gui/ui_theme.py`, `gui/ui_helpers.py`, `gui/ui_text.py`
+- Added `.gitattributes` to normalize text/source line endings and reduce cross-platform CRLF/LF noise
+- Added Windows DPI-awareness bootstrap in app startup to keep Tk + native file dialogs sharp on HiDPI displays
+
+### Changed
+
+- Refreshed Tkinter UI to a soft-blue minimal style: calmer contrast, unified controls, updated status bar, notebook/treeview/scrollbar/checkbutton states
+- Reworked Settings inline panels to use consistent two-column layout with equal-width action rows (`Create/Edit/Add to records`)
+- Improved Distribution tables so columns stretch to the right edge in both empty and populated states
+- Improved dashboard/infographics chart layout behavior for compact window sizes and better axis/legend visibility
+- Localized Distribution action buttons and messagebox flows to eliminate hardcoded UI strings
+- Replaced raw enum values in Debts/Budget tables with localized labels for kind/status/pace values
+- Added application icon hooks (`.ico` + `iconphoto` fallback) for the top-left window icon and future EXE packaging
+
+### Fixed
+
+- Fixed multiple mixed-language GUI tails by routing remaining tab/shell strings through i18n keys
+- Fixed Dashboard tab render issues caused by geometry conflicts and tightened chart area allocation
+- Fixed stale default hover colors from `clam` (brown accents) by enforcing blue palette mappings in ttk style maps
+- Fixed fragile GUI test behavior in incomplete Tcl/Tk environments by introducing deterministic Tk availability guards in tests
+- Hardened DPI bootstrap exception handling on unsupported/non-Windows environments so startup never fails because of DPI API calls
+
+### Tests
+
+- Added/updated localization coverage for language-pack parsing and fallback behavior
+- Extended GUI regression checks for dashboard/debts/analytics flows under the refreshed UI layer
+- GUI Tk tests now skip cleanly when Tcl/Tk runtime files are unavailable, preventing environment-only red builds
+
+### Docs
+
+- Updated `README.md` and `README_EN.md` for `v1.11.0`, external language packs, UI polish, and test-environment guardrails
+
+No breaking changes.
+
+---
+
 ## [1.10.1] - 2026-04-07
 
 ### Fixed
