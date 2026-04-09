@@ -4,6 +4,9 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import VERTICAL, ttk
 
+from gui.i18n import tr
+from gui.ui_helpers import center_dialog
+
 
 def safe_destroy(widget) -> None:
     if widget is None:
@@ -31,27 +34,37 @@ def show_import_preview_dialog(
     force: bool = False,
 ) -> bool:
     dialog = tk.Toplevel(parent)
-    dialog.title("Import Preview (Dry-Run)")
+    dialog.title(tr("operations.preview.title", "Предпросмотр импорта"))
     dialog.transient(parent.winfo_toplevel())
-    dialog.resizable(False, False)
+    dialog.grid_columnconfigure(0, weight=1)
+    dialog.grid_rowconfigure(0, weight=1)
 
     result = {"confirmed": False}
     content = ttk.Frame(dialog, padding=12)
     content.grid(row=0, column=0, sticky="nsew")
     content.grid_columnconfigure(0, weight=1)
 
-    ttk.Label(content, text="Import Preview (Dry-Run)", font=("Segoe UI", 11, "bold")).grid(
-        row=0, column=0, sticky="w"
-    )
-    ttk.Label(content, text=f"File: {Path(filepath).name}").grid(
-        row=1, column=0, sticky="w", pady=(8, 0)
-    )
-    ttk.Label(content, text=f"Policy: {policy_label}").grid(row=2, column=0, sticky="w")
+    ttk.Label(
+        content,
+        text=tr("operations.preview.title", "Предпросмотр импорта"),
+        font=("Segoe UI", 11, "bold"),
+    ).grid(row=0, column=0, sticky="w")
+    ttk.Label(
+        content,
+        text=tr("operations.preview.file", "Файл: {name}", name=Path(filepath).name),
+    ).grid(row=1, column=0, sticky="w", pady=(8, 0))
+    ttk.Label(
+        content,
+        text=tr("operations.preview.mode", "Режим: {mode}", mode=policy_label),
+    ).grid(row=2, column=0, sticky="w")
 
     if force:
         ttk.Label(
             content,
-            text="Readonly snapshot: force override is active.",
+            text=tr(
+                "operations.preview.force",
+                "Это снимок только для чтения. Принудительная замена включена.",
+            ),
             foreground="#b45309",
         ).grid(row=3, column=0, sticky="w", pady=(8, 0))
         stats_row = 4
@@ -61,14 +74,22 @@ def show_import_preview_dialog(
     stats = ttk.Frame(content)
     stats.grid(row=stats_row, column=0, sticky="ew", pady=(10, 0))
     stats.grid_columnconfigure(1, weight=1)
-    ttk.Label(stats, text="Records to import:").grid(row=0, column=0, sticky="w")
+    ttk.Label(stats, text=tr("operations.preview.imported", "Записей к импорту:")).grid(
+        row=0, column=0, sticky="w"
+    )
     ttk.Label(stats, text=str(preview.imported)).grid(row=0, column=1, sticky="e")
-    ttk.Label(stats, text="Skipped rows:").grid(row=1, column=0, sticky="w")
+    ttk.Label(stats, text=tr("operations.preview.skipped", "Пропущено строк:")).grid(
+        row=1, column=0, sticky="w"
+    )
     ttk.Label(stats, text=str(preview.skipped)).grid(row=1, column=1, sticky="e")
-    ttk.Label(stats, text="Errors:").grid(row=2, column=0, sticky="w")
+    ttk.Label(stats, text=tr("operations.preview.errors", "Ошибок:")).grid(
+        row=2, column=0, sticky="w"
+    )
     ttk.Label(stats, text=str(len(preview.errors))).grid(row=2, column=1, sticky="e")
 
-    ttk.Label(content, text="Errors:").grid(row=stats_row + 1, column=0, sticky="w", pady=(10, 4))
+    ttk.Label(content, text=tr("operations.preview.errors", "Ошибки:")).grid(
+        row=stats_row + 1, column=0, sticky="w", pady=(10, 4)
+    )
     errors_frame = ttk.Frame(content)
     errors_frame.grid(row=stats_row + 2, column=0, sticky="ew")
     errors_frame.grid_columnconfigure(0, weight=1)
@@ -82,7 +103,9 @@ def show_import_preview_dialog(
     errors_scroll = ttk.Scrollbar(errors_frame, orient=VERTICAL, command=errors_tree.yview)
     errors_scroll.grid(row=0, column=1, sticky="ns")
     errors_tree.config(yscrollcommand=errors_scroll.set)
-    for error in preview.errors or ["No validation errors."]:
+    for error in preview.errors or [
+        tr("operations.preview.no_errors", "Ошибок валидации не найдено.")
+    ]:
         errors_tree.insert("", "end", text=error)
 
     buttons = ttk.Frame(content)
@@ -95,24 +118,19 @@ def show_import_preview_dialog(
         result["confirmed"] = True
         dialog.destroy()
 
-    ttk.Button(buttons, text="Cancel", command=close).pack(side=tk.LEFT, padx=(0, 8))
+    ttk.Button(buttons, text=tr("common.cancel", "Отмена"), command=close).pack(
+        side=tk.LEFT, padx=(0, 8)
+    )
     if preview.imported > 0:
-        ttk.Button(buttons, text="Proceed with Import", command=proceed).pack(side=tk.LEFT)
+        ttk.Button(
+            buttons,
+            text=tr("operations.import", "Импорт"),
+            style="Primary.TButton",
+            command=proceed,
+        ).pack(side=tk.LEFT)
 
     dialog.protocol("WM_DELETE_WINDOW", close)
-    dialog.update_idletasks()
-
-    parent_window = parent.winfo_toplevel()
-    parent_x = parent_window.winfo_rootx()
-    parent_y = parent_window.winfo_rooty()
-    parent_w = parent_window.winfo_width()
-    parent_h = parent_window.winfo_height()
-    width = dialog.winfo_width()
-    height = dialog.winfo_height()
-    pos_x = parent_x + max((parent_w - width) // 2, 0)
-    pos_y = parent_y + max((parent_h - height) // 2, 0)
-    dialog.geometry(f"+{pos_x}+{pos_y}")
-
+    center_dialog(dialog, parent)
     dialog.grab_set()
     parent.wait_window(dialog)
     return bool(result["confirmed"])

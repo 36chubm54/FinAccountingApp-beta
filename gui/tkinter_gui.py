@@ -3,14 +3,19 @@ import tkinter as tk
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, datetime
-from tkinter import messagebox, ttk
+from pathlib import Path
+from tkinter import ttk
 from typing import Any
 
 from app.services import CurrencyService
 from bootstrap import bootstrap_repository, run_post_startup_maintenance
 from domain.import_policy import ImportPolicy
 from gui.controllers import FinancialController
+from gui.i18n import tr
 from gui.record_colors import KIND_TO_FOREGROUND, foreground_for_kind
+from gui.ui_helpers import show_error, show_info
+from gui.ui_text import app_title, get_import_formats, get_tab_titles
+from gui.ui_theme import bootstrap_ui
 from utils.charting import (
     aggregate_daily_cashflow,
     aggregate_expenses_by_category,
@@ -22,19 +27,40 @@ from version import __version__
 
 logger = logging.getLogger(__name__)
 
-IMPORT_FORMATS = {
-    "CSV": {"ext": ".csv", "desc": "CSV"},
-    "XLSX": {"ext": ".xlsx", "desc": "Excel"},
-    "JSON": {"ext": ".json", "desc": "JSON"},
-}
-
 
 class FinancialApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Financial Accounting")
-        self.geometry("1100x800")
-        self.minsize(900, 600)
+        bootstrap_ui(self)
+
+        icons_dir = Path(__file__).resolve().parent / "assets" / "icons"
+        ico_path = icons_dir / "app.ico"
+        png_path = icons_dir / "app.png"
+
+        try:
+            # Windows native icon
+            if ico_path.exists():
+                self.iconbitmap(default=str(ico_path))
+        except Exception:
+            pass
+
+        try:
+            # Tk fallback (and for other OS)
+            if png_path.exists():
+                app_icon = tk.PhotoImage(file=str(png_path))
+                self.iconphoto(True, app_icon)
+                self._app_icon_ref = app_icon  # so that GC does not gather
+        except Exception:
+            pass
+
+        self._import_formats = get_import_formats()
+        self.title(app_title())
+        screen_w = self.winfo_screenwidth()
+        screen_h = self.winfo_screenheight()
+        min_width = min(1440, int(screen_w * 0.8))
+        min_height = min(880, int(screen_h * 0.82))
+        self.geometry(f"{min_width}x{min_height}")
+        self.minsize(min_width, min_height)
         # Make shutdown explicit: ensures background executor and repository are closed
         # when user closes the window via the window manager.
         self.protocol("WM_DELETE_WINDOW", self.destroy)
@@ -76,7 +102,7 @@ class FinancialApp(tk.Tk):
         self.chart_year_menu: ttk.OptionMenu | None = None
         self.expense_pie_canvas: tk.Canvas | None = None
         self.expense_legend_canvas: tk.Canvas | None = None
-        self.expense_legend_frame: tk.Frame | None = None
+        self.expense_legend_frame: tk.Widget | None = None
         self.daily_bar_canvas: tk.Canvas | None = None
         self.monthly_bar_canvas: tk.Canvas | None = None
 
@@ -97,15 +123,16 @@ class FinancialApp(tk.Tk):
         self.tab_distribution = ttk.Frame(notebook)
         self.tab_settings = ttk.Frame(notebook)
 
-        notebook.add(self.tab_infographics, text="Infographics")
-        notebook.add(self.tab_operations, text="Operations")
-        notebook.add(self.tab_reports, text="Reports")
-        notebook.add(self.tab_analytics, text="Analytics")
-        notebook.add(self.tab_dashboard, text="Dashboard")
-        notebook.add(self.tab_budget, text="Budget")
-        notebook.add(self.tab_debts, text="Debts")
-        notebook.add(self.tab_distribution, text="Distribution")
-        notebook.add(self.tab_settings, text="Settings")
+        tab_titles = get_tab_titles()
+        notebook.add(self.tab_infographics, text=tab_titles["infographics"])
+        notebook.add(self.tab_operations, text=tab_titles["operations"])
+        notebook.add(self.tab_reports, text=tab_titles["reports"])
+        notebook.add(self.tab_analytics, text=tab_titles["analytics"])
+        notebook.add(self.tab_dashboard, text=tab_titles["dashboard"])
+        notebook.add(self.tab_budget, text=tab_titles["budget"])
+        notebook.add(self.tab_debts, text=tab_titles["debts"])
+        notebook.add(self.tab_distribution, text=tab_titles["distribution"])
+        notebook.add(self.tab_settings, text=tab_titles["settings"])
         self._tab_keys_by_widget = {
             str(self.tab_infographics): "infographics",
             str(self.tab_operations): "operations",
@@ -140,6 +167,32 @@ class FinancialApp(tk.Tk):
             close_method()
         super().destroy()
 
+    def reload_strings(self) -> None:
+        self._import_formats = get_import_formats()
+        self.title(app_title())
+        if hasattr(self, "_notebook"):
+            tab_titles = get_tab_titles()
+            for tab_widget, key in (
+                (self.tab_infographics, "infographics"),
+                (self.tab_operations, "operations"),
+                (self.tab_reports, "reports"),
+                (self.tab_analytics, "analytics"),
+                (self.tab_dashboard, "dashboard"),
+                (self.tab_budget, "budget"),
+                (self.tab_debts, "debts"),
+                (self.tab_distribution, "distribution"),
+                (self.tab_settings, "settings"),
+            ):
+                self._notebook.tab(tab_widget, text=tab_titles[key])
+        if self._currency_status_label is not None and not self._online_toggle_running:
+            self._currency_status_label.config(
+                text=tr("app.status.currency_offline", "Курсы: офлайн")
+            )
+        if self._price_status_label is not None:
+            self._price_status_label.config(
+                text=tr("app.status.prices_local", "Цены активов: локально")
+            )
+
     def _set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = busy
         try:
@@ -149,12 +202,13 @@ class FinancialApp(tk.Tk):
         if busy:
             self.progress.pack(fill=tk.X, padx=8, pady=(0, 8))
             self.progress.start(12)
-            self.title(f"Financial Accounting - {message}" if message else "Financial Accounting")
+            base_title = app_title()
+            self.title(f"{base_title} - {message}" if message else base_title)
             self.config(cursor="watch")
         else:
             self.progress.stop()
             self.progress.pack_forget()
-            self.title("Financial Accounting")
+            self.title(app_title())
             self.config(cursor="")
 
     def _run_background(
@@ -163,11 +217,14 @@ class FinancialApp(tk.Tk):
         *,
         on_success: Callable[[Any], None],
         on_error: Callable[[BaseException], None] | None = None,
-        busy_message: str = "Processing...",
+        busy_message: str = tr("app.busy.default", "Выполняется операция..."),
         block_ui: bool = True,
     ) -> None:
         if block_ui and self._busy:
-            messagebox.showinfo("Please wait", "Operation is already running.")
+            show_info(
+                tr("app.wait_running", "Дождитесь завершения текущей операции."),
+                title=tr("app.wait", "Подождите"),
+            )
             return
         if block_ui:
             self._set_busy(True, busy_message)
@@ -185,32 +242,52 @@ class FinancialApp(tk.Tk):
                     on_error(error)
                 else:
                     logger.exception("Background operation failed", exc_info=error)
-                    messagebox.showerror("Error", str(error))
+                    show_error(str(error))
                 return
             on_success(future.result())
 
         self.after(100, _poll)
 
     def _build_status_bar(self) -> ttk.Frame:
-        bar = ttk.Frame(self, relief="sunken")
+        bar = ttk.Frame(self, style="StatusBar.TFrame", padding=(0, 1))
+        bar.grid_columnconfigure(4, weight=1)
         self._online_var = tk.BooleanVar(value=False)
         online_check = ttk.Checkbutton(
             bar,
-            text="Online",
+            text=tr("app.status.online", "Онлайн"),
             variable=self._online_var,
             command=self._on_online_toggle,
             style="StatusBar.TCheckbutton",
         )
-        online_check.pack(side=tk.LEFT, padx=(8, 4), pady=2)
-        ttk.Separator(bar, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=4, pady=3)
-        self._currency_status_label = ttk.Label(bar, text="Offline rates", width=22)
-        self._currency_status_label.pack(side=tk.LEFT, padx=4, pady=2)
-        ttk.Separator(bar, orient="vertical").pack(side=tk.LEFT, fill=tk.Y, padx=4, pady=3)
-        self._price_status_label = ttk.Label(bar, text="", width=20)
-        self._price_status_label.pack(side=tk.LEFT, padx=4, pady=2)
-        ttk.Label(bar, text=f"v{__version__}", foreground="gray").pack(
-            side=tk.RIGHT, padx=8, pady=2
+        online_check.grid(row=0, column=0, sticky="w", padx=(8, 6), pady=4)
+        ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
+            row=0, column=1, sticky="ns", pady=5, padx=(0, 8)
         )
+        self._currency_status_label = ttk.Label(
+            bar,
+            text=tr("app.status.currency_offline", "Курсы: офлайн"),
+            anchor="w",
+            style="StatusBar.TLabel",
+        )
+        self._currency_status_label.grid(row=0, column=2, sticky="w", padx=(0, 8), pady=4)
+        ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
+            row=0, column=3, sticky="ns", pady=5, padx=(0, 8)
+        )
+        self._price_status_label = ttk.Label(
+            bar,
+            text=tr("app.status.prices_local", "Цены активов: локально"),
+            anchor="w",
+            style="StatusBar.TLabel",
+        )
+        self._price_status_label.grid(row=0, column=4, sticky="w", padx=(0, 8), pady=4)
+        ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
+            row=0, column=5, sticky="ns", pady=5, padx=(0, 8)
+        )
+        ttk.Label(
+            bar,
+            text=tr("app.status.version", "v{version}", version=__version__),
+            style="StatusBarMuted.TLabel",
+        ).grid(row=0, column=6, sticky="e", padx=(0, 10), pady=4)
         return bar
 
     def _on_online_toggle(self) -> None:
@@ -222,7 +299,13 @@ class FinancialApp(tk.Tk):
 
         enabled = self._online_var.get()
         self._online_toggle_running = True
-        self._currency_status_label.config(text="Fetching rates..." if enabled else "Offline rates")
+        self._currency_status_label.config(
+            text=(
+                tr("app.status.currency_fetching", "Обновляем курсы...")
+                if enabled
+                else tr("app.status.currency_offline", "Курсы: офлайн")
+            )
+        )
 
         def task() -> None:
             self.controller.set_online_mode(enabled)
@@ -255,7 +338,9 @@ class FinancialApp(tk.Tk):
         self._online_var.set(self.controller.get_online_mode())
         self._currency_status_label.config(text=status["currency"])
         if self._price_status_label is not None and not self._price_status_label.cget("text"):
-            self._price_status_label.config(text="")
+            self._price_status_label.config(
+                text=tr("app.status.prices_local", "Цены активов: локально")
+            )
 
     def _start_status_refresh_timer(self) -> None:
         """Refresh status bar every 60 seconds to update timestamps."""
@@ -269,7 +354,9 @@ class FinancialApp(tk.Tk):
         saved = self.controller.load_online_mode_preference()
         if saved:
             self._online_var.set(True)
-            self._currency_status_label.config(text="Fetching rates...")
+            self._currency_status_label.config(
+                text=tr("app.status.currency_fetching", "Обновляем курсы...")
+            )
             self._online_toggle_running = True
 
             def task() -> None:
@@ -297,9 +384,9 @@ class FinancialApp(tk.Tk):
         self._start_status_refresh_timer()
 
     def _import_policy_from_ui(self, mode_label: str) -> ImportPolicy:
-        if mode_label == "Full Backup":
+        if mode_label == "Полная замена":
             return ImportPolicy.FULL_BACKUP
-        if mode_label == "Legacy Import":
+        if mode_label == "Наследуемый импорт":
             return ImportPolicy.LEGACY
         return ImportPolicy.CURRENT_RATE
 
@@ -321,6 +408,24 @@ class FinancialApp(tk.Tk):
             if records is not None
             else self.controller.build_record_list_items()
         )
+
+        def _display_type_label(raw_label: str, kind: str) -> str:
+            normalized = str(raw_label or "").strip().lower()
+            mapping = {
+                "income": tr("operations.type.income", "Доход"),
+                "expense": tr("operations.type.expense", "Расход"),
+                "mandatory expense": tr("operations.type.mandatory", "Обязательный расход"),
+                "transfer": tr("operations.type.transfer", "Перевод"),
+            }
+            return mapping.get(normalized, mapping.get(kind, str(raw_label)))
+
+        def _display_category_label(raw_category: str, kind: str) -> str:
+            category = str(raw_category or "")
+            if kind == "transfer" and category.lower().startswith("transfer #"):
+                suffix = category.split("#", 1)[1].strip() if "#" in category else ""
+                return tr("operations.transfer.category", "Перевод #{id}", id=suffix or "?")
+            return category
+
         for item in list_items:
             self._record_id_to_repo_index[item.record_id] = item.repository_index
             if item.domain_record_id is not None:
@@ -330,8 +435,8 @@ class FinancialApp(tk.Tk):
             values = (
                 str(item.invariant_id),
                 str(item.date),
-                str(item.type_label),
-                str(item.category),
+                _display_type_label(str(item.type_label), kind),
+                _display_category_label(str(item.category), kind),
                 f"{float(item.amount_original):.2f}",
                 str(item.currency),
                 f"{float(item.amount_kzt):.2f}",
@@ -397,7 +502,7 @@ class FinancialApp(tk.Tk):
         elif tab_key == "operations":
             from gui.tabs.operations_tab import build_operations_tab
 
-            operations = build_operations_tab(self.tab_operations, self, IMPORT_FORMATS)
+            operations = build_operations_tab(self.tab_operations, self, self._import_formats)
             self.records_tree = operations.records_tree
             self.refresh_operation_wallet_menu = operations.refresh_operation_wallet_menu
             self.refresh_transfer_wallet_menus = operations.refresh_transfer_wallet_menus
@@ -432,7 +537,7 @@ class FinancialApp(tk.Tk):
         elif tab_key == "settings":
             from gui.tabs.settings_tab import build_settings_tab
 
-            build_settings_tab(self.tab_settings, self, IMPORT_FORMATS)
+            build_settings_tab(self.tab_settings, self, self._import_formats)
         else:
             return
 
@@ -503,9 +608,15 @@ class FinancialApp(tk.Tk):
         else:
             details_text = "\n".join(details)
         message_text = (
-            f"Successfully created {len(created_auto_payments)} autopayments:\n" + details_text
+            tr(
+                "app.autopay.summary",
+                "Создано автоплатежей: {count}",
+                count=len(created_auto_payments),
+            )
+            + "\n"
+            + details_text
         )
-        messagebox.showinfo("Auto-payments applied", message_text)
+        show_info(message_text, title=tr("app.autopay.title", "Автоплатежи применены"))
 
     def _refresh_wallets(self) -> None:
         """Refresh wallet list in settings tab and wallet menus in operations tab."""
@@ -573,7 +684,10 @@ class FinancialApp(tk.Tk):
 
         menu = self.pie_month_menu["menu"]
         menu.delete(0, "end")
-        menu.add_command(label="Все время", command=lambda value="all": pie_month_var.set(value))
+        menu.add_command(
+            label=tr("infographics.all_time", "Все время"),
+            command=lambda value="all": pie_month_var.set(value),
+        )
         for month in months:
             menu.add_command(label=month, command=lambda value=month: pie_month_var.set(value))
 
@@ -609,6 +723,7 @@ class FinancialApp(tk.Tk):
             self.pie_month_var is None
             or self.expense_pie_canvas is None
             or self.expense_legend_frame is None
+            or self.expense_legend_canvas is None
         ):
             return
 
@@ -630,19 +745,23 @@ class FinancialApp(tk.Tk):
                 10,
                 10,
                 anchor="nw",
-                text="No data to display",
+                text=tr("common.empty", "Нет данных для отображения"),
                 fill="#6b7280",
                 font=("Segoe UI", 11),
             )
             return
 
-        width = max(self.expense_pie_canvas.winfo_width(), 240)
-        height = max(self.expense_pie_canvas.winfo_height(), 240)
-        size = min(width, height) - 30
-        x0 = (width - size) / 2
-        y0 = (height - size) / 2
-        x1 = x0 + size
-        y1 = y0 + size
+        width = max(self.expense_pie_canvas.winfo_width(), 220)
+        height = max(self.expense_pie_canvas.winfo_height(), 220)
+        usable_w = max(width - 32, 120)
+        usable_h = max(height - 32, 120)
+        radius = max(52, min(usable_w * 0.42, usable_h * 0.48))
+        center_x = max(radius + 16, min(width * 0.42, width - radius - 16))
+        center_y = height / 2
+        x0 = center_x - radius
+        y0 = center_y - radius
+        x1 = center_x + radius
+        y1 = center_y + radius
 
         colors = self._generate_colors(len(data))
 
@@ -663,16 +782,28 @@ class FinancialApp(tk.Tk):
             )
             start += extent
 
-            legend_row = tk.Frame(self.expense_legend_frame)
-            legend_row.pack(anchor="w", pady=2)
-            color_box = tk.Canvas(legend_row, width=12, height=12, highlightthickness=0)
-            color_box.create_rectangle(0, 0, 12, 12, fill=color, outline=color)
-            color_box.pack(side=tk.LEFT)
-            ttk.Label(
+            legend_row = tk.Frame(self.expense_legend_frame, bg="white")
+            legend_row.pack(fill="x", anchor="w", pady=1, padx=6)
+            legend_row.grid_columnconfigure(1, weight=1)
+            color_box = tk.Canvas(
+                legend_row,
+                width=10,
+                height=10,
+                highlightthickness=0,
+                bg="white",
+            )
+            color_box.create_rectangle(0, 0, 10, 10, fill=color, outline=color)
+            color_box.grid(row=0, column=0, sticky="nw", padx=(0, 6), pady=2)
+            tk.Label(
                 legend_row,
                 text=f"{category}: {value:.2f} KZT",
-                font=("Segoe UI", 9),
-            ).pack(side=tk.LEFT, padx=6)
+                font=("Segoe UI", 8),
+                wraplength=max(96, self.expense_legend_canvas.winfo_width() - 42),
+                justify="left",
+                anchor="w",
+                bg="white",
+                fg="#1f2937",
+            ).grid(row=0, column=1, sticky="w")
 
     def _group_minor_categories(
         self, data: list[tuple[str, float]], max_slices: int
@@ -682,7 +813,7 @@ class FinancialApp(tk.Tk):
 
         major = data[: max_slices - 1]
         other_total = sum(value for _, value in data[max_slices - 1 :])
-        major.append(("Other", other_total))
+        major.append((tr("common.other", "Other"), other_total))
         return major
 
     def _filter_records_by_month(self, records: Any, month_value: str) -> list[Any]:
@@ -829,13 +960,18 @@ class FinancialApp(tk.Tk):
                 10,
                 10,
                 anchor="nw",
-                text="No data to display",
+                text=tr("common.empty", "Нет данных для отображения"),
                 fill="#6b7280",
                 font=("Segoe UI", 11),
             )
             return
 
-        padding = {"left": 40, "right": 20, "top": 20, "bottom": 30}
+        padding = {
+            "left": 34 if width < 420 else 40,
+            "right": 16 if width < 420 else 20,
+            "top": 20,
+            "bottom": 34 if height < 240 else 30,
+        }
         chart_w = width - padding["left"] - padding["right"]
         chart_h = height - padding["top"] - padding["bottom"]
         zero_y = padding["top"] + chart_h / 2
@@ -846,7 +982,8 @@ class FinancialApp(tk.Tk):
         )
 
         group_width = chart_w / max(1, len(labels))
-        bar_width = max(6, min(18, group_width * 0.35))
+        bar_gap = 1 if group_width < 18 else 2
+        bar_width = max(3, min(16, group_width * 0.34))
 
         for idx, label in enumerate(labels):
             x_center = padding["left"] + group_width * idx + group_width / 2
@@ -854,24 +991,28 @@ class FinancialApp(tk.Tk):
             expense_h = expense_values[idx] * scale
 
             canvas.create_rectangle(
-                x_center - bar_width - 2,
+                x_center - bar_width - bar_gap,
                 zero_y - income_h,
-                x_center - 2,
+                x_center - bar_gap,
                 zero_y,
                 fill="#10b981",
                 outline="",
             )
             canvas.create_rectangle(
-                x_center + 2,
+                x_center + bar_gap,
                 zero_y,
-                x_center + bar_width + 2,
+                x_center + bar_width + bar_gap,
                 zero_y + expense_h,
                 fill="#ef4444",
                 outline="",
             )
 
-            label_step = max(1, len(labels) // max_labels)
-            if idx % label_step == 0 or len(labels) <= max_labels:
+            label_capacity = max(
+                3,
+                min(max_labels, int(chart_w // 44) if chart_w > 0 else max_labels),
+            )
+            label_step = max(1, len(labels) // label_capacity)
+            if idx % label_step == 0 or len(labels) <= label_capacity:
                 canvas.create_text(
                     x_center,
                     padding["top"] + chart_h + 10,
@@ -883,7 +1024,7 @@ class FinancialApp(tk.Tk):
         canvas.create_text(
             padding["left"],
             padding["top"] - 6,
-            text="Incomes",
+            text="Доходы",
             fill="#10b981",
             anchor="sw",
             font=("Segoe UI", 9),
@@ -891,7 +1032,7 @@ class FinancialApp(tk.Tk):
         canvas.create_text(
             padding["left"] + 60,
             padding["top"] - 6,
-            text="Expenses",
+            text="Расходы",
             fill="#ef4444",
             anchor="sw",
             font=("Segoe UI", 9),
@@ -903,4 +1044,7 @@ def main() -> None:
         app = FinancialApp()
         app.mainloop()
     except KeyboardInterrupt:
-        messagebox.showinfo("Info", "Application closed by user.")
+        show_info(
+            tr("app.closed_by_user", "Приложение закрыто пользователем."),
+            title=tr("app.info", "Информация"),
+        )

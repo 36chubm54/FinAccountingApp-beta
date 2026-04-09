@@ -7,6 +7,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from tkinter import ttk
 
+from gui.i18n import tr
+
 
 @dataclass(slots=True)
 class InfographicsTabBindings:
@@ -33,79 +35,118 @@ def build_infographics_tab(
     after: Callable[[int, Callable[[], None]], str],
     after_cancel: Callable[[str], None],
 ) -> InfographicsTabBindings:
-    pie_frame = ttk.LabelFrame(parent, text="Expenses by category")
-    pie_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
-
-    pie_controls = tk.Frame(pie_frame)
-    pie_controls.pack(fill=tk.X, padx=10, pady=(8, 0))
-    ttk.Label(pie_controls, text="Month:").pack(side=tk.LEFT)
-
-    pie_month_var = tk.StringVar()
-    pie_month_menu = ttk.OptionMenu(pie_controls, pie_month_var, "")
-    pie_month_menu.pack(side=tk.LEFT, padx=6)
-    pie_month_var.trace_add("write", on_chart_filter_change)
-
-    daily_frame = ttk.LabelFrame(parent, text="Income/expense by day of month")
-    daily_frame.grid(row=1, column=1, sticky="nsew", padx=10, pady=10)
-
-    monthly_frame = ttk.LabelFrame(parent, text="Income/expense by months of year")
-    monthly_frame.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
-
-    parent.grid_columnconfigure(0, weight=1)
-    parent.grid_columnconfigure(1, weight=1)
+    parent.grid_columnconfigure(0, weight=1, uniform="infographics_top")
+    parent.grid_columnconfigure(1, weight=1, uniform="infographics_top")
     parent.grid_rowconfigure(1, weight=1)
     parent.grid_rowconfigure(2, weight=1)
 
-    expense_pie_canvas = tk.Canvas(pie_frame, height=240, bg="white", highlightthickness=0)
-    expense_pie_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 6))
+    pie_frame = ttk.LabelFrame(
+        parent, text=tr("infographics.expenses_by_category", "Расходы по категориям")
+    )
+    pie_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+    pie_frame.grid_columnconfigure(0, weight=2)
+    pie_frame.grid_columnconfigure(1, weight=1)
+    pie_frame.grid_rowconfigure(1, weight=1)
 
-    legend_container = tk.Frame(pie_frame)
-    legend_container.pack(fill=tk.BOTH, expand=False, padx=10, pady=(0, 10))
-    expense_legend_canvas = tk.Canvas(legend_container, height=110, highlightthickness=0)
-    expense_legend_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    pie_controls = ttk.Frame(pie_frame)
+    pie_controls.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=(8, 0))
+    pie_controls.grid_columnconfigure(1, weight=1)
+    ttk.Label(pie_controls, text=tr("infographics.month", "Месяц:")).grid(
+        row=0, column=0, sticky="w"
+    )
+
+    pie_month_var = tk.StringVar()
+    pie_month_menu = ttk.OptionMenu(pie_controls, pie_month_var, "")
+    pie_month_menu.grid(row=0, column=1, sticky="w", padx=(6, 0))
+    pie_month_var.trace_add("write", on_chart_filter_change)
+
+    daily_frame = ttk.LabelFrame(
+        parent, text=tr("infographics.daily_cashflow", "Доходы и расходы по дням месяца")
+    )
+    daily_frame.grid(row=1, column=1, sticky="nsew", padx=10, pady=10)
+    daily_frame.grid_columnconfigure(0, weight=1)
+    daily_frame.grid_rowconfigure(1, weight=1)
+
+    monthly_frame = ttk.LabelFrame(
+        parent, text=tr("infographics.monthly_cashflow", "Доходы и расходы по месяцам года")
+    )
+    monthly_frame.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
+    monthly_frame.grid_columnconfigure(0, weight=1)
+    monthly_frame.grid_rowconfigure(1, weight=1)
+
+    expense_pie_canvas = tk.Canvas(pie_frame, height=240, bg="white", highlightthickness=0)
+    expense_pie_canvas.grid(row=1, column=0, sticky="nsew", padx=(10, 4), pady=10)
+
+    legend_container = ttk.Frame(pie_frame)
+    legend_container.grid(row=1, column=1, sticky="nsew", padx=(4, 10), pady=10)
+    legend_container.grid_columnconfigure(0, weight=1)
+    legend_container.grid_rowconfigure(0, weight=1)
+    expense_legend_canvas = tk.Canvas(
+        legend_container,
+        height=240,
+        highlightthickness=0,
+        bg="white",
+    )
+    expense_legend_canvas.grid(row=0, column=0, sticky="nsew")
     legend_scroll = ttk.Scrollbar(
         legend_container,
         orient="vertical",
         command=expense_legend_canvas.yview,
     )
-    legend_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+    legend_scroll.grid(row=0, column=1, sticky="ns")
     expense_legend_canvas.configure(yscrollcommand=legend_scroll.set)
 
-    expense_legend_frame = tk.Frame(expense_legend_canvas)
-    expense_legend_canvas.create_window((0, 0), window=expense_legend_frame, anchor="nw")
+    expense_legend_frame = tk.Frame(expense_legend_canvas, bg="white")
+    expense_legend_canvas.create_window(
+        (0, 0),
+        window=expense_legend_frame,
+        anchor="nw",
+        tags=("legend_window",),
+    )
 
     def _update_legend_scroll(_event: object | None = None) -> None:
         expense_legend_canvas.configure(scrollregion=expense_legend_canvas.bbox("all"))
+        bbox = expense_legend_canvas.bbox("all")
+        if bbox:
+            width = max(expense_legend_canvas.winfo_width(), bbox[2] - bbox[0])
+            expense_legend_canvas.itemconfigure("legend_window", width=max(width - 10, 0))
 
     expense_legend_frame.bind("<Configure>", _update_legend_scroll)
+    expense_legend_canvas.bind("<Configure>", _update_legend_scroll)
     expense_legend_canvas.bind("<MouseWheel>", on_legend_mousewheel)
     expense_legend_frame.bind("<MouseWheel>", on_legend_mousewheel)
 
     bind_all("<MouseWheel>", on_legend_mousewheel)
 
-    daily_controls = tk.Frame(daily_frame)
-    daily_controls.pack(fill=tk.X, padx=10, pady=(10, 0))
-    ttk.Label(daily_controls, text="Month:").pack(side=tk.LEFT)
+    daily_controls = ttk.Frame(daily_frame)
+    daily_controls.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
+    daily_controls.grid_columnconfigure(1, weight=1)
+    ttk.Label(daily_controls, text=tr("infographics.month", "Месяц:")).grid(
+        row=0, column=0, sticky="w"
+    )
 
     chart_month_var = tk.StringVar()
     chart_month_menu = ttk.OptionMenu(daily_controls, chart_month_var, "")
-    chart_month_menu.pack(side=tk.LEFT, padx=6)
+    chart_month_menu.grid(row=0, column=1, sticky="w", padx=(6, 0))
     chart_month_var.trace_add("write", on_chart_filter_change)
 
     daily_bar_canvas = tk.Canvas(daily_frame, height=220, bg="white", highlightthickness=0)
-    daily_bar_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+    daily_bar_canvas.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
 
-    monthly_controls = tk.Frame(monthly_frame)
-    monthly_controls.pack(fill=tk.X, padx=10, pady=(10, 0))
-    ttk.Label(monthly_controls, text="Year:").pack(side=tk.LEFT)
+    monthly_controls = ttk.Frame(monthly_frame)
+    monthly_controls.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
+    monthly_controls.grid_columnconfigure(1, weight=1)
+    ttk.Label(monthly_controls, text=tr("infographics.year", "Год:")).grid(
+        row=0, column=0, sticky="w"
+    )
 
     chart_year_var = tk.StringVar()
     chart_year_menu = ttk.OptionMenu(monthly_controls, chart_year_var, "")
-    chart_year_menu.pack(side=tk.LEFT, padx=6)
+    chart_year_menu.grid(row=0, column=1, sticky="w", padx=(6, 0))
     chart_year_var.trace_add("write", on_chart_filter_change)
 
     monthly_bar_canvas = tk.Canvas(monthly_frame, height=220, bg="white", highlightthickness=0)
-    monthly_bar_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+    monthly_bar_canvas.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
 
     chart_redraw_job: str | None = None
 

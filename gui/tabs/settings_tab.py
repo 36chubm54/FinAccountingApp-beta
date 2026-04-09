@@ -13,6 +13,7 @@ from typing import Any, Protocol
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
 from gui.helpers import open_in_file_manager
+from gui.i18n import tr
 from gui.tabs.settings_support import safe_destroy, show_audit_report_dialog
 
 
@@ -37,7 +38,7 @@ class SettingsTabContext(Protocol):
         *,
         on_success: Callable[[Any], None],
         on_error: Callable[[BaseException], None] | None = None,
-        busy_message: str = "Processing...",
+        busy_message: str = tr("app.busy.default", "Выполняется операция..."),
     ) -> None: ...
 
 
@@ -49,19 +50,20 @@ def build_settings_tab(
     pad_x = 8
     pad_y = 6
 
-    parent.grid_columnconfigure(0, weight=0)
-    parent.grid_columnconfigure(1, weight=1)
+    parent.grid_columnconfigure(0, weight=3, uniform="settings")
+    parent.grid_columnconfigure(1, weight=5, uniform="settings")
     parent.grid_rowconfigure(0, weight=1)
 
     left_panel = ttk.Frame(parent)
-    left_panel.grid(row=0, column=0, sticky="ns", padx=10, pady=10)
+    left_panel.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+    left_panel.grid_columnconfigure(0, weight=1)
 
     right_panel = ttk.Frame(parent)
     right_panel.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
     right_panel.grid_rowconfigure(0, weight=1)
     right_panel.grid_columnconfigure(0, weight=1)
 
-    wallets_frame = ttk.LabelFrame(left_panel, text="Wallets")
+    wallets_frame = ttk.LabelFrame(left_panel, text=tr("settings.wallets", "Кошельки"))
     wallets_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
     wallets_frame.grid_columnconfigure(0, weight=1)
     wallets_frame.grid_rowconfigure(1, weight=1)
@@ -70,22 +72,30 @@ def build_settings_tab(
     form.grid(row=0, column=0, sticky="ew", padx=pad_x, pady=pad_y)
     form.grid_columnconfigure(1, weight=1)
 
-    ttk.Label(form, text="Name:").grid(row=0, column=0, sticky="w")
+    ttk.Label(form, text=tr("settings.wallets.name", "Название:")).grid(row=0, column=0, sticky="w")
     wallet_name_entry = ttk.Entry(form)
     wallet_name_entry.grid(row=0, column=1, sticky="ew", pady=2)
 
-    ttk.Label(form, text="Currency:").grid(row=1, column=0, sticky="w")
+    ttk.Label(form, text=tr("settings.wallets.currency", "Валюта:")).grid(
+        row=1, column=0, sticky="w"
+    )
     wallet_currency_entry = ttk.Entry(form, width=8)
     wallet_currency_entry.insert(0, "KZT")
     wallet_currency_entry.grid(row=1, column=1, sticky="ew", pady=2)
 
-    ttk.Label(form, text="Initial balance:").grid(row=2, column=0, sticky="w")
+    ttk.Label(form, text=tr("settings.wallets.initial_balance", "Начальный баланс:")).grid(
+        row=2, column=0, sticky="w"
+    )
     wallet_initial_entry = ttk.Entry(form)
     wallet_initial_entry.insert(0, "0")
     wallet_initial_entry.grid(row=2, column=1, sticky="ew", pady=2)
 
     wallet_allow_negative_var = tk.BooleanVar(value=False)
-    ttk.Checkbutton(form, text="Allow negative", variable=wallet_allow_negative_var).grid(
+    ttk.Checkbutton(
+        form,
+        text=tr("settings.wallets.allow_negative", "Разрешить отрицательный баланс"),
+        variable=wallet_allow_negative_var,
+    ).grid(
         row=3,
         column=0,
         columnspan=2,
@@ -115,13 +125,27 @@ def build_settings_tab(
         height=8,
     )
     for col, text, width, minwidth, stretch, anchor in (
-        ("id", "ID", 30, 30, False, "e"),
-        ("name", "Name", 80, 80, False, "w"),
-        ("currency", "Currency", 45, 45, False, "center"),
-        ("initial_balance", "Initial balance", 85, 85, False, "e"),
-        ("balance", "Balance", 85, 85, False, "e"),
-        ("allow_negative", "Allow negative", 95, 95, False, "center"),
-        ("active", "Active", 55, 55, False, "center"),
+        ("id", "ID", 40, 40, False, "e"),
+        ("name", tr("settings.wallets.name_short", "Название"), 100, 100, True, "w"),
+        ("currency", tr("settings.wallets.currency_short", "Вал."), 60, 60, False, "center"),
+        (
+            "initial_balance",
+            tr("settings.wallets.initial_balance_short", "Старт"),
+            110,
+            90,
+            False,
+            "e",
+        ),
+        ("balance", tr("settings.wallets.balance", "Баланс"), 110, 90, False, "e"),
+        (
+            "allow_negative",
+            tr("settings.wallets.allow_negative_short", "Минус"),
+            92,
+            92,
+            False,
+            "center",
+        ),
+        ("active", tr("settings.wallets.active", "Активен"), 90, 90, False, "center"),
     ):
         wallet_tree.heading(col, text=text)
         wallet_tree.column(col, width=width, minwidth=minwidth, stretch=stretch, anchor=anchor)  # type: ignore
@@ -135,6 +159,56 @@ def build_settings_tab(
         yscrollcommand=wallet_scroll.set,
         xscrollcommand=wallet_xscroll.set,
     )
+
+    def _wallet_scroll_units(delta: int, *, multiplier: int = 12) -> int:
+        if delta == 0:
+            return 0
+        base_units = max(1, abs(int(delta)) // 120)
+        return base_units * multiplier
+
+    def _scroll_wallet_vertically(direction: int, units: int) -> str:
+        wallet_tree.yview_scroll(direction * units, "units")
+        return "break"
+
+    def _scroll_wallet_horizontally(direction: int, units: int) -> str:
+        wallet_tree.xview_scroll(direction * units, "units")
+        return "break"
+
+    def _on_wallet_mousewheel(event: tk.Event) -> str:
+        delta = int(getattr(event, "delta", 0))
+        units = _wallet_scroll_units(delta, multiplier=8)
+        if units <= 0:
+            return "break"
+        direction = -1 if delta > 0 else 1
+        return _scroll_wallet_vertically(direction, units)
+
+    def _on_wallet_shift_mousewheel(event: tk.Event) -> str:
+        delta = int(getattr(event, "delta", 0))
+        units = _wallet_scroll_units(delta, multiplier=12)
+        if units <= 0:
+            return "break"
+        direction = -1 if delta > 0 else 1
+        return _scroll_wallet_horizontally(direction, units)
+
+    def _on_wallet_button4(_event: tk.Event) -> str:
+        return _scroll_wallet_vertically(-1, 3)
+
+    def _on_wallet_button5(_event: tk.Event) -> str:
+        return _scroll_wallet_vertically(1, 3)
+
+    def _on_wallet_shift_button4(_event: tk.Event) -> str:
+        return _scroll_wallet_horizontally(-1, 3)
+
+    def _on_wallet_shift_button5(_event: tk.Event) -> str:
+        return _scroll_wallet_horizontally(1, 3)
+
+    for widget in (wallet_tree, wallet_scroll, wallet_xscroll):
+        widget.bind("<MouseWheel>", _on_wallet_mousewheel, add="+")
+        widget.bind("<Shift-MouseWheel>", _on_wallet_shift_mousewheel, add="+")
+        widget.bind("<Button-4>", _on_wallet_button4, add="+")
+        widget.bind("<Button-5>", _on_wallet_button5, add="+")
+        widget.bind("<Shift-Button-4>", _on_wallet_shift_button4, add="+")
+        widget.bind("<Shift-Button-5>", _on_wallet_shift_button5, add="+")
 
     def refresh_wallets() -> None:
         for iid in wallet_tree.get_children():
@@ -153,8 +227,8 @@ def build_settings_tab(
                     str(wallet.currency),
                     f"{wallet.initial_balance:.2f}",
                     f"{balance:.2f}",
-                    "Yes" if wallet.allow_negative else "No",
-                    "Yes" if wallet.is_active else "No",
+                    tr("common.yes", "Да") if wallet.allow_negative else tr("common.no", "Нет"),
+                    tr("common.yes", "Да") if wallet.is_active else tr("common.no", "Нет"),
                 ),
             )
 
@@ -176,7 +250,13 @@ def build_settings_tab(
         try:
             initial_balance = float(wallet_initial_entry.get().strip() or "0")
         except ValueError:
-            messagebox.showerror("Error", "Invalid wallet initial balance.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr(
+                    "settings.wallets.error.initial_balance",
+                    "Некорректный начальный баланс кошелька.",
+                ),
+            )
             return
 
         try:
@@ -186,15 +266,35 @@ def build_settings_tab(
                 initial_balance=initial_balance,
                 allow_negative=wallet_allow_negative_var.get(),
             )
-            messagebox.showinfo("Success", f"Wallet created: [{wallet.id}] {wallet.name}")
+            messagebox.showinfo(
+                tr("common.done", "Готово"),
+                tr(
+                    "settings.wallets.created",
+                    "Кошелек создан: [{wallet_id}] {wallet_name}",
+                    wallet_id=wallet.id,
+                    wallet_name=wallet.name,
+                ),
+            )
             wallet_name_entry.delete(0, tk.END)
             wallet_initial_entry.delete(0, tk.END)
             wallet_initial_entry.insert(0, "0")
             refresh_wallets()
         except Exception as error:
-            messagebox.showerror("Error", f"Failed to create wallet: {str(error)}")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr(
+                    "settings.wallets.error.create",
+                    "Не удалось создать кошелек: {error}",
+                    error=str(error),
+                ),
+            )
 
-    ttk.Button(form, text="Create wallet", command=create_wallet).grid(
+    ttk.Button(
+        form,
+        text=tr("settings.wallets.create", "Создать кошелек"),
+        style="Primary.TButton",
+        command=create_wallet,
+    ).grid(
         row=4,
         column=0,
         columnspan=2,
@@ -205,34 +305,54 @@ def build_settings_tab(
     def delete_wallet() -> None:
         selection = wallet_tree.selection()
         if not selection:
-            messagebox.showerror("Error", "Select wallet to delete.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr("settings.wallets.error.select_delete", "Выберите кошелек для удаления."),
+            )
             return
         try:
             values = wallet_tree.item(selection[0], "values")
             wallet_id = int(values[0])
         except Exception:
-            messagebox.showerror("Error", "Failed to parse selected wallet id.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr(
+                    "settings.wallets.error.parse_id",
+                    "Не удалось определить идентификатор выбранного кошелька.",
+                ),
+            )
             return
 
         try:
             context.controller.soft_delete_wallet(wallet_id)
-            messagebox.showinfo("Success", "Wallet was soft-deleted.")
+            messagebox.showinfo(
+                tr("common.done", "Готово"),
+                tr("settings.wallets.deleted", "Кошелек деактивирован."),
+            )
             refresh_wallets()
         except Exception as error:
-            messagebox.showerror("Error", str(error))
+            messagebox.showerror(tr("common.error", "Ошибка"), str(error))
 
     wallet_actions = ttk.Frame(wallets_frame)
     wallet_actions.grid(row=2, column=0, sticky="ew", padx=pad_x, pady=pad_y)
     wallet_actions.grid_columnconfigure(0, weight=1)
     wallet_actions.grid_columnconfigure(1, weight=1)
 
-    ttk.Button(wallet_actions, text="Delete wallet", command=delete_wallet).grid(
+    ttk.Button(
+        wallet_actions,
+        text=tr("settings.wallets.delete", "Удалить кошелек"),
+        command=delete_wallet,
+    ).grid(
         row=0,
         column=0,
         sticky="ew",
         padx=(0, 4),
     )
-    ttk.Button(wallet_actions, text="Refresh", command=refresh_wallets).grid(
+    ttk.Button(
+        wallet_actions,
+        text=tr("common.refresh", "Обновить"),
+        command=refresh_wallets,
+    ).grid(
         row=0,
         column=1,
         sticky="ew",
@@ -241,7 +361,7 @@ def build_settings_tab(
 
     refresh_wallets()
 
-    mand_frame = ttk.LabelFrame(right_panel, text="Mandatory expenses")
+    mand_frame = ttk.LabelFrame(right_panel, text=tr("settings.mandatory", "Обязательные расходы"))
     mand_frame.grid(row=0, column=0, sticky="nsew")
     mand_frame.grid_rowconfigure(0, weight=1)
     mand_frame.grid_columnconfigure(0, weight=1)
@@ -269,15 +389,15 @@ def build_settings_tab(
         height=10,
     )
     for col, text, width, minwidth, stretch, anchor in (
-        ("index", "#", 30, 40, False, "e"),
-        ("amount", "Amount", 70, 90, False, "e"),
-        ("currency", "Cur", 50, 50, False, "center"),
-        ("kzt", "KZT", 80, 90, False, "e"),
-        ("category", "Category", 100, 120, False, "w"),
-        ("description", "Description", 200, 160, True, "w"),
-        ("period", "Period", 80, 70, False, "w"),
-        ("date", "Date", 80, 90, False, "w"),
-        ("autopay", "Autopay", 70, 60, False, "center"),
+        ("index", "#", 40, 40, False, "e"),
+        ("amount", tr("settings.mandatory.amount", "Сумма"), 90, 90, False, "e"),
+        ("currency", tr("settings.mandatory.currency_short", "Вал."), 60, 60, False, "center"),
+        ("kzt", "KZT", 90, 90, False, "e"),
+        ("category", tr("settings.mandatory.category", "Категория"), 120, 120, False, "w"),
+        ("description", tr("settings.mandatory.description", "Описание"), 200, 160, True, "w"),
+        ("period", tr("settings.mandatory.period", "Период"), 90, 80, False, "w"),
+        ("date", tr("settings.mandatory.date", "Дата"), 100, 100, False, "w"),
+        ("autopay", tr("settings.mandatory.autopay", "Автоплатеж"), 120, 100, False, "center"),
     ):
         mand_tree.heading(col, text=text)
         mand_tree.column(col, width=width, minwidth=minwidth, stretch=stretch, anchor=anchor)  # type: ignore[arg-type]
@@ -290,13 +410,6 @@ def build_settings_tab(
     mand_xscroll = ttk.Scrollbar(mand_list_frame, orient="horizontal", command=mand_tree.xview)
     mand_xscroll.grid(row=1, column=0, sticky="ew")
     mand_tree.config(xscrollcommand=mand_xscroll.set)
-
-    def _block_separator_resize(event: tk.Event) -> str | None:
-        if isinstance(event.widget, ttk.Treeview):
-            region = event.widget.identify_region(event.x, event.y)
-            if region == "separator":
-                return "break"
-        return None
 
     def _mandatory_scroll_units(delta: int, *, multiplier: int = 12) -> int:
         if delta == 0:
@@ -326,8 +439,6 @@ def build_settings_tab(
         widget.bind("<Shift-MouseWheel>", _on_mandatory_shift_mousewheel, add="+")
         widget.bind("<Shift-Button-4>", _on_mandatory_shift_button4, add="+")
         widget.bind("<Shift-Button-5>", _on_mandatory_shift_button5, add="+")
-
-    mand_tree.bind("<Button-1>", _block_separator_resize, add="+")
 
     def refresh_mandatory() -> None:
         for iid in mand_tree.get_children():
@@ -365,23 +476,33 @@ def build_settings_tab(
                 safe_destroy(panel)
                 current_panel[key] = None
 
+    def _configure_inline_panel_grid(panel: ttk.Frame) -> None:
+        panel.grid_columnconfigure(0, minsize=280)
+        panel.grid_columnconfigure(1, weight=1, minsize=320)
+
     def add_mandatory_inline() -> None:
         close_inline_panels()
 
-        add_panel = tk.Frame(mand_frame)
+        add_panel = ttk.Frame(mand_frame, style="InlinePanel.TFrame", padding=(8, 6))
         add_panel.grid(row=2, column=0, columnspan=2, pady=6, sticky="ew")
+        _configure_inline_panel_grid(add_panel)
         current_panel["add"] = add_panel
 
-        ttk.Label(add_panel, text="Amount:").grid(row=0, column=0, sticky="w")
+        ttk.Label(add_panel, text=tr("settings.mandatory.field.amount", "Сумма:")).grid(
+            row=0, column=0, sticky="w"
+        )
         amount_entry = ttk.Entry(add_panel)
-        amount_entry.grid(row=0, column=1)
+        amount_entry.grid(row=0, column=1, sticky="ew", pady=2)
 
-        ttk.Label(add_panel, text="Currency (default KZT):").grid(row=1, column=0, sticky="w")
+        ttk.Label(
+            add_panel,
+            text=tr("settings.mandatory.field.currency_default", "Валюта (по умолчанию KZT):"),
+        ).grid(row=1, column=0, sticky="w")
         currency_entry = ttk.Entry(add_panel)
         currency_entry.insert(0, "KZT")
-        currency_entry.grid(row=1, column=1)
+        currency_entry.grid(row=1, column=1, sticky="ew", pady=2)
 
-        ttk.Label(add_panel, text="Wallet:").grid(row=2, column=0, sticky="w")
+        ttk.Label(add_panel, text=tr("common.wallet", "Кошелек:")).grid(row=2, column=0, sticky="w")
         mandatory_wallet_var = tk.StringVar(value="")
         mandatory_wallet_menu = ttk.OptionMenu(add_panel, mandatory_wallet_var, "")
         mandatory_wallet_menu.grid(row=2, column=1, sticky="ew")
@@ -398,32 +519,57 @@ def build_settings_tab(
             )
         mandatory_wallet_var.set(wallet_labels[0])
 
-        ttk.Label(add_panel, text="Category (default Mandatory):").grid(row=3, column=0, sticky="w")
+        ttk.Label(
+            add_panel,
+            text=tr(
+                "settings.mandatory.field.category_default", "Категория (по умолчанию Mandatory):"
+            ),
+        ).grid(row=3, column=0, sticky="w")
         category_entry = ttk.Entry(add_panel)
         category_entry.insert(0, "Mandatory")
-        category_entry.grid(row=3, column=1)
+        category_entry.grid(row=3, column=1, sticky="ew", pady=2)
 
-        ttk.Label(add_panel, text="Description:").grid(row=4, column=0, sticky="w")
+        ttk.Label(add_panel, text=tr("common.description", "Описание:")).grid(
+            row=4, column=0, sticky="w"
+        )
         description_entry = ttk.Entry(add_panel)
-        description_entry.grid(row=4, column=1)
+        description_entry.grid(row=4, column=1, sticky="ew", pady=2)
 
-        ttk.Label(add_panel, text="Period:").grid(row=5, column=0, sticky="w")
+        ttk.Label(add_panel, text=tr("common.period", "Период:")).grid(row=5, column=0, sticky="w")
         period_var = tk.StringVar(value="monthly")
-        ttk.OptionMenu(add_panel, period_var, "daily", "daily", "weekly", "monthly", "yearly").grid(
+        ttk.OptionMenu(
+            add_panel,
+            period_var,
+            "daily",
+            "daily",
+            "weekly",
+            "monthly",
+            "yearly",
+        ).grid(
             row=5,
             column=1,
+            sticky="ew",
+            pady=2,
         )
 
-        ttk.Label(add_panel, text="Date (YYYY-MM-DD, optional):").grid(row=6, column=0, sticky="w")
+        ttk.Label(
+            add_panel,
+            text=tr("settings.mandatory.field.date_optional", "Дата (YYYY-MM-DD, необязательно):"),
+        ).grid(row=6, column=0, sticky="w")
         date_entry = ttk.Entry(add_panel)
-        date_entry.grid(row=6, column=1)
+        date_entry.grid(row=6, column=1, sticky="ew", pady=2)
 
         def save() -> None:
             try:
                 amount = float(amount_entry.get())
                 description = description_entry.get()
                 if not description:
-                    messagebox.showerror("Error", "Description is required.")
+                    messagebox.showerror(
+                        tr("common.error", "Ошибка"),
+                        tr(
+                            "settings.mandatory.error.description_required", "Описание обязательно."
+                        ),
+                    )
                     return
                 date_val = date_entry.get().strip()
                 if date_val:
@@ -432,11 +578,20 @@ def build_settings_tab(
 
                         parse_ymd(date_val)
                     except ValueError:
-                        messagebox.showerror("Error", "Invalid date format. Use YYYY-MM-DD.")
+                        messagebox.showerror(
+                            tr("common.error", "Ошибка"),
+                            tr(
+                                "settings.mandatory.error.invalid_date",
+                                "Некорректная дата. Используйте YYYY-MM-DD.",
+                            ),
+                        )
                         return
                 wallet_id = mandatory_wallet_map.get(mandatory_wallet_var.get())
                 if wallet_id is None:
-                    messagebox.showerror("Error", "Wallet is required.")
+                    messagebox.showerror(
+                        tr("common.error", "Ошибка"),
+                        tr("settings.mandatory.error.wallet_required", "Кошелек обязателен."),
+                    )
                     return
                 context.controller.create_mandatory_expense(
                     amount=amount,
@@ -447,14 +602,24 @@ def build_settings_tab(
                     period=period_var.get(),
                     date=date_val,
                 )
-                messagebox.showinfo("Success", "Mandatory expense added.")
+                messagebox.showinfo(
+                    tr("common.done", "Готово"),
+                    tr("settings.mandatory.added", "Обязательный расход добавлен."),
+                )
                 safe_destroy(add_panel)
                 current_panel["add"] = None
                 context._refresh_charts()
                 refresh_mandatory()
                 context._refresh_budgets()
             except Exception as error:
-                messagebox.showerror("Error", f"Failed to add expense: {str(error)}")
+                messagebox.showerror(
+                    tr("common.error", "Ошибка"),
+                    tr(
+                        "settings.mandatory.error.add_failed",
+                        "Не удалось добавить расход: {error}",
+                        error=error,
+                    ),
+                )
 
         def cancel() -> None:
             try:
@@ -462,18 +627,34 @@ def build_settings_tab(
             finally:
                 current_panel["add"] = None
 
-        ttk.Button(add_panel, text="Save", command=save).grid(row=7, column=0, padx=6)
-        ttk.Button(add_panel, text="Cancel", command=cancel).grid(row=7, column=1, padx=6)
+        add_buttons = ttk.Frame(add_panel, style="InlinePanel.TFrame")
+        add_buttons.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        add_buttons.grid_columnconfigure(0, weight=1)
+        add_buttons.grid_columnconfigure(1, weight=1)
+        ttk.Button(
+            add_buttons, text=tr("common.save", "Сохранить"), style="Primary.TButton", command=save
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ttk.Button(add_buttons, text=tr("common.cancel", "Отмена"), command=cancel).grid(
+            row=0, column=1, sticky="ew", padx=(6, 0)
+        )
 
     def edit_mandatory_inline() -> None:
         selection = mand_tree.selection()
         if not selection:
-            messagebox.showerror("Error", "Select a required expense to edit.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr(
+                    "settings.mandatory.error.select_edit",
+                    "Выберите обязательный расход для редактирования.",
+                ),
+            )
             return
         try:
             index = int(selection[0])
         except Exception:
-            messagebox.showerror("Error", "Invalid selection.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"), tr("common.invalid_selection", "Некорректный выбор.")
+            )
             return
         expenses = context.controller.load_mandatory_expenses()
         if not (0 <= index < len(expenses)):
@@ -482,17 +663,21 @@ def build_settings_tab(
 
         close_inline_panels()
 
-        edit_panel = ttk.Frame(mand_frame)
+        edit_panel = ttk.Frame(mand_frame, style="InlinePanel.TFrame", padding=(8, 6))
         edit_panel.grid(row=2, column=0, columnspan=2, pady=6, sticky="ew")
         current_panel["edit"] = edit_panel
-        edit_panel.grid_columnconfigure(1, weight=1)
+        _configure_inline_panel_grid(edit_panel)
 
-        ttk.Label(edit_panel, text="Amount KZT:").grid(row=0, column=0, sticky="w")
+        ttk.Label(edit_panel, text=tr("settings.mandatory.field.amount_kzt", "Сумма KZT:")).grid(
+            row=0, column=0, sticky="w"
+        )
         amount_kzt_entry = ttk.Entry(edit_panel)
         amount_kzt_entry.insert(0, str(expense.amount_kzt))
-        amount_kzt_entry.grid(row=0, column=1)
+        amount_kzt_entry.grid(row=0, column=1, sticky="ew", pady=2)
 
-        ttk.Label(edit_panel, text="Wallet:").grid(row=1, column=0, sticky="w")
+        ttk.Label(edit_panel, text=tr("common.wallet", "Кошелек:")).grid(
+            row=1, column=0, sticky="w"
+        )
         edit_wallet_var = tk.StringVar(value="")
         edit_wallet_menu = ttk.OptionMenu(edit_panel, edit_wallet_var, "")
         edit_wallet_menu.grid(row=1, column=1, sticky="ew")
@@ -513,7 +698,7 @@ def build_settings_tab(
         )
         edit_wallet_var.set(current_wallet_label)
 
-        ttk.Label(edit_panel, text="Period:").grid(row=2, column=0, sticky="w")
+        ttk.Label(edit_panel, text=tr("common.period", "Период:")).grid(row=2, column=0, sticky="w")
         edit_period_var = tk.StringVar(value=str(expense.period or "monthly"))
         ttk.OptionMenu(
             edit_panel,
@@ -525,7 +710,10 @@ def build_settings_tab(
             "yearly",
         ).grid(row=2, column=1, sticky="ew")
 
-        ttk.Label(edit_panel, text="Date (YYYY-MM-DD, optional):").grid(row=3, column=0, sticky="w")
+        ttk.Label(
+            edit_panel,
+            text=tr("settings.mandatory.field.date_optional", "Дата (YYYY-MM-DD, необязательно):"),
+        ).grid(row=3, column=0, sticky="w")
         date_entry = ttk.Entry(edit_panel)
         date_entry.insert(
             0,
@@ -533,7 +721,7 @@ def build_settings_tab(
             if hasattr(expense.date, "isoformat")
             else str(expense.date or ""),
         )
-        date_entry.grid(row=3, column=1)
+        date_entry.grid(row=3, column=1, sticky="ew", pady=2)
 
         def save_edit() -> None:
             expense_id = int(expense.id)
@@ -545,12 +733,17 @@ def build_settings_tab(
                         expense_id, float(raw_amount)
                     )
                 except ValueError as error:
-                    messagebox.showerror("Amount error", str(error))
+                    messagebox.showerror(
+                        tr("settings.mandatory.error.amount_title", "Ошибка суммы"), str(error)
+                    )
                     return
 
             new_wallet_id = edit_wallet_map.get(edit_wallet_var.get())
             if new_wallet_id is None:
-                messagebox.showerror("Error", "Wallet is required.")
+                messagebox.showerror(
+                    tr("common.error", "Ошибка"),
+                    tr("settings.mandatory.error.wallet_required", "Кошелек обязателен."),
+                )
                 return
             if int(new_wallet_id) != int(expense.wallet_id):
                 try:
@@ -558,7 +751,9 @@ def build_settings_tab(
                         expense_id, int(new_wallet_id)
                     )
                 except ValueError as error:
-                    messagebox.showerror("Wallet error", str(error))
+                    messagebox.showerror(
+                        tr("settings.mandatory.error.wallet_title", "Ошибка кошелька"), str(error)
+                    )
                     return
 
             new_period = str(edit_period_var.get() or "").strip().lower()
@@ -566,7 +761,9 @@ def build_settings_tab(
                 try:
                     context.controller.update_mandatory_expense_period(expense_id, new_period)
                 except ValueError as error:
-                    messagebox.showerror("Period error", str(error))
+                    messagebox.showerror(
+                        tr("settings.mandatory.error.period_title", "Ошибка периода"), str(error)
+                    )
                     return
 
             current_date = (
@@ -579,7 +776,9 @@ def build_settings_tab(
                 try:
                     context.controller.update_mandatory_expense_date(expense_id, new_date)
                 except ValueError as error:
-                    messagebox.showerror("Date error", str(error))
+                    messagebox.showerror(
+                        tr("settings.mandatory.error.date_title", "Ошибка даты"), str(error)
+                    )
                     return
 
             safe_destroy(edit_panel)
@@ -587,7 +786,10 @@ def build_settings_tab(
             refresh_mandatory()
             context._refresh_charts()
             context._refresh_budgets()
-            messagebox.showinfo("Success", "Mandatory expense updated.")
+            messagebox.showinfo(
+                tr("common.done", "Готово"),
+                tr("settings.mandatory.updated", "Обязательный расход обновлен."),
+            )
 
         def cancel_edit() -> None:
             try:
@@ -595,28 +797,49 @@ def build_settings_tab(
             finally:
                 current_panel["edit"] = None
 
-        ttk.Button(edit_panel, text="Save", command=lambda: save_edit()).grid(
-            row=4, column=0, padx=6
+        edit_buttons = ttk.Frame(edit_panel, style="InlinePanel.TFrame")
+        edit_buttons.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        edit_buttons.grid_columnconfigure(0, weight=1)
+        edit_buttons.grid_columnconfigure(1, weight=1)
+        ttk.Button(
+            edit_buttons,
+            text=tr("common.save", "Сохранить"),
+            style="Primary.TButton",
+            command=save_edit,
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ttk.Button(edit_buttons, text=tr("common.cancel", "Отмена"), command=cancel_edit).grid(
+            row=0, column=1, sticky="ew", padx=(6, 0)
         )
-        ttk.Button(edit_panel, text="Cancel", command=cancel_edit).grid(row=4, column=1, padx=6)
 
     def add_to_records_inline() -> None:
         selection = mand_tree.selection()
         if not selection:
             selection = mand_tree.selection()
-            messagebox.showerror("Error", "Select a required expense to add to records.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr(
+                    "settings.mandatory.error.select_add_to_records",
+                    "Выберите обязательный расход для добавления в записи.",
+                ),
+            )
             return
         close_inline_panels()
 
-        add_to_report_panel = tk.Frame(mand_frame)
+        add_to_report_panel = ttk.Frame(mand_frame, style="InlinePanel.TFrame", padding=(8, 6))
         add_to_report_panel.grid(row=2, column=0, columnspan=2, pady=6, sticky="ew")
+        _configure_inline_panel_grid(add_to_report_panel)
         current_panel["report"] = add_to_report_panel
 
-        ttk.Label(add_to_report_panel, text="Date (YYYY-MM-DD):").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            add_to_report_panel,
+            text=tr("settings.mandatory.field.date_required", "Дата (YYYY-MM-DD):"),
+        ).grid(row=0, column=0, sticky="w")
         date_entry = ttk.Entry(add_to_report_panel)
-        date_entry.grid(row=0, column=1)
+        date_entry.grid(row=0, column=1, sticky="ew", pady=2)
 
-        ttk.Label(add_to_report_panel, text="Wallet:").grid(row=1, column=0, sticky="w")
+        ttk.Label(add_to_report_panel, text=tr("common.wallet", "Кошелек:")).grid(
+            row=1, column=0, sticky="w"
+        )
         mandatory_wallet_var = tk.StringVar(value="")
         mandatory_wallet_menu = ttk.OptionMenu(add_to_report_panel, mandatory_wallet_var, "")
         mandatory_wallet_menu.grid(row=1, column=1, sticky="ew")
@@ -652,12 +875,20 @@ def build_settings_tab(
                 ensure_not_future(entered_date)
                 wallet_id = mandatory_wallet_map.get(mandatory_wallet_var.get())
                 if wallet_id is None:
-                    messagebox.showerror("Error", "Wallet is required.")
+                    messagebox.showerror(
+                        tr("common.error", "Ошибка"),
+                        tr("settings.mandatory.error.wallet_required", "Кошелек обязателен."),
+                    )
                     return
 
                 context.controller.add_mandatory_to_report(index, date_value, wallet_id)
                 messagebox.showinfo(
-                    "Success", f"Mandatory expense added to report for {date_value}."
+                    tr("common.done", "Готово"),
+                    tr(
+                        "settings.mandatory.added_to_records",
+                        "Обязательный расход добавлен в записи за {date}.",
+                        date=date_value,
+                    ),
                 )
                 safe_destroy(add_to_report_panel)
                 current_panel["report"] = None
@@ -668,7 +899,14 @@ def build_settings_tab(
                 context._refresh_budgets()
                 context._refresh_all()
             except ValueError as error:
-                messagebox.showerror("Error", f"Invalid date: {str(error)}. Use YYYY-MM-DD.")
+                messagebox.showerror(
+                    tr("common.error", "Ошибка"),
+                    tr(
+                        "settings.mandatory.error.invalid_date_with_hint",
+                        "Некорректная дата: {error}. Используйте YYYY-MM-DD.",
+                        error=error,
+                    ),
+                )
 
         def cancel() -> None:
             try:
@@ -676,71 +914,132 @@ def build_settings_tab(
             finally:
                 current_panel["report"] = None
 
-        ttk.Button(add_to_report_panel, text="Save", command=save).grid(row=2, column=0, padx=6)
-        ttk.Button(add_to_report_panel, text="Cancel", command=cancel).grid(row=2, column=1, padx=6)
+        report_buttons = ttk.Frame(add_to_report_panel, style="InlinePanel.TFrame")
+        report_buttons.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        report_buttons.grid_columnconfigure(0, weight=1)
+        report_buttons.grid_columnconfigure(1, weight=1)
+        ttk.Button(
+            report_buttons,
+            text=tr("common.save", "Сохранить"),
+            style="Primary.TButton",
+            command=save,
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ttk.Button(report_buttons, text=tr("common.cancel", "Отмена"), command=cancel).grid(
+            row=0, column=1, sticky="ew", padx=(6, 0)
+        )
 
     def delete_mandatory() -> None:
         selection = mand_tree.selection()
         if not selection:
-            messagebox.showerror("Error", "Select mandatory expense to delete.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr(
+                    "settings.mandatory.error.select_delete",
+                    "Выберите обязательный расход для удаления.",
+                ),
+            )
             return
         try:
             index = int(selection[0])
         except Exception:
-            messagebox.showerror("Error", "Invalid selection.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"), tr("common.invalid_selection", "Некорректный выбор.")
+            )
             return
         if context.controller.delete_mandatory_expense(index):
-            messagebox.showinfo("Success", "Mandatory expense deleted.")
+            messagebox.showinfo(
+                tr("common.done", "Готово"),
+                tr("settings.mandatory.deleted", "Обязательный расход удален."),
+            )
             refresh_mandatory()
         else:
-            messagebox.showerror("Error", "Failed to delete mandatory expense.")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr(
+                    "settings.mandatory.error.delete_failed",
+                    "Не удалось удалить обязательный расход.",
+                ),
+            )
 
     def delete_all_mandatory() -> None:
         if not messagebox.askyesno(
-            "Confirm Delete All",
-            "Delete ALL mandatory expenses? This action cannot be undone.",
+            tr("common.confirm", "Подтверждение"),
+            tr(
+                "settings.mandatory.confirm_delete_all",
+                "Удалить ВСЕ обязательные расходы? Это действие нельзя отменить.",
+            ),
         ):
             return
         context.controller.delete_all_mandatory_expenses()
-        messagebox.showinfo("Success", "All mandatory expenses deleted.")
+        messagebox.showinfo(
+            tr("common.done", "Готово"),
+            tr("settings.mandatory.deleted_all", "Все обязательные расходы удалены."),
+        )
         refresh_mandatory()
 
     actions = ttk.Frame(mand_frame)
     actions.grid(row=1, column=0, columnspan=2, sticky="ew", padx=pad_x, pady=(0, pad_y))
+    for idx in range(5):
+        actions.grid_columnconfigure(idx, weight=1)
 
     format_var = tk.StringVar(value="CSV")
 
-    ttk.Button(actions, text="Add", command=add_mandatory_inline).grid(row=0, column=0)
-    ttk.Button(actions, text="Edit", command=edit_mandatory_inline).grid(row=0, column=1, padx=6)
-    ttk.Button(actions, text="Add to Records", command=add_to_records_inline).grid(
-        row=0, column=2, padx=6
+    ttk.Button(actions, text=tr("common.create", "Создать"), command=add_mandatory_inline).grid(
+        row=0, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
     )
-    ttk.Button(actions, text="Delete", command=delete_mandatory).grid(row=0, column=3)
-    ttk.Button(actions, text="Delete All", command=delete_all_mandatory).grid(
-        row=0, column=4, padx=6
+    ttk.Button(
+        actions, text=tr("common.edit", "Редактировать"), command=edit_mandatory_inline
+    ).grid(row=0, column=1, sticky="ew", padx=6, pady=(0, 6))
+    ttk.Button(
+        actions,
+        text=tr("settings.mandatory.add_to_records", "Добавить в записи"),
+        command=add_to_records_inline,
+    ).grid(row=0, column=2, sticky="ew", padx=6, pady=(0, 6))
+    ttk.Button(actions, text=tr("common.delete", "Удалить"), command=delete_mandatory).grid(
+        row=0, column=3, sticky="ew", padx=6, pady=(0, 6)
     )
-    ttk.Button(actions, text="Refresh", command=refresh_mandatory).grid(row=0, column=5, padx=6)
-    ttk.OptionMenu(actions, format_var, "CSV", "CSV", "XLSX").grid(row=0, column=6, padx=6)
+    ttk.Button(
+        actions,
+        text=tr("settings.mandatory.delete_all", "Удалить все"),
+        command=delete_all_mandatory,
+    ).grid(row=0, column=4, sticky="ew", padx=(6, 0), pady=(0, 6))
+    ttk.Button(actions, text=tr("common.refresh", "Обновить"), command=refresh_mandatory).grid(
+        row=1, column=0, sticky="ew", padx=(0, 6)
+    )
+    ttk.OptionMenu(actions, format_var, "CSV", "CSV", "XLSX").grid(
+        row=1, column=1, sticky="ew", padx=6
+    )
 
     def import_mand() -> None:
         fmt = format_var.get()
         cfg = import_formats.get(fmt)
         if not cfg:
-            messagebox.showerror("Error", f"Unsupported format: {fmt}")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr("common.unsupported_format", "Неподдерживаемый формат: {fmt}", fmt=fmt),
+            )
             return
 
         filepath = filedialog.askopenfilename(
             defaultextension=cfg["ext"],
             filetypes=[(f"{cfg['desc']} files", f"*{cfg['ext']}"), ("All files", "*.*")],
-            title=f"Select {cfg['desc']} file to import mandatory expenses",
+            title=tr(
+                "settings.mandatory.import.select_file",
+                "Выберите файл {desc} для импорта обязательных расходов",
+                desc=cfg["desc"],
+            ),
         )
         if not filepath:
             return
 
         if not messagebox.askyesno(
-            "Confirm Import",
-            "This will replace all existing mandatory expenses with data from:\n"
-            f"{filepath}\n\nContinue?",
+            tr("common.confirm", "Подтверждение"),
+            tr(
+                "settings.mandatory.import.confirm",
+                "Это заменит все существующие обязательные расходы данными из:\n{filepath}\n"
+                "\nПродолжить?",
+                filepath=filepath,
+            ),
         ):
             return
 
@@ -755,36 +1054,59 @@ def build_settings_tab(
                 )
 
             messagebox.showinfo(
-                "Success",
-                f"Successfully imported {result.imported} "
-                f"mandatory expenses from {cfg['desc']} file."
-                "\nAll existing mandatory expenses have been replaced." + details,
+                tr("common.done", "Готово"),
+                tr(
+                    "settings.mandatory.import.success",
+                    "Успешно импортировано {count} обязательных расходов из файла {desc}."
+                    "\nВсе существующие обязательные расходы были заменены.",
+                    count=result.imported,
+                    desc=cfg["desc"],
+                )
+                + details,
             )
             refresh_mandatory()
 
         def on_error(exc: BaseException) -> None:
             if isinstance(exc, FileNotFoundError):
-                messagebox.showerror("Error", f"File not found: {filepath}")
+                messagebox.showerror(
+                    tr("common.error", "Ошибка"),
+                    tr("common.file_not_found", "Файл не найден: {filepath}", filepath=filepath),
+                )
                 return
-            messagebox.showerror("Error", f"Failed to import {fmt}: {str(exc)}")
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr(
+                    "settings.mandatory.import.error",
+                    "Не удалось импортировать {fmt}: {error}",
+                    fmt=fmt,
+                    error=exc,
+                ),
+            )
 
         context._run_background(
             task,
             on_success=on_success,
             on_error=on_error,
-            busy_message=f"Importing {cfg['desc']} mandatory expenses...",
+            busy_message=tr(
+                "settings.mandatory.import.busy",
+                "Импортируем обязательные расходы из {desc}...",
+                desc=cfg["desc"],
+            ),
         )
 
     def export_mand() -> None:
         fmt = format_var.get()
         expenses = context.controller.load_mandatory_expenses()
         if not expenses:
-            messagebox.showinfo("No Expenses", "No mandatory expenses to export.")
+            messagebox.showinfo(
+                tr("settings.mandatory.export.empty_title", "Нет расходов"),
+                tr("settings.mandatory.export.empty", "Нет обязательных расходов для экспорта."),
+            )
             return
 
         filepath = filedialog.asksaveasfilename(
             defaultextension=f".{fmt.lower()}",
-            title="Save Mandatory Expenses",
+            title=tr("settings.mandatory.export.save", "Сохранить обязательные расходы"),
         )
         if not filepath:
             return
@@ -795,19 +1117,34 @@ def build_settings_tab(
             export_mandatory_expenses(expenses, filepath, fmt.lower())
 
         def on_success(_: Any) -> None:
-            messagebox.showinfo("Success", f"Mandatory expenses exported to {filepath}")
+            messagebox.showinfo(
+                tr("common.done", "Готово"),
+                tr(
+                    "settings.mandatory.export.success",
+                    "Обязательные расходы экспортированы в {filepath}",
+                    filepath=filepath,
+                ),
+            )
             open_in_file_manager(os.path.dirname(filepath))
 
         context._run_background(
             task,
             on_success=on_success,
-            busy_message=f"Exporting {fmt} mandatory expenses...",
+            busy_message=tr(
+                "settings.mandatory.export.busy",
+                "Экспортируем обязательные расходы в {fmt}...",
+                fmt=fmt,
+            ),
         )
 
-    ttk.Button(actions, text="Import", command=import_mand).grid(row=0, column=7)
-    ttk.Button(actions, text="Export", command=export_mand).grid(row=0, column=8)
+    ttk.Button(actions, text=tr("operations.import", "Импорт"), command=import_mand).grid(
+        row=1, column=2, sticky="ew", padx=6
+    )
+    ttk.Button(actions, text=tr("operations.export", "Экспорт"), command=export_mand).grid(
+        row=1, column=3, sticky="ew", padx=6
+    )
 
-    backup_frame = ttk.LabelFrame(left_panel, text="Backup (JSON)")
+    backup_frame = ttk.LabelFrame(left_panel, text=tr("settings.backup", "Резервная копия (JSON)"))
     backup_frame.grid(row=2, column=0, sticky="ew")
     backup_frame.grid_columnconfigure(0, weight=1)
     backup_frame.grid_columnconfigure(1, weight=1)
@@ -816,15 +1153,18 @@ def build_settings_tab(
         filepath = filedialog.askopenfilename(
             defaultextension=".json",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-            title="Import Full Backup",
+            title=tr("settings.backup.import.title", "Импорт полной копии"),
         )
         if not filepath:
             return
 
         if not messagebox.askyesno(
-            "Confirm Backup Import",
-            "This will replace all wallets, records, transfers, mandatory expenses, budgets, "
-            "and distribution data. Continue?",
+            tr("common.confirm", "Подтверждение"),
+            tr(
+                "settings.backup.import.confirm",
+                "Это заменит все кошельки, записи, переводы, обязательные расходы, "
+                "бюджеты и данные распределения. Продолжить?",
+            ),
         ):
             return
 
@@ -841,7 +1181,13 @@ def build_settings_tab(
             if result.skipped:
                 details = f"\nSkipped: {result.skipped}\n- " + "\n- ".join(result.errors[:5])
             messagebox.showinfo(
-                "Success", f"Backup imported. Imported entities: {result.imported}.{details}"
+                tr("common.done", "Готово"),
+                tr(
+                    "settings.backup.import.success",
+                    "Резервная копия импортирована. Импортировано сущностей: {count}.{details}",
+                    count=result.imported,
+                    details=details,
+                ),
             )
             refresh_mandatory()
             refresh_wallets()
@@ -864,18 +1210,29 @@ def build_settings_tab(
 
                 if is_readonly and not force:
                     if messagebox.askyesno(
-                        "Readonly Snapshot",
-                        "Backup is readonly snapshot. Import with force override?",
+                        tr("settings.backup.readonly.title", "Снимок только для чтения"),
+                        tr(
+                            "settings.backup.readonly.confirm",
+                            "Резервная копия доступна только для чтения. "
+                            "Импортировать с принудительным режимом?",
+                        ),
                     ):
                         run_import(True)
                     return
-                messagebox.showerror("Error", f"Failed to import backup: {str(exc)}")
+                messagebox.showerror(
+                    tr("common.error", "Ошибка"),
+                    tr(
+                        "settings.backup.import.error",
+                        "Не удалось импортировать резервную копию: {error}",
+                        error=exc,
+                    ),
+                )
 
             context._run_background(
                 current_task,
                 on_success=on_success,
                 on_error=on_error,
-                busy_message="Importing full backup...",
+                busy_message=tr("settings.backup.import.busy", "Импортируем полную копию..."),
             )
 
         run_import(False)
@@ -884,7 +1241,7 @@ def build_settings_tab(
         filepath = filedialog.asksaveasfilename(
             defaultextension=".json",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-            title="Export Full Backup",
+            title=tr("settings.backup.export.title", "Экспорт полной копии"),
         )
         if not filepath:
             return
@@ -935,23 +1292,38 @@ def build_settings_tab(
             )
 
         def on_success(_: Any) -> None:
-            messagebox.showinfo("Success", f"Full backup exported to {filepath}")
+            messagebox.showinfo(
+                tr("common.done", "Готово"),
+                tr(
+                    "settings.backup.export.success",
+                    "Полная копия экспортирована в {filepath}",
+                    filepath=filepath,
+                ),
+            )
             open_in_file_manager(os.path.dirname(filepath))
 
         context._run_background(
             task,
             on_success=on_success,
-            busy_message="Exporting full backup...",
+            busy_message=tr("settings.backup.export.busy", "Экспортируем полную копию..."),
         )
 
-    ttk.Button(backup_frame, text="Export Full Backup", command=export_backup).grid(
+    ttk.Button(
+        backup_frame,
+        text=tr("settings.backup.export.button", "Экспорт полной копии"),
+        command=export_backup,
+    ).grid(
         row=0,
         column=0,
         sticky="ew",
         padx=pad_x,
         pady=pad_y,
     )
-    ttk.Button(backup_frame, text="Import Full Backup", command=import_backup).grid(
+    ttk.Button(
+        backup_frame,
+        text=tr("settings.backup.import.button", "Импорт полной копии"),
+        command=import_backup,
+    ).grid(
         row=0,
         column=1,
         sticky="ew",
@@ -959,7 +1331,7 @@ def build_settings_tab(
         pady=pad_y,
     )
 
-    audit_frame = ttk.LabelFrame(left_panel, text="Finance Audit")
+    audit_frame = ttk.LabelFrame(left_panel, text=tr("settings.audit", "Финансовый аудит"))
     audit_frame.grid(row=3, column=0, sticky="ew", pady=(10, 0))
     audit_frame.grid_columnconfigure(0, weight=1)
 
@@ -968,9 +1340,11 @@ def build_settings_tab(
             report = context.controller.run_audit()
             show_audit_report_dialog(report, parent)
         except Exception as error:
-            messagebox.showerror("Audit Error", str(error))
+            messagebox.showerror(tr("settings.audit.error_title", "Ошибка аудита"), str(error))
 
-    ttk.Button(audit_frame, text="Run Audit", command=_on_run_audit).grid(
+    ttk.Button(
+        audit_frame, text=tr("settings.audit.run", "Запустить аудит"), command=_on_run_audit
+    ).grid(
         row=0,
         column=0,
         sticky="ew",

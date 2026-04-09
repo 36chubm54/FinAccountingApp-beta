@@ -5,6 +5,8 @@ import tkinter as tk
 from tkinter import scrolledtext, ttk
 
 from domain.audit import AuditFinding, AuditReport
+from gui.i18n import tr
+from gui.ui_helpers import center_dialog
 
 
 def safe_destroy(widget) -> None:
@@ -37,15 +39,17 @@ def _populate_audit_section(
         lines = [_format_audit_finding(finding, passed=passed) for finding in findings]
         widget.insert("1.0", "\n".join(lines))
     else:
-        widget.insert("1.0", "(none)")
+        widget.insert("1.0", tr("settings.audit.none", "(none)"))
     widget.configure(state="disabled")
 
 
 def show_audit_report_dialog(report: AuditReport, parent: tk.Misc) -> None:
     dialog = tk.Toplevel(parent)
-    dialog.title("Data Audit Report")
+    dialog.title(tr("settings.audit.report.title", "Отчет аудита"))
     dialog.minsize(560, 480)
     dialog.transient(parent.winfo_toplevel())
+    dialog.grid_columnconfigure(0, weight=1)
+    dialog.grid_rowconfigure(0, weight=1)
 
     frame = ttk.Frame(dialog, padding=12)
     frame.pack(fill="both", expand=True)
@@ -54,22 +58,36 @@ def show_audit_report_dialog(report: AuditReport, parent: tk.Misc) -> None:
     frame.grid_rowconfigure(4, weight=1)
     frame.grid_rowconfigure(5, weight=1)
 
-    ttk.Label(frame, text=f"Database: {os.path.basename(report.db_path)}").grid(
-        row=0, column=0, sticky="w"
-    )
+    ttk.Label(
+        frame,
+        text=tr("settings.audit.db", "База данных: {name}", name=os.path.basename(report.db_path)),
+    ).grid(row=0, column=0, sticky="w")
     ttk.Label(frame, text=report.summary()).grid(row=1, column=0, sticky="w", pady=(4, 10))
 
-    errors_frame = ttk.LabelFrame(frame, text=f"Errors ({len(report.errors)})")
+    errors_frame = ttk.LabelFrame(
+        frame,
+        text=tr("settings.audit.errors", "Ошибки ({count})", count=len(report.errors)),
+    )
     errors_frame.grid(row=3, column=0, sticky="nsew", pady=(0, 8))
     errors_frame.grid_columnconfigure(0, weight=1)
     errors_frame.grid_rowconfigure(0, weight=1)
 
-    warnings_frame = ttk.LabelFrame(frame, text=f"Warnings ({len(report.warnings)})")
+    warnings_frame = ttk.LabelFrame(
+        frame,
+        text=tr(
+            "settings.audit.warnings",
+            "Предупреждения ({count})",
+            count=len(report.warnings),
+        ),
+    )
     warnings_frame.grid(row=4, column=0, sticky="nsew", pady=(0, 8))
     warnings_frame.grid_columnconfigure(0, weight=1)
     warnings_frame.grid_rowconfigure(0, weight=1)
 
-    passed_frame = ttk.LabelFrame(frame, text=f"Passed ({len(report.passed)})")
+    passed_frame = ttk.LabelFrame(
+        frame,
+        text=tr("settings.audit.passed", "Пройдено ({count})", count=len(report.passed)),
+    )
     passed_frame.grid(row=5, column=0, sticky="nsew", pady=(0, 10))
     passed_frame.grid_columnconfigure(0, weight=1)
     passed_frame.grid_rowconfigure(0, weight=1)
@@ -98,19 +116,13 @@ def show_audit_report_dialog(report: AuditReport, parent: tk.Misc) -> None:
         background="#e6f9e6" if report.is_clean else None,
     )
 
-    close_button = ttk.Button(frame, text="Close", command=dialog.destroy)
+    close_button = ttk.Button(
+        frame,
+        text=tr("common.close", "Закрыть"),
+        command=dialog.destroy,
+    )
     close_button.grid(row=6, column=0, sticky="e")
 
-    dialog.update_idletasks()
-    root = parent.winfo_toplevel()
-    root_x = root.winfo_rootx()
-    root_y = root.winfo_rooty()
-    root_w = root.winfo_width()
-    root_h = root.winfo_height()
-    dialog_w = max(dialog.winfo_width(), 560)
-    dialog_h = max(dialog.winfo_height(), 480)
-    pos_x = root_x + max((root_w - dialog_w) // 2, 0)
-    pos_y = root_y + max((root_h - dialog_h) // 2, 0)
-    dialog.geometry(f"{dialog_w}x{dialog_h}+{pos_x}+{pos_y}")
+    center_dialog(dialog, parent, min_width=560, min_height=480)
     dialog.grab_set()
     close_button.focus_set()

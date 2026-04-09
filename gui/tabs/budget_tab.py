@@ -6,11 +6,19 @@ import logging
 import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import simpledialog, ttk
 from typing import Any, Protocol
 
 from domain.budget import Budget, BudgetResult, BudgetStatus, PaceStatus
+from gui.i18n import tr
 from gui.tooltip import Tooltip
+from gui.ui_helpers import (
+    ask_confirm,
+    attach_treeview_scrollbars,
+    bind_label_wrap,
+    set_status,
+    show_error,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -114,41 +122,49 @@ def build_budget_tab(
     parent.grid_columnconfigure(0, weight=1)
     parent.grid_rowconfigure(1, weight=1)
 
-    form_frame = ttk.LabelFrame(parent, text="New Budget")
+    form_frame = ttk.LabelFrame(parent, text=tr("budget.new", "Новый бюджет"))
     form_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=8)
     for col in (1, 3, 5):
         form_frame.grid_columnconfigure(col, weight=1)
 
-    ttk.Label(form_frame, text="Category:").grid(row=0, column=0, sticky="w", padx=6, pady=4)
+    ttk.Label(form_frame, text=tr("common.category", "Категория:")).grid(
+        row=0, column=0, sticky="w", padx=6, pady=4
+    )
     category_combo = ttk.Combobox(form_frame, state="normal", width=20)
     category_combo.grid(row=0, column=1, sticky="ew", padx=6, pady=4)
 
-    ttk.Label(form_frame, text="From (YYYY-MM-DD):").grid(
+    ttk.Label(form_frame, text=tr("common.from", "С даты:")).grid(
         row=0, column=2, sticky="w", padx=6, pady=4
     )
     start_date_entry = ttk.Entry(form_frame, width=12)
     start_date_entry.grid(row=0, column=3, sticky="ew", padx=6, pady=4)
 
-    ttk.Label(form_frame, text="To (YYYY-MM-DD):").grid(row=0, column=4, sticky="w", padx=6, pady=4)
+    ttk.Label(form_frame, text=tr("common.to", "По дату:")).grid(
+        row=0, column=4, sticky="w", padx=6, pady=4
+    )
     end_date_entry = ttk.Entry(form_frame, width=12)
     end_date_entry.grid(row=0, column=5, sticky="ew", padx=6, pady=4)
 
-    ttk.Label(form_frame, text="Limit (KZT):").grid(row=1, column=0, sticky="w", padx=6, pady=4)
+    ttk.Label(form_frame, text=tr("budget.limit_kzt", "Лимит (KZT):")).grid(
+        row=1, column=0, sticky="w", padx=6, pady=4
+    )
     limit_entry = ttk.Entry(form_frame, width=16)
     limit_entry.grid(row=1, column=1, sticky="ew", padx=6, pady=4)
 
     include_mandatory_var = tk.BooleanVar(value=False)
     include_mandatory_check = ttk.Checkbutton(
         form_frame,
-        text="Include mandatory expenses",
+        text=tr("budget.include_mandatory", "Учитывать обязательные расходы"),
         variable=include_mandatory_var,
     )
     include_mandatory_check.grid(row=1, column=2, columnspan=2, sticky="w", padx=6, pady=4)
     Tooltip(
         include_mandatory_check,
-        "Counts records with type 'mandatory_expense' only when they were added to Records,\n"
-        "their category matches the budget category, "
-        "and their date falls inside the budget period.",
+        tr(
+            "budget.include_mandatory.tooltip",
+            "Учитываются только обязательные расходы, уже добавленные в операции,"
+            "\nесли категория совпадает, а дата попадает в период бюджета.",
+        ),
     )
 
     list_frame = ttk.Frame(parent)
@@ -170,15 +186,15 @@ def build_budget_tab(
     budget_tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=10)
 
     for col, text, width, anchor in (
-        ("category", "Category", 110, "w"),
-        ("period", "Period", 185, "w"),
-        ("include", "Include mandatory", 120, "center"),
-        ("limit", "Limit KZT", 100, "e"),
-        ("spent", "Spent KZT", 100, "e"),
-        ("remaining", "Remaining", 100, "e"),
-        ("usage", "Usage %", 65, "center"),
-        ("pace", "Pace", 85, "center"),
-        ("status", "Status", 70, "center"),
+        ("category", tr("common.category_short", "Категория"), 170, "w"),
+        ("period", tr("common.period", "Период"), 180, "w"),
+        ("include", tr("budget.include_short", "Обязательные"), 120, "center"),
+        ("limit", tr("budget.limit", "Лимит"), 70, "e"),
+        ("spent", tr("budget.spent", "Потрачено"), 100, "e"),
+        ("remaining", tr("budget.remaining", "Остаток"), 100, "e"),
+        ("usage", tr("budget.usage_short", "%"), 65, "center"),
+        ("pace", tr("budget.pace", "Темп"), 85, "center"),
+        ("status", tr("common.status", "Статус"), 80, "center"),
     ):
         budget_tree.heading(col, text=text)
         budget_tree.column(col, width=width, anchor=anchor)  # type: ignore[arg-type]
@@ -190,17 +206,25 @@ def build_budget_tab(
     budget_tree.tag_configure("expired", foreground="#9ca3af")
 
     budget_tree.grid(row=0, column=0, sticky="nsew")
-    scroll = ttk.Scrollbar(list_frame, orient="vertical", command=budget_tree.yview)
-    scroll.grid(row=0, column=1, sticky="ns")
-    budget_tree.configure(yscrollcommand=scroll.set)
+    attach_treeview_scrollbars(list_frame, budget_tree, row=0, column=0, horizontal=True)
 
     progress_canvas = tk.Canvas(list_frame, height=40, bg="white", highlightthickness=0)
-    progress_canvas.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(2, 0))
+    progress_canvas.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(2, 0))
+    legend_label = ttk.Label(
+        list_frame,
+        text=tr(
+            "budget.legend",
+            "Зеленый: норма, янтарный: выше темпа, красный: перерасход, синяя линия: прошедшая часть периода.",  # noqa: E501
+        ),
+        style="Subtle.TLabel",
+    )
+    legend_label.grid(row=3, column=0, columnspan=2, sticky="ew", padx=4)
+    bind_label_wrap(legend_label, list_frame, max_width=720)
 
     btn_frame = ttk.Frame(list_frame)
-    btn_frame.grid(row=2, column=0, columnspan=2, sticky="w", pady=4)
+    btn_frame.grid(row=4, column=0, columnspan=2, sticky="w", pady=4)
     status_label = ttk.Label(list_frame, text="")
-    status_label.grid(row=3, column=0, columnspan=2, sticky="w", padx=4)
+    status_label.grid(row=5, column=0, columnspan=2, sticky="w", padx=4)
 
     def _clear_form() -> None:
         category_combo.set("")
@@ -215,6 +239,20 @@ def build_budget_tab(
         if result.status == BudgetStatus.EXPIRED:
             return "expired"
         return result.pace_status.value
+
+    def _display_pace_status(pace_status: PaceStatus) -> str:
+        return {
+            PaceStatus.ON_TRACK: tr("budget.pace_status.on_track", "В норме"),
+            PaceStatus.OVERPACE: tr("budget.pace_status.overpace", "Выше темпа"),
+            PaceStatus.OVERSPENT: tr("budget.pace_status.overspent", "Перерасход"),
+        }.get(pace_status, str(pace_status.value))
+
+    def _display_budget_status(status: BudgetStatus) -> str:
+        return {
+            BudgetStatus.FUTURE: tr("budget.status_value.future", "Будущий"),
+            BudgetStatus.ACTIVE: tr("budget.status_value.active", "Активный"),
+            BudgetStatus.EXPIRED: tr("budget.status_value.expired", "Завершен"),
+        }.get(status, str(status.value))
 
     def _refresh() -> None:
         try:
@@ -240,20 +278,29 @@ def build_budget_tab(
                 values=(
                     budget.category,
                     f"{budget.start_date}  ->  {budget.end_date}",
-                    "Yes" if budget.include_mandatory else "No",
+                    tr("common.yes", "Да") if budget.include_mandatory else tr("common.no", "Нет"),
                     f"{budget.limit_kzt:,.0f}",
                     f"{result.spent_kzt:,.0f}",
                     f"{result.remaining_kzt:,.0f}",
                     f"{result.usage_pct:.1f}%",
-                    result.pace_status.value,
-                    result.status.value,
+                    _display_pace_status(result.pace_status),
+                    _display_budget_status(result.status),
                 ),
                 tags=(_row_tag(result),),
             )
 
         progress_canvas.after(50, lambda: _draw_progress_bars(progress_canvas, results))
         active_count = sum(1 for item in results if item.status == BudgetStatus.ACTIVE)
-        status_label.config(text=f"{active_count} active  /  {len(results)} total")
+        set_status(
+            status_label,
+            tr(
+                "budget.status.active",
+                "Активных бюджетов: {active} из {total}",
+                active=active_count,
+                total=len(results),
+            ),
+            tone="success" if active_count else "muted",
+        )
 
     def _find_selected_budget() -> Budget | None:
         selection = budget_tree.selection()
@@ -273,17 +320,22 @@ def build_budget_tab(
         raw_limit = limit_entry.get().strip()
 
         if not category:
-            messagebox.showerror("Error", "Category is required.")
+            show_error(tr("budget.error.category_required", "Укажите категорию."))
             return
         if not start_date or not end_date:
-            messagebox.showerror("Error", "Both From and To dates are required (YYYY-MM-DD).")
+            show_error(
+                tr(
+                    "budget.error.date_required",
+                    "Укажите начальную и конечную дату в формате ГГГГ-ММ-ДД.",
+                )
+            )
             return
         try:
             limit_kzt = float(raw_limit.replace(" ", "").replace(",", "."))
             if limit_kzt <= 0:
                 raise ValueError
         except ValueError:
-            messagebox.showerror("Error", "Limit must be a positive number.")
+            show_error(tr("budget.error.limit_positive", "Лимит должен быть положительным числом."))
             return
 
         try:
@@ -295,7 +347,7 @@ def build_budget_tab(
                 include_mandatory=include_mandatory_var.get(),
             )
         except ValueError as error:
-            messagebox.showerror("Budget Error", str(error))
+            show_error(str(error), title=tr("budget.error.title", "Ошибка бюджета"))
             return
 
         _clear_form()
@@ -304,28 +356,38 @@ def build_budget_tab(
     def _delete_budget() -> None:
         target = _find_selected_budget()
         if target is None:
-            messagebox.showerror("Error", "Select a budget to delete.")
+            show_error(tr("budget.error.select_first", "Сначала выберите бюджет."))
             return
-        if not messagebox.askyesno(
-            "Confirm Delete",
-            f"Delete budget '{target.category}'\n{target.start_date} -> {target.end_date}?",
+        if not ask_confirm(
+            tr(
+                "budget.delete.confirm",
+                "Удалить бюджет '{category}'\n{start_date} -> {end_date}?",
+                category=target.category,
+                start_date=target.start_date,
+                end_date=target.end_date,
+            ),
+            title=tr("operations.delete_all.title", "Подтвердите удаление"),
         ):
             return
         try:
             context.controller.delete_budget(target.id)
         except ValueError as error:
-            messagebox.showerror("Error", str(error))
+            show_error(str(error))
             return
         _refresh()
 
     def _edit_limit() -> None:
         target = _find_selected_budget()
         if target is None:
-            messagebox.showerror("Error", "Select a budget to edit.")
+            show_error(tr("budget.error.select_first", "Сначала выберите бюджет."))
             return
         new_limit_str = simpledialog.askstring(
-            "Edit Limit",
-            f"New limit (KZT) for '{target.category}':",
+            tr("budget.limit.title", "Изменение лимита"),
+            tr(
+                "budget.limit.prompt",
+                "Новый лимит (KZT) для '{category}':",
+                category=target.category,
+            ),
             initialvalue=f"{target.limit_kzt:,.0f}",
             parent=parent,
         )
@@ -339,15 +401,30 @@ def build_budget_tab(
         try:
             context.controller.update_budget_limit(target.id, float(normalized))
         except (ValueError, TypeError) as error:
-            messagebox.showerror("Error", f"Invalid limit: {error}")
+            show_error(tr("budget.error.invalid_limit", "Некорректный лимит: {error}", error=error))
             return
         _refresh()
 
-    ttk.Button(form_frame, text="Add", command=_add_budget).grid(row=1, column=4, padx=6, pady=4)
-    ttk.Button(form_frame, text="Clear", command=_clear_form).grid(row=1, column=5, padx=6, pady=4)
-    ttk.Button(btn_frame, text="Edit Limit", command=_edit_limit).pack(side=tk.LEFT, padx=4)
-    ttk.Button(btn_frame, text="Delete", command=_delete_budget).pack(side=tk.LEFT, padx=4)
-    ttk.Button(btn_frame, text="Refresh", command=_refresh).pack(side=tk.LEFT, padx=4)
+    ttk.Button(
+        form_frame,
+        text=tr("budget.create", "Создать бюджет"),
+        style="Primary.TButton",
+        command=_add_budget,
+    ).grid(row=1, column=4, padx=6, pady=4)
+    ttk.Button(form_frame, text=tr("budget.clear", "Очистить"), command=_clear_form).grid(
+        row=1, column=5, padx=6, pady=4
+    )
+    ttk.Button(
+        btn_frame,
+        text=tr("budget.edit_limit", "Изменить лимит"),
+        command=_edit_limit,
+    ).pack(side=tk.LEFT, padx=4)
+    ttk.Button(btn_frame, text=tr("common.delete", "Удалить"), command=_delete_budget).pack(
+        side=tk.LEFT, padx=4
+    )
+    ttk.Button(btn_frame, text=tr("common.refresh", "Обновить"), command=_refresh).pack(
+        side=tk.LEFT, padx=4
+    )
 
     parent.after(100, _refresh)
     return BudgetTabBindings(
