@@ -384,10 +384,19 @@ class FinancialApp(tk.Tk):
         self._start_status_refresh_timer()
 
     def _import_policy_from_ui(self, mode_label: str) -> ImportPolicy:
-        if mode_label == "Полная замена":
+        mapping = {
+            "operations.mode.replace": ImportPolicy.FULL_BACKUP,
+            "operations.mode.legacy": ImportPolicy.LEGACY,
+            "operations.mode.current_rate": ImportPolicy.CURRENT_RATE,
+        }
+        if mode_label in mapping:
+            return mapping[mode_label]
+        if mode_label == tr("operations.mode.replace", "Полная замена"):
             return ImportPolicy.FULL_BACKUP
-        if mode_label == "Наследуемый импорт":
+        if mode_label == tr("operations.mode.legacy", "Наследуемый импорт"):
             return ImportPolicy.LEGACY
+        if mode_label == tr("operations.mode.current_rate", "По текущему курсу"):
+            return ImportPolicy.CURRENT_RATE
         return ImportPolicy.CURRENT_RATE
 
     def _refresh_list(self, records: list[Any] | None = None) -> None:

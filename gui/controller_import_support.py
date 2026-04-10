@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections.abc import Callable
 from dataclasses import replace
+from typing import cast
 
-from domain.debt import DebtPayment
-from domain.records import Record
+from domain.debt import Debt, DebtPayment
+from domain.records import MandatoryExpenseRecord, Record
 from domain.transfers import Transfer
+from domain.wallets import Wallet
 from infrastructure.repositories import RecordRepository
 
 
@@ -36,8 +39,11 @@ def run_import_transaction(repository: RecordRepository, operation, logger: logg
     transfers_snapshot = repository.load_transfers()
     debts_snapshot = None
     debt_payments_snapshot = None
-    load_debts = getattr(repository, "load_debts", None)
-    load_debt_payments = getattr(repository, "load_debt_payments", None)
+    load_debts = cast(Callable[[], list[Debt]] | None, getattr(repository, "load_debts", None))
+    load_debt_payments = cast(
+        Callable[[], list[DebtPayment]] | None,
+        getattr(repository, "load_debt_payments", None),
+    )
     if callable(load_debts) and callable(load_debt_payments):
         try:
             debts_snapshot = list(load_debts())
@@ -50,16 +56,22 @@ def run_import_transaction(repository: RecordRepository, operation, logger: logg
     except Exception as import_error:
         logger.exception("Import failed, rolling back repository state")
         try:
-            rollback_payload = dict(
-                wallets=wallets_snapshot,
-                records=records_snapshot,
-                mandatory_expenses=mandatory_snapshot,
-                transfers=transfers_snapshot,
-            )
             if debts_snapshot is not None and debt_payments_snapshot is not None:
-                rollback_payload["debts"] = debts_snapshot
-                rollback_payload["debt_payments"] = debt_payments_snapshot
-            repository.replace_all_data(**rollback_payload)
+                repository.replace_all_data(
+                    wallets=wallets_snapshot,
+                    records=records_snapshot,
+                    mandatory_expenses=mandatory_snapshot,
+                    transfers=transfers_snapshot,
+                    debts=debts_snapshot,
+                    debt_payments=debt_payments_snapshot,
+                )
+            else:
+                repository.replace_all_data(
+                    wallets=wallets_snapshot,
+                    records=records_snapshot,
+                    mandatory_expenses=mandatory_snapshot,
+                    transfers=transfers_snapshot,
+                )
         except Exception:
             logger.exception("Rollback failed after import error")
         raise import_error
@@ -81,10 +93,16 @@ def normalize_operation_ids_for_import(repository: RecordRepository) -> None:
         record_id_map[int(record.id)] = index
         normalized_records.append(replace(record, id=index, transfer_id=mapped_transfer_id))
 
-    load_debts = getattr(repository, "load_debts", None)
-    load_debt_payments = getattr(repository, "load_debt_payments", None)
-    replace_all_data = getattr(repository, "replace_all_data", None)
-    if callable(load_debts) and callable(load_debt_payments) and callable(replace_all_data):
+    load_debts = cast(Callable[[], list[Debt]] | None, getattr(repository, "load_debts", None))
+    load_debt_payments = cast(
+        Callable[[], list[DebtPayment]] | None,
+        getattr(repository, "load_debt_payments", None),
+    )
+    if callable(load_debts) and callable(load_debt_payments):
+        debt_payments: list[DebtPayment] | None = None
+        debts: list[Debt] | None = None
+        wallets: list[Wallet] | None = None
+        mandatory_expenses: list[MandatoryExpenseRecord] = []
         try:
             debt_payments = list(load_debt_payments())
             debts = list(load_debts())
@@ -102,7 +120,7 @@ def normalize_operation_ids_for_import(repository: RecordRepository) -> None:
             if payment.record_id is not None:
                 mapped_record_id = record_id_map.get(int(payment.record_id))
             normalized_debt_payments.append(replace(payment, record_id=mapped_record_id))
-        replace_all_data(
+        repository.replace_all_data(
             wallets=wallets,
             records=normalized_records,
             mandatory_expenses=mandatory_expenses,

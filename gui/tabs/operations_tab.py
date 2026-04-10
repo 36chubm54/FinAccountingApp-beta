@@ -663,11 +663,22 @@ def build_operations_tab(
     ).grid(row=8, column=0, columnspan=2, pady=6)
     refresh_transfer_wallet_menus()
 
-    import_mode_var = tk.StringVar(value=tr("operations.mode.replace", "Полная замена"))
+    import_mode_keys = [
+        "operations.mode.replace",
+        "operations.mode.current_rate",
+        "operations.mode.legacy",
+    ]
+    import_mode_labels = [
+        tr("operations.mode.replace", "Полная замена"),
+        tr("operations.mode.current_rate", "По текущему курсу"),
+        tr("operations.mode.legacy", "Наследуемый импорт"),
+    ]
+    import_mode_label_var = tk.StringVar(value=import_mode_labels[0])
+    import_mode_key_var = tk.StringVar(value=import_mode_keys[0])
     import_format_var = tk.StringVar(value="CSV")
 
     def import_records_data() -> None:
-        policy = context._import_policy_from_ui(import_mode_var.get())
+        policy = context._import_policy_from_ui(import_mode_key_var.get())
         fmt = import_format_var.get()
         cfg = import_formats.get(fmt)
         if not cfg:
@@ -744,7 +755,7 @@ def build_operations_tab(
             confirmed = show_import_preview_dialog(
                 parent=parent,
                 filepath=filepath,
-                policy_label=import_mode_var.get(),
+                policy_label=import_mode_label_var.get(),
                 preview=preview,
                 force=False,
             )
@@ -861,14 +872,22 @@ def build_operations_tab(
         row=0, column=1, sticky="ew", padx=(6, 8)
     )
     ttk.Label(import_actions, text=tr("common.mode", "Режим:")).grid(row=0, column=2, sticky="w")
-    ttk.OptionMenu(
+    import_mode_combo = ttk.Combobox(
         import_actions,
-        import_mode_var,
-        tr("operations.mode.replace", "Полная замена"),
-        tr("operations.mode.replace", "Полная замена"),
-        tr("operations.mode.current_rate", "По текущему курсу"),
-        tr("operations.mode.legacy", "Наследуемый импорт"),
-    ).grid(row=0, column=3, sticky="ew", padx=(6, 8))
+        textvariable=import_mode_label_var,
+        values=import_mode_labels,
+        state="readonly",
+    )
+    import_mode_combo.grid(row=0, column=3, sticky="ew", padx=(6, 8))
+
+    def _sync_import_mode_key(_event: Any | None = None) -> None:
+        idx = import_mode_combo.current()
+        if idx < 0:
+            idx = 0
+        import_mode_key_var.set(import_mode_keys[idx])
+
+    import_mode_combo.bind("<<ComboboxSelected>>", _sync_import_mode_key)
+    _sync_import_mode_key()
     ttk.Button(
         import_actions,
         text=tr("operations.import", "Импорт"),
