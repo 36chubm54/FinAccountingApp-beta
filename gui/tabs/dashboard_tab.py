@@ -7,7 +7,7 @@ import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
-from tkinter import messagebox, ttk
+from tkinter import ttk
 from typing import Any, Protocol
 
 from domain.asset import Asset
@@ -15,20 +15,10 @@ from domain.dashboard import DashboardAllocationSlice, DashboardPayload, Dashboa
 from domain.goal import GoalProgress
 from domain.validation import ensure_not_future, parse_ymd
 from gui.i18n import tr
-from gui.ui_helpers import bind_label_wrap, center_dialog, show_error, show_info
+from gui.ui_helpers import ask_confirm, bind_label_wrap, center_dialog, show_error, show_info
+from gui.ui_theme import get_palette
 
 logger = logging.getLogger(__name__)
-
-_PALETTE = [
-    "#1d4ed8",
-    "#059669",
-    "#d97706",
-    "#dc2626",
-    "#7c3aed",
-    "#0891b2",
-    "#65a30d",
-    "#ea580c",
-]
 
 
 class DashboardTabContext(Protocol):
@@ -256,6 +246,8 @@ def _prepare_bulk_snapshot_entries(
 
 def _draw_trend(canvas: tk.Canvas, data: list[DashboardTrendPoint]) -> None:
     canvas.delete("all")
+    palette = get_palette()
+    canvas.configure(bg=palette.surface_elevated, highlightbackground=palette.border_soft)
     width = max(canvas.winfo_width(), 320)
     height = max(canvas.winfo_height(), 200)
     pad = {"left": 54, "right": 18, "top": 20, "bottom": 34}
@@ -265,7 +257,7 @@ def _draw_trend(canvas: tk.Canvas, data: list[DashboardTrendPoint]) -> None:
             width // 2,
             height // 2,
             text=tr("dashboard.trend.empty", "Пока нет данных по динамике"),
-            fill="#6b7280",
+            fill=palette.chart_empty,
             font=("Segoe UI", 11),
         )
         return
@@ -295,7 +287,7 @@ def _draw_trend(canvas: tk.Canvas, data: list[DashboardTrendPoint]) -> None:
         pad["top"],
         width - pad["right"],
         height - pad["bottom"],
-        outline="#e5e7eb",
+        outline=palette.border_soft,
         width=1,
     )
 
@@ -305,7 +297,7 @@ def _draw_trend(canvas: tk.Canvas, data: list[DashboardTrendPoint]) -> None:
         height - pad["bottom"],
         width - pad["right"],
         height - pad["bottom"],
-        fill="#cbd5e1",
+        fill=palette.chart_axis,
         width=1,
     )
 
@@ -316,18 +308,26 @@ def _draw_trend(canvas: tk.Canvas, data: list[DashboardTrendPoint]) -> None:
             zero_y,
             width - pad["right"],
             zero_y,
-            fill="#d1d5db",
+            fill=palette.chart_grid,
             dash=(4, 4),
         )
 
     for index in range(len(values) - 1):
         x1, y1 = to_xy(index, values[index])
         x2, y2 = to_xy(index + 1, values[index + 1])
-        canvas.create_line(x1, y1, x2, y2, fill="#1d4ed8", width=3, smooth=True)
+        canvas.create_line(x1, y1, x2, y2, fill=palette.accent_blue, width=3, smooth=True)
 
     for index, point in enumerate(data):
         x, y = to_xy(index, float(point.balance))
-        canvas.create_oval(x - 3, y - 3, x + 3, y + 3, fill="#1d4ed8", outline="white", width=1)
+        canvas.create_oval(
+            x - 3,
+            y - 3,
+            x + 3,
+            y + 3,
+            fill=palette.accent_blue,
+            outline=palette.chart_outline,
+            width=1,
+        )
 
     step = max(1, len(data) // 5)
     for index, point in enumerate(data):
@@ -337,7 +337,7 @@ def _draw_trend(canvas: tk.Canvas, data: list[DashboardTrendPoint]) -> None:
                 x,
                 height - pad["bottom"] + 12,
                 text=str(point.month),
-                fill="#6b7280",
+                fill=palette.chart_empty,
                 font=("Segoe UI", 8),
             )
 
@@ -345,7 +345,7 @@ def _draw_trend(canvas: tk.Canvas, data: list[DashboardTrendPoint]) -> None:
         pad["left"] - 6,
         pad["top"],
         text=f"{max_value:,.0f}",
-        fill="#6b7280",
+        fill=palette.chart_empty,
         font=("Segoe UI", 8),
         anchor="e",
     )
@@ -353,7 +353,7 @@ def _draw_trend(canvas: tk.Canvas, data: list[DashboardTrendPoint]) -> None:
         pad["left"] - 6,
         height - pad["bottom"],
         text=f"{min_value:,.0f}",
-        fill="#6b7280",
+        fill=palette.chart_empty,
         font=("Segoe UI", 8),
         anchor="e",
     )
@@ -361,6 +361,8 @@ def _draw_trend(canvas: tk.Canvas, data: list[DashboardTrendPoint]) -> None:
 
 def _draw_allocation(canvas: tk.Canvas, data: list[DashboardAllocationSlice]) -> None:
     canvas.delete("all")
+    palette = get_palette()
+    canvas.configure(bg=palette.surface_elevated, highlightbackground=palette.border_soft)
     width = max(canvas.winfo_width(), 280)
     height = max(canvas.winfo_height(), 220)
     center_x = width * 0.35
@@ -373,7 +375,7 @@ def _draw_allocation(canvas: tk.Canvas, data: list[DashboardAllocationSlice]) ->
             width // 2,
             height // 2,
             text=tr("dashboard.allocation.empty_assets", "Активы пока не добавлены"),
-            fill="#6b7280",
+            fill=palette.chart_empty,
             font=("Segoe UI", 11),
         )
         return
@@ -384,7 +386,7 @@ def _draw_allocation(canvas: tk.Canvas, data: list[DashboardAllocationSlice]) ->
             width // 2,
             height // 2,
             text=tr("dashboard.allocation.empty", "Нет данных для структуры активов"),
-            fill="#6b7280",
+            fill=palette.chart_empty,
             font=("Segoe UI", 11),
         )
         return
@@ -393,7 +395,7 @@ def _draw_allocation(canvas: tk.Canvas, data: list[DashboardAllocationSlice]) ->
     for index, item in enumerate(data):
         amount = float(item.amount_kzt)
         sweep = amount / total * 360.0
-        color = _PALETTE[index % len(_PALETTE)]
+        color = palette.chart_series[index % len(palette.chart_series)]
         canvas.create_arc(
             center_x - radius,
             center_y - radius,
@@ -402,7 +404,7 @@ def _draw_allocation(canvas: tk.Canvas, data: list[DashboardAllocationSlice]) ->
             start=start_angle,
             extent=-sweep,
             fill=color,
-            outline="white",
+            outline=palette.chart_outline,
             width=2,
         )
         start_angle -= sweep
@@ -412,21 +414,21 @@ def _draw_allocation(canvas: tk.Canvas, data: list[DashboardAllocationSlice]) ->
         center_y - inner_radius,
         center_x + inner_radius,
         center_y + inner_radius,
-        fill="white",
-        outline="white",
+        fill=palette.surface_elevated,
+        outline=palette.surface_elevated,
     )
     canvas.create_text(
         center_x,
         center_y - 8,
         text=tr("dashboard.assets", "Активы"),
-        fill="#6b7280",
+        fill=palette.chart_empty,
         font=("Segoe UI", 9),
     )
     canvas.create_text(
         center_x,
         center_y + 12,
         text=_format_money(total),
-        fill="#111827",
+        fill=palette.chart_text,
         font=("Segoe UI", 10, "bold"),
     )
 
@@ -434,14 +436,14 @@ def _draw_allocation(canvas: tk.Canvas, data: list[DashboardAllocationSlice]) ->
     legend_y = 30
     for index, item in enumerate(data[:6]):
         y = legend_y + index * 28
-        color = _PALETTE[index % len(_PALETTE)]
+        color = palette.chart_series[index % len(palette.chart_series)]
         canvas.create_rectangle(legend_x, y, legend_x + 12, y + 12, fill=color, outline="")
         canvas.create_text(
             legend_x + 18,
             y + 1,
             anchor="nw",
             text=str(item.category).title(),
-            fill="#111827",
+            fill=palette.chart_text,
             font=("Segoe UI", 9, "bold"),
         )
         canvas.create_text(
@@ -449,7 +451,7 @@ def _draw_allocation(canvas: tk.Canvas, data: list[DashboardAllocationSlice]) ->
             y + 14,
             anchor="nw",
             text=f"{item.share_pct:.1f}% • {_format_money(item.amount_kzt)}",
-            fill="#6b7280",
+            fill=palette.chart_empty,
             font=("Segoe UI", 8),
         )
 
@@ -548,6 +550,7 @@ def show_bulk_asset_snapshot_dialog(
     context: DashboardTabContext,
     on_saved: Callable[[], None],
 ) -> None:
+    palette = get_palette()
     assets = list(context.controller.get_assets(active_only=True))
     if not assets:
         show_info(
@@ -567,6 +570,7 @@ def show_bulk_asset_snapshot_dialog(
     dialog.transient(parent.winfo_toplevel())
     dialog.minsize(900, 500)
     dialog.resizable(True, True)
+    dialog.configure(background=palette.background)
     dialog.grid_columnconfigure(0, weight=1)
     dialog.grid_rowconfigure(0, weight=1)
 
@@ -590,7 +594,7 @@ def show_bulk_asset_snapshot_dialog(
             "dashboard.bulk.hint",
             "Заполняйте только те активы, которые нужно обновить. Пустые строки будут пропущены.",
         ),
-        foreground="#6b7280",
+        foreground=palette.text_muted,
     ).grid(row=1, column=0, sticky="w", pady=(4, 10))
 
     header = ttk.Frame(content)
@@ -609,7 +613,7 @@ def show_bulk_asset_snapshot_dialog(
         text=tr(
             "dashboard.bulk.snapshot_date_hint", "Эта дата применяется ко всем заполненным строкам."
         ),
-        foreground="#6b7280",
+        foreground=palette.text_muted,
     ).grid(
         row=0,
         column=2,
@@ -621,7 +625,12 @@ def show_bulk_asset_snapshot_dialog(
     table_frame.grid_columnconfigure(0, weight=1)
     table_frame.grid_rowconfigure(0, weight=1)
 
-    canvas = tk.Canvas(table_frame, highlightthickness=0, bg="white")
+    canvas = tk.Canvas(
+        table_frame,
+        highlightthickness=0,
+        bg=palette.surface,
+        highlightbackground=palette.border_soft,
+    )
     canvas.grid(row=0, column=0, sticky="nsew")
     scroll = ttk.Scrollbar(table_frame, orient="vertical", command=canvas.yview)
     scroll.grid(row=0, column=1, sticky="ns")
@@ -670,7 +679,7 @@ def show_bulk_asset_snapshot_dialog(
             padx=(0, 12),
             pady=6,
         )
-        ttk.Label(rows, text=current_text, foreground="#6b7280").grid(
+        ttk.Label(rows, text=current_text, foreground=palette.text_muted).grid(
             row=visual_row,
             column=1,
             sticky="w",
@@ -728,12 +737,12 @@ def show_bulk_asset_snapshot_dialog(
             "Подсказка: пустые строки игнорируются, поэтому можно обновлять только те активы, "
             "которые вы изменяли.",
         ),
-        foreground="#6b7280",
+        foreground=palette.text_muted,
     ).grid(row=4, column=0, sticky="w", pady=(14, 0))
 
     buttons = ttk.Frame(content)
     buttons.grid(row=5, column=0, sticky="e", pady=(12, 0))
-    form_status = ttk.Label(content, foreground="#b45309")
+    form_status = ttk.Label(content, foreground=palette.warning)
     form_status.grid(row=5, column=0, sticky="w")
 
     def _close() -> None:
@@ -1275,9 +1284,13 @@ def show_manage_assets_dialog(
                 parent=dialog,
             )
             return
-        confirmed = messagebox.askyesno(
-            "Деактивация актива",
-            f"Деактивировать актив '{asset.name}'?",
+        confirmed = ask_confirm(
+            tr(
+                "dashboard.asset.deactivate.confirm",
+                "Деактивировать актив '{name}'?",
+                name=asset.name,
+            ),
+            title=tr("dashboard.asset.deactivate.title", "Деактивация актива"),
             parent=dialog,
         )
         if not confirmed:
@@ -1320,6 +1333,7 @@ def build_dashboard_tab(
     *,
     context: DashboardTabContext,
 ) -> DashboardTabBindings:
+    palette = get_palette()
     parent.grid_columnconfigure(0, weight=1)
     parent.grid_rowconfigure(1, weight=5, minsize=390)
     parent.grid_rowconfigure(2, weight=1, minsize=170)
@@ -1338,7 +1352,7 @@ def build_dashboard_tab(
     ttk.Label(
         action_row,
         text=tr("dashboard.quick_actions", "Быстрые действия:"),
-        foreground="#6b7280",
+        foreground=palette.text_muted,
     ).pack(side=tk.LEFT)
     create_asset_button = ttk.Button(
         action_row,
@@ -1401,7 +1415,7 @@ def build_dashboard_tab(
             active="-",
             total="-",
         ),
-        foreground="#6b7280",
+        foreground=palette.text_muted,
     )
     assets_status_label.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 4))
 
@@ -1414,7 +1428,7 @@ def build_dashboard_tab(
     ttk.Label(
         summary_frame,
         text=tr("dashboard.trend.hint", "Краткая помесячная динамика капитала."),
-        foreground="#6b7280",
+        foreground=palette.text_muted,
     ).grid(row=3, column=0, columnspan=2, sticky="w", padx=12)
 
     allocation_label = ttk.Label(
@@ -1429,13 +1443,23 @@ def build_dashboard_tab(
             "dashboard.allocation.hint",
             "Активные активы, сгруппированные по категориям.",
         ),
-        foreground="#6b7280",
+        foreground=palette.text_muted,
     ).grid(row=3, column=2, sticky="w", padx=12)
 
-    trend_canvas = tk.Canvas(summary_frame, height=260, bg="white", highlightthickness=0)
+    trend_canvas = tk.Canvas(
+        summary_frame,
+        height=260,
+        bg=palette.surface_elevated,
+        highlightthickness=0,
+    )
     trend_canvas.grid(row=4, column=0, columnspan=2, sticky="nsew", padx=(12, 6), pady=(6, 12))
 
-    allocation_canvas = tk.Canvas(summary_frame, height=260, bg="white", highlightthickness=0)
+    allocation_canvas = tk.Canvas(
+        summary_frame,
+        height=260,
+        bg=palette.surface_elevated,
+        highlightthickness=0,
+    )
     allocation_canvas.grid(row=4, column=2, sticky="nsew", padx=(6, 12), pady=(6, 12))
 
     goals_frame = ttk.LabelFrame(parent, text=tr("dashboard.goals.title", "Цели"))
@@ -1452,12 +1476,16 @@ def build_dashboard_tab(
             "dashboard.goals.hint",
             "Следите за прогрессом и меняйте статус целей прямо отсюда.",
         ),
-        foreground="#6b7280",
+        foreground=palette.text_muted,
     )
     goals_hint_label.grid(row=0, column=0, sticky="ew")
     bind_label_wrap(goals_hint_label, goals_header, max_width=720)
 
-    goals_canvas = tk.Canvas(goals_frame, bg="white", highlightthickness=0)
+    goals_canvas = tk.Canvas(
+        goals_frame,
+        bg=palette.surface_elevated,
+        highlightthickness=0,
+    )
     goals_canvas.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=10)
 
     goals_scroll = ttk.Scrollbar(goals_frame, orient="vertical", command=goals_canvas.yview)
@@ -1557,9 +1585,9 @@ def build_dashboard_tab(
 
     def _delete_goal(goal_progress: GoalProgress) -> None:
         goal = goal_progress.goal
-        confirmed = messagebox.askyesno(
-            tr("common.confirm", "Подтверждение"),
+        confirmed = ask_confirm(
             tr("dashboard.goal.delete.confirm", "Удалить цель '{title}'?", title=goal.title),
+            title=tr("common.confirm", "Подтверждение"),
             parent=parent,
         )
         if not confirmed:

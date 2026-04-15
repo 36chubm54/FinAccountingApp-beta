@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 import tkinter as tk
 from collections.abc import Callable
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, ttk
 from typing import Any, Protocol
 
 from domain.import_policy import ImportPolicy
@@ -15,6 +15,7 @@ from domain.import_result import ImportResult
 from gui.helpers import open_in_file_manager
 from gui.i18n import tr
 from gui.tabs.settings_support import safe_destroy, show_audit_report_dialog
+from gui.ui_dialogs import messagebox_compat as messagebox
 
 
 class SettingsTabContext(Protocol):

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from tkinter import ttk
 
 from gui.i18n import tr
+from gui.ui_theme import get_palette
 
 
 @dataclass(slots=True)
@@ -35,6 +36,7 @@ def build_infographics_tab(
     after: Callable[[int, Callable[[], None]], str],
     after_cancel: Callable[[str], None],
 ) -> InfographicsTabBindings:
+    palette = get_palette()
     parent.grid_columnconfigure(0, weight=1, uniform="infographics_top")
     parent.grid_columnconfigure(1, weight=1, uniform="infographics_top")
     parent.grid_rowconfigure(1, weight=1)
@@ -74,7 +76,12 @@ def build_infographics_tab(
     monthly_frame.grid_columnconfigure(0, weight=1)
     monthly_frame.grid_rowconfigure(1, weight=1)
 
-    expense_pie_canvas = tk.Canvas(pie_frame, height=240, bg="white", highlightthickness=0)
+    expense_pie_canvas = tk.Canvas(
+        pie_frame,
+        height=240,
+        bg=palette.surface_elevated,
+        highlightthickness=0,
+    )
     expense_pie_canvas.grid(row=1, column=0, sticky="nsew", padx=(10, 4), pady=10)
 
     legend_container = ttk.Frame(pie_frame)
@@ -85,7 +92,7 @@ def build_infographics_tab(
         legend_container,
         height=240,
         highlightthickness=0,
-        bg="white",
+        bg=palette.surface_elevated,
     )
     expense_legend_canvas.grid(row=0, column=0, sticky="nsew")
     legend_scroll = ttk.Scrollbar(
@@ -96,7 +103,7 @@ def build_infographics_tab(
     legend_scroll.grid(row=0, column=1, sticky="ns")
     expense_legend_canvas.configure(yscrollcommand=legend_scroll.set)
 
-    expense_legend_frame = tk.Frame(expense_legend_canvas, bg="white")
+    expense_legend_frame = tk.Frame(expense_legend_canvas, bg=palette.surface_elevated)
     expense_legend_canvas.create_window(
         (0, 0),
         window=expense_legend_frame,
@@ -130,7 +137,12 @@ def build_infographics_tab(
     chart_month_menu.grid(row=0, column=1, sticky="w", padx=(6, 0))
     chart_month_var.trace_add("write", on_chart_filter_change)
 
-    daily_bar_canvas = tk.Canvas(daily_frame, height=220, bg="white", highlightthickness=0)
+    daily_bar_canvas = tk.Canvas(
+        daily_frame,
+        height=220,
+        bg=palette.surface_elevated,
+        highlightthickness=0,
+    )
     daily_bar_canvas.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
 
     monthly_controls = ttk.Frame(monthly_frame)
@@ -145,7 +157,12 @@ def build_infographics_tab(
     chart_year_menu.grid(row=0, column=1, sticky="w", padx=(6, 0))
     chart_year_var.trace_add("write", on_chart_filter_change)
 
-    monthly_bar_canvas = tk.Canvas(monthly_frame, height=220, bg="white", highlightthickness=0)
+    monthly_bar_canvas = tk.Canvas(
+        monthly_frame,
+        height=220,
+        bg=palette.surface_elevated,
+        highlightthickness=0,
+    )
     monthly_bar_canvas.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
 
     chart_redraw_job: str | None = None

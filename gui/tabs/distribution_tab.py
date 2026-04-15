@@ -8,12 +8,15 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date as dt_date
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import ttk
 from typing import Any, Protocol
 
 from domain.distribution import DistributionItem, FrozenDistributionRow, MonthlyDistribution
 from gui.i18n import tr
 from gui.tooltip import Tooltip
+from gui.ui_dialogs import messagebox_compat as messagebox
+from gui.ui_helpers import ask_text
+from gui.ui_theme import get_palette
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +41,7 @@ def build_distribution_tab(
     *,
     context: DistributionTabContext,
 ) -> DistributionTabBindings:
+    palette = get_palette()
     parent.grid_columnconfigure(0, weight=1)
     parent.grid_rowconfigure(0, weight=1)
 
@@ -80,9 +84,13 @@ def build_distribution_tab(
     structure_tree.column("#0", width=240, anchor="w", stretch=False)
     structure_tree.column("pct", width=70, anchor="center", stretch=False)
     structure_tree.column("group", width=180, minwidth=160, anchor="w", stretch=True)
-    structure_tree.tag_configure("group_header", foreground="#1f4e79", font=("Segoe UI", 9, "bold"))
-    structure_tree.tag_configure("item", foreground="#111827")
-    structure_tree.tag_configure("subitem", foreground="#2563eb")
+    structure_tree.tag_configure(
+        "group_header",
+        foreground=palette.accent_blue,
+        font=("Segoe UI", 9, "bold"),
+    )
+    structure_tree.tag_configure("item", foreground=palette.text_primary)
+    structure_tree.tag_configure("subitem", foreground=palette.accent_blue)
     structure_tree.grid(row=0, column=0, sticky="nsew")
 
     structure_scroll = ttk.Scrollbar(
@@ -141,9 +149,21 @@ def build_distribution_tab(
         yscrollcommand=results_scroll_y.set,
         xscrollcommand=results_scroll_x.set,
     )
-    results_tree.tag_configure("neg_row", background="#fee2e2")
-    results_tree.tag_configure("odd_row", background="#f8fafc")
-    results_tree.tag_configure("even_row", background="#ffffff")
+    results_tree.tag_configure(
+        "neg_row",
+        background=palette.danger_tint,
+        foreground=palette.text_primary,
+    )
+    results_tree.tag_configure(
+        "odd_row",
+        background=palette.row_alt,
+        foreground=palette.text_primary,
+    )
+    results_tree.tag_configure(
+        "even_row",
+        background=palette.surface_elevated,
+        foreground=palette.text_primary,
+    )
 
     footer_row = ttk.Frame(right_frame)
     footer_row.grid(row=2, column=0, sticky="ew", padx=8, pady=(6, 0))
@@ -300,12 +320,12 @@ def build_distribution_tab(
                     "distribution.validation.ok",
                     "Структура корректна: верхний уровень и подэлементы суммарно дают 100.00%",
                 ),
-                foreground="#166534",
+                foreground=palette.success,
             )
             return
         validation_label.config(
             text="\n".join(f"- {error.message}" for error in errors),
-            foreground="#991b1b",
+            foreground=palette.danger,
         )
 
     def _refresh_structure() -> None:
@@ -314,7 +334,7 @@ def build_distribution_tab(
             items = context.controller.get_distribution_items()
         except Exception as exc:
             logger.warning("Failed to refresh distribution structure: %s", exc)
-            validation_label.config(text=str(exc), foreground="#991b1b")
+            validation_label.config(text=str(exc), foreground=palette.danger)
             return
 
         grouped: dict[str, list[DistributionItem]] = defaultdict(list)
@@ -410,7 +430,7 @@ def build_distribution_tab(
             )
         except Exception as exc:
             logger.warning("Failed to refresh distribution results: %s", exc)
-            status_label.config(text=str(exc), foreground="#991b1b")
+            status_label.config(text=str(exc), foreground=palette.danger)
             results_tree.delete(*results_tree.get_children())
             return
 
@@ -533,28 +553,37 @@ def build_distribution_tab(
         _refresh_results()
 
     def _ask_pct(title: str, prompt: str, *, initialvalue: str = "0.00") -> float | None:
-        raw_value = simpledialog.askstring(title, prompt, parent=parent, initialvalue=initialvalue)
-        if raw_value is None:
-            return None
-        normalized = raw_value.replace(" ", "").replace(",", ".")
-        try:
-            return float(normalized)
-        except ValueError:
-            messagebox.showerror(
-                tr("distribution.error.percent_title", "Некорректный процент"),
-                tr("distribution.error.percent_number", "Процент должен быть числом."),
-            )
+        def _normalize(value: str) -> str:
+            return value.replace(" ", "").replace(",", ".")
+
+        def _validate(value: str) -> str | None:
+            try:
+                float(value)
+            except ValueError:
+                return tr("distribution.error.percent_number", "Процент должен быть числом.")
             return None
 
+        raw_value = ask_text(
+            title,
+            prompt,
+            parent=parent,
+            initialvalue=initialvalue,
+            normalize=_normalize,
+            validator=_validate,
+        )
+        if raw_value is None:
+            return None
+        return float(raw_value)
+
     def _add_item() -> None:
-        name = simpledialog.askstring(
+        name = ask_text(
             tr("distribution.dialog.new_item", "Новый элемент"),
             tr("distribution.dialog.item_name", "Название элемента:"),
             parent=parent,
         )
         if not name:
             return
-        group_name = simpledialog.askstring(
+        group_name = ask_text(
             tr("common.group", "Группа"),
             tr("distribution.dialog.group_name", "Необязательное имя группы:"),
             parent=parent,
@@ -589,7 +618,7 @@ def build_distribution_tab(
                 ),
             )
             return
-        name = simpledialog.askstring(
+        name = ask_text(
             tr("distribution.dialog.new_subitem", "Новый подэлемент"),
             tr("distribution.dialog.subitem_name", "Название подэлемента:"),
             parent=parent,
@@ -670,9 +699,9 @@ def build_distribution_tab(
             )
             return
         current_name = structure_tree.item(iid, "text").strip()
-        new_name = simpledialog.askstring(
-            "Rename",
-            "New name:",
+        new_name = ask_text(
+            tr("distribution.dialog.rename", "Переименование"),
+            tr("distribution.dialog.new_name", "Новое имя:"),
             parent=parent,
             initialvalue=current_name,
         )

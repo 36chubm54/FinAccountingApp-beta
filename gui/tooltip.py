@@ -81,10 +81,10 @@ class Tooltip:
             tw,
             text=self.text,
             justify=tk.LEFT,
-            background="#ffffff",
+            background="#ffffe1",
             relief=tk.SOLID,
             borderwidth=1,
-            font=("Segoe UI", 10),
+            font=("Segoe UI", 9),
         )
         label.pack(ipadx=1)
         tw.update_idletasks()  # Обновляем геометрию для получения размеров

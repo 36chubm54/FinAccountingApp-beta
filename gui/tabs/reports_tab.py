@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import tkinter as tk
-from tkinter import VERTICAL, filedialog, messagebox, ttk
+from tkinter import VERTICAL, filedialog, ttk
 from typing import Any, Protocol
 
 from gui.helpers import open_in_file_manager
@@ -12,6 +12,7 @@ from gui.i18n import tr
 from gui.record_colors import KIND_TO_FOREGROUND, foreground_for_kind
 from gui.tabs.reports_controller import ReportsController
 from gui.tooltip import Tooltip
+from gui.ui_helpers import show_error, show_info
 from services.report_service import ReportFilters, build_category_group_rows
 from utils.csv_utils import report_to_csv
 
@@ -296,12 +297,12 @@ class ReportsFrame(ttk.Frame):
         try:
             result = self._controller.generate(self._current_filters())
         except ValueError as error:
-            messagebox.showerror(tr("common.error", "Ошибка"), str(error))
+            show_error(str(error), title=tr("common.error", "Ошибка"))
             return
         except Exception as error:
-            messagebox.showerror(
-                tr("common.error", "Ошибка"),
+            show_error(
                 tr("reports.error.generate", "Не удалось сформировать отчет: {error}", error=error),
+                title=tr("common.error", "Ошибка"),
             )
             return
 
@@ -497,21 +498,21 @@ class ReportsFrame(ttk.Frame):
     def _export(self, fmt: str) -> None:
         result = self._last_result
         if result is None:
-            messagebox.showerror(
-                tr("common.error", "Ошибка"),
+            show_error(
                 tr("reports.error.generate_first", "Сначала сформируйте отчет."),
+                title=tr("common.error", "Ошибка"),
             )
             return
 
         fmt = (fmt or "csv").strip().lower()
         if fmt not in ("csv", "xlsx", "pdf"):
-            messagebox.showerror(
-                tr("common.error", "Ошибка"),
+            show_error(
                 tr(
                     "reports.error.unsupported_format",
                     "Неподдерживаемый формат экспорта: {fmt}",
                     fmt=fmt,
                 ),
+                title=tr("common.error", "Ошибка"),
             )
             return
 
@@ -576,15 +577,15 @@ class ReportsFrame(ttk.Frame):
                         fmt,
                         debts=self._context.controller.get_debts(result.filters.wallet_id),
                     )
-            messagebox.showinfo(
-                tr("common.done", "Готово"),
+            show_info(
                 tr("reports.export.success", "Экспортировано в {filepath}", filepath=filepath),
+                title=tr("common.done", "Готово"),
             )
             open_in_file_manager(os.path.dirname(filepath))
         except Exception as error:
-            messagebox.showerror(
-                tr("common.error", "Ошибка"),
+            show_error(
                 tr("reports.export.error", "Не удалось экспортировать: {error}", error=error),
+                title=tr("common.error", "Ошибка"),
             )
 
 

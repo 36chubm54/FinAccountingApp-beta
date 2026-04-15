@@ -7,7 +7,7 @@ import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, ttk
 from typing import Any, Protocol
 
 from domain.import_policy import ImportPolicy
@@ -19,7 +19,13 @@ from gui.tabs.operations_support import (
     safe_destroy,
     show_import_preview_dialog,
 )
-from gui.ui_helpers import ask_confirm, attach_treeview_scrollbars, show_error, show_info
+from gui.ui_helpers import (
+    ask_confirm,
+    attach_treeview_scrollbars,
+    show_error,
+    show_info,
+    show_warning,
+)
 
 
 class OperationsTabContext(Protocol):
@@ -704,12 +710,12 @@ def build_operations_tab(
             return
 
         if policy == ImportPolicy.CURRENT_RATE:
-            messagebox.showwarning(
-                tr("operations.import.current_rate.title", "Импорт по текущему курсу"),
+            show_warning(
                 tr(
                     "operations.import.current_rate.body",
                     "В режиме CURRENT_RATE курсы валют будут зафиксированы на момент импорта.",
                 ),
+                title=tr("operations.import.current_rate.title", "Импорт по текущему курсу"),
             )
 
         def preview_task() -> ImportResult:
@@ -724,8 +730,7 @@ def build_operations_tab(
                 details = f"\nПропущено строк: {result.skipped}.\nПервые ошибки:\n- " + "\n- ".join(
                     result.errors[:5]
                 )
-            messagebox.showinfo(
-                tr("common.done", "Готово"),
+            show_info(
                 tr(
                     "operations.import.success",
                     "Импортировано записей: {count} ({format}).\nТекущие записи были заменены.",
@@ -733,6 +738,7 @@ def build_operations_tab(
                     format=cfg["desc"],
                 )
                 + details,
+                title=tr("common.done", "Готово"),
             )
             refresh_operation_views(context)
 
