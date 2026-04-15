@@ -90,6 +90,7 @@ from gui.controller_support import (
     build_list_items,
     wallets_with_system_initial_balance,
 )
+from gui.i18n import tr
 from infrastructure.repositories import RecordRepository
 from infrastructure.sqlite_repository import SQLiteRecordRepository
 from services.asset_service import AssetService
@@ -189,20 +190,46 @@ class FinancialController:
         if isinstance(self._repository, SQLiteRecordRepository):
             self._repository.set_schema_meta("online_mode", "1" if enabled else "0")
 
+    def save_language_preference(self, code: str) -> None:
+        if isinstance(self._repository, SQLiteRecordRepository):
+            self._repository.set_schema_meta("app_language", str(code or "").strip().lower())
+
+    def load_language_preference(self) -> str | None:
+        if not isinstance(self._repository, SQLiteRecordRepository):
+            return None
+        value = self._repository.get_schema_meta("app_language")
+        return str(value).strip().lower() if value else None
+
+    def save_theme_preference(self, name: str) -> None:
+        if isinstance(self._repository, SQLiteRecordRepository):
+            self._repository.set_schema_meta("app_theme", str(name or "").strip().lower())
+
+    def load_theme_preference(self) -> str | None:
+        if not isinstance(self._repository, SQLiteRecordRepository):
+            return None
+        value = self._repository.get_schema_meta("app_theme")
+        return str(value).strip().lower() if value else None
+
     def get_online_mode(self) -> bool:
         """Return current online mode state."""
         return self._currency.is_online
 
     def get_online_status(self) -> dict[str, str]:
         """Return human-readable status strings for the status bar."""
-        mode = "Online" if self._currency.is_online else "Offline"
+        mode = (
+            tr("app.status.online", "Онлайн")
+            if self._currency.is_online
+            else tr("app.status.offline", "Офлайн")
+        )
         last = self._currency.last_fetched_at
         if last is not None:
-            currency_status = f"Updated {last.strftime('%H:%M')}"
+            currency_status = tr(
+                "app.status.updated", "Обновлено {time}", time=last.strftime("%H:%M")
+            )
         elif self._currency.is_online:
-            currency_status = "Fetching..."
+            currency_status = tr("app.status.currency_fetching", "Обновляем курсы...")
         else:
-            currency_status = "Offline rates"
+            currency_status = tr("app.status.currency_offline", "Курсы: офлайн")
         return {"mode": mode, "currency": currency_status}
 
     def load_online_mode_preference(self) -> bool:
