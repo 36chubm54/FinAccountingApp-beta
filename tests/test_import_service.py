@@ -1626,6 +1626,59 @@ def test_normalize_operation_ids_for_import_remaps_debt_payment_record_ids() -> 
     assert kwargs["debt_payments"][0].record_id == 1
 
 
+def test_normalize_operation_ids_for_import_restores_cleared_debt_payment_record_ids() -> None:
+    repository = Mock()
+    repository.load_all.return_value = [
+        ExpenseRecord(
+            id=10,
+            date="2026-03-01",
+            wallet_id=1,
+            related_debt_id=1,
+            amount_original=5.0,
+            currency="KZT",
+            rate_at_operation=1.0,
+            amount_kzt=5.0,
+            category="Debt payment",
+            description="Alex",
+        )
+    ]
+    repository.load_transfers.return_value = []
+    repository.load_wallets.return_value = [
+        Wallet(id=1, name="Main", currency="KZT", initial_balance=0.0, system=True)
+    ]
+    repository.load_mandatory_expenses.return_value = []
+    repository.load_debts.return_value = [
+        Debt(
+            id=1,
+            contact_name="Alex",
+            kind=DebtKind.DEBT,
+            total_amount_minor=1000,
+            remaining_amount_minor=500,
+            currency="KZT",
+            interest_rate=0.0,
+            status=DebtStatus.OPEN,
+            created_at="2026-03-01",
+        )
+    ]
+    repository.load_debt_payments.return_value = [
+        DebtPayment(
+            id=1,
+            debt_id=1,
+            record_id=None,
+            operation_type=DebtOperationType.DEBT_REPAY,
+            principal_paid_minor=500,
+            is_write_off=False,
+            payment_date="2026-03-01",
+        )
+    ]
+
+    normalize_operation_ids_for_import(repository)
+
+    kwargs = repository.replace_all_data.call_args.kwargs
+    assert [record.id for record in kwargs["records"]] == [1]
+    assert kwargs["debt_payments"][0].record_id == 1
+
+
 def test_run_import_transaction_restores_assets_on_failure(tmp_path: Path) -> None:
     repo, controller = _make_sqlite_controller(tmp_path, "import_rollback_assets.db")
     try:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import date as dt_date
+from dataclasses import replace
 
 from domain.asset import Asset, AssetCategory, AssetSnapshot
 from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
@@ -183,6 +184,70 @@ class SQLiteRecordRepository(RecordRepository):
                 raise ValueError(
                     f"Debt payment #{payment.id} references missing record #{payment.record_id}"
                 )
+
+    @staticmethod
+    def _payment_expected_record_type(payment: DebtPayment) -> str | None:
+        if payment.is_write_off:
+            return None
+        if payment.operation_type is DebtOperationType.DEBT_REPAY:
+            return "expense"
+        if payment.operation_type is DebtOperationType.LOAN_COLLECT:
+            return "income"
+        return None
+
+    def _restore_debt_payment_record_ids(
+        self,
+        records: list[Record],
+        payments: list[DebtPayment],
+    ) -> list[DebtPayment]:
+        if not payments:
+            return []
+
+        record_ids = {int(record.id) for record in records}
+        reserved_record_ids = {
+            int(payment.record_id)
+            for payment in payments
+            if payment.record_id is not None and int(payment.record_id) in record_ids
+        }
+        candidate_groups: dict[tuple[int, str, int, str], list[int]] = {}
+        for record in sorted(records, key=lambda item: int(item.id)):
+            if record.related_debt_id is None:
+                continue
+            record_type = self._record_type(record)
+            if record_type == "mandatory_expense":
+                continue
+            key = (
+                int(record.related_debt_id),
+                self._date_as_text(record.date),
+                to_minor_units(record.amount_kzt or 0.0),
+                record_type,
+            )
+            candidate_groups.setdefault(key, []).append(int(record.id))
+
+        normalized: list[DebtPayment] = []
+        for payment in payments:
+            current_record_id = int(payment.record_id) if payment.record_id is not None else None
+            if current_record_id in record_ids:
+                normalized.append(payment)
+                continue
+
+            expected_record_type = self._payment_expected_record_type(payment)
+            restored_record_id = None
+            if expected_record_type is not None:
+                key = (
+                    int(payment.debt_id),
+                    str(payment.payment_date),
+                    int(payment.principal_paid_minor),
+                    expected_record_type,
+                )
+                for candidate_id in candidate_groups.get(key, []):
+                    if candidate_id in reserved_record_ids:
+                        continue
+                    restored_record_id = candidate_id
+                    reserved_record_ids.add(candidate_id)
+                    break
+            normalized.append(replace(payment, record_id=restored_record_id))
+        return normalized
 
     def _reset_autoincrement(self, table: str) -> None:
         self._conn.execute("DELETE FROM sqlite_sequence WHERE name = ?", (table,))
@@ -1348,6 +1413,7 @@ class SQLiteRecordRepository(RecordRepository):
 
     def replace_debts(self, debts: list[Debt], payments: list[DebtPayment] | None = None) -> None:
         normalized_payments = list(payments or [])
+        normalized_payments = self._restore_debt_payment_record_ids(self.load_all(), normalized_payments)
         self._validate_debt_integrity(self.load_all(), debts, normalized_payments)
         with self._conn:
             self._conn.execute("DELETE FROM debt_payments")
@@ -1810,6 +1876,10 @@ class SQLiteRecordRepository(RecordRepository):
         normalized_transfers = list(transfers or [])
         normalized_debts = list(debts or [])
         normalized_debt_payments = list(debt_payments or [])
+        normalized_debt_payments = self._restore_debt_payment_record_ids(
+            records,
+            normalized_debt_payments,
+        )
         self._validate_transfer_integrity(records, normalized_transfers)
         self._validate_debt_integrity(records, normalized_debts, normalized_debt_payments)
 

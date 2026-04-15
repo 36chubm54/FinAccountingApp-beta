@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import replace
 from typing import cast
 
 from domain.debt import Debt, DebtPayment
-from domain.records import MandatoryExpenseRecord, Record
+from domain.records import ExpenseRecord, MandatoryExpenseRecord, Record
 from domain.transfers import Transfer
 from domain.wallets import Wallet
 from infrastructure.repositories import RecordRepository
+from utils.money import to_minor_units
 
 
 def run_import_transaction(repository: RecordRepository, operation, logger: logging.Logger):
@@ -110,15 +112,55 @@ def normalize_operation_ids_for_import(repository: RecordRepository) -> None:
             mandatory_expenses = list(repository.load_mandatory_expenses())
         except TypeError:
             debt_payments = None
-        if debt_payments is None:
+        if debt_payments is None or debts is None:
             repository.replace_records_and_transfers(normalized_records, normalized_transfers)
             return
+
+        debt_kind_by_id = {int(debt.id): debt.kind for debt in debts}
+        payment_record_candidates: dict[tuple[int, str, int, str, str], deque[int]] = defaultdict(
+            deque
+        )
+        for record in records:
+            related_debt_id = getattr(record, "related_debt_id", None)
+            if related_debt_id is None:
+                continue
+            record_type = "expense" if isinstance(record, ExpenseRecord) else "income"
+            payment_record_candidates[
+                (
+                    int(related_debt_id),
+                    str(record.date),
+                    to_minor_units(float(record.amount_kzt or 0.0)),
+                    record_type,
+                    str(record.category or ""),
+                )
+            ].append(int(record.id))
 
         normalized_debt_payments: list[DebtPayment] = []
         for payment in debt_payments:
             mapped_record_id = None
             if payment.record_id is not None:
                 mapped_record_id = record_id_map.get(int(payment.record_id))
+            if mapped_record_id is None:
+                debt_kind = debt_kind_by_id.get(int(payment.debt_id))
+                if debt_kind is not None and not payment.is_write_off:
+                    expected_record_type = "expense" if debt_kind.value == "debt" else "income"
+                    expected_category = (
+                        "Debt payment" if debt_kind.value == "debt" else "Loan payment"
+                    )
+                    original_record_id = None
+                    candidates = payment_record_candidates.get(
+                        (
+                            int(payment.debt_id),
+                            str(payment.payment_date),
+                            int(payment.principal_paid_minor),
+                            expected_record_type,
+                            expected_category,
+                        )
+                    )
+                    if candidates:
+                        original_record_id = candidates.popleft()
+                    if original_record_id is not None:
+                        mapped_record_id = record_id_map.get(original_record_id)
             normalized_debt_payments.append(replace(payment, record_id=mapped_record_id))
         repository.replace_all_data(
             wallets=wallets,
