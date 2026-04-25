@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from domain.records import ExpenseRecord, IncomeRecord
 from domain.wallets import Wallet
 from gui.controllers import FinancialController
 from infrastructure.sqlite_repository import SQLiteRecordRepository
+from storage.sqlite_storage import SQLiteStorage
 from utils.backup_utils import export_full_backup_to_json
 from utils.csv_utils import export_records_to_csv
 from utils.excel_utils import export_records_to_xlsx
@@ -182,6 +184,50 @@ def _runtime_record_types(repo: SQLiteRecordRepository) -> list[str]:
 
 def _snapshot_months(controller: FinancialController) -> list[str]:
     return [row.month for row in controller.get_frozen_distribution_rows()]
+
+
+def test_sqlite_storage_proxy_supports_backup_and_concurrent_selects(tmp_path: Path) -> None:
+    source = SQLiteStorage(str(tmp_path / "source.db"))
+    target = SQLiteStorage(str(tmp_path / "target.db"))
+    schema_path = _schema_path()
+    errors: list[Exception] = []
+
+    try:
+        source.initialize_schema(schema_path)
+        target.initialize_schema(schema_path)
+        source.execute(
+            """
+            INSERT INTO wallets (
+                id, name, currency, initial_balance, initial_balance_minor,
+                system, allow_negative, is_active
+            ) VALUES (1, 'Main', 'KZT', 0, 0, 1, 0, 1)
+            """
+        )
+        source.commit()
+
+        def _reader() -> None:
+            try:
+                for _ in range(25):
+                    cursor = source._conn.execute("SELECT COUNT(*) FROM wallets")
+                    assert cursor.fetchone()[0] == 1
+            except Exception as exc:  # pragma: no cover - assertion path reported below
+                errors.append(exc)
+
+        threads = [threading.Thread(target=_reader) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert errors == []
+
+        source._conn.backup(target._conn)
+        restored = target.query_one("SELECT COUNT(*) FROM wallets")
+        assert restored is not None
+        assert int(restored[0]) == 1
+    finally:
+        source.close()
+        target.close()
 
 
 @pytest.mark.parametrize(
@@ -649,6 +695,74 @@ def test_sqlite_replace_all_data_restores_missing_debt_payment_record_id(tmp_pat
         repo.close()
 
 
+def test_sqlite_replace_records_and_transfers_remaps_debt_payment_record_id(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path / "replace_records_transfers_debt_record_id.db")
+
+    try:
+        repo.execute(
+            """
+            INSERT INTO wallets (
+                id, name, currency, initial_balance, initial_balance_minor,
+                system, allow_negative, is_active
+            ) VALUES (4, 'Cash', 'KZT', 0, 0, 1, 0, 1)
+            """
+        )
+        repo.execute(
+            """
+            INSERT INTO debts (
+                id, contact_name, kind, total_amount_minor, remaining_amount_minor,
+                currency, interest_rate, status, created_at, closed_at
+            ) VALUES (1, 'Alice', 'debt', 50000, 20000, 'KZT', 0.0, 'open', '2026-04-01', NULL)
+            """
+        )
+        repo.execute(
+            """
+            INSERT INTO records (
+                id, type, date, wallet_id, transfer_id, related_debt_id,
+                amount_original, amount_original_minor, currency,
+                rate_at_operation, rate_at_operation_text,
+                amount_kzt, amount_kzt_minor, category, description, period
+            ) VALUES (
+                10, 'expense', '2026-04-02', 4, NULL, 1,
+                300.0, 30000, 'KZT',
+                1.0, '1', 300.0, 30000, 'Debt payment', '', NULL
+            )
+            """
+        )
+        repo.execute(
+            """
+            INSERT INTO debt_payments (
+                id, debt_id, record_id, operation_type,
+                principal_paid_minor, is_write_off, payment_date
+            ) VALUES (1, 1, 10, 'debt_repay', 30000, 0, '2026-04-02')
+            """
+        )
+
+        records = repo.load_all()
+        records.append(
+            ExpenseRecord(
+                id=20,
+                date="2026-04-03",
+                wallet_id=4,
+                amount_original=100.0,
+                currency="KZT",
+                rate_at_operation=1.0,
+                amount_kzt=100.0,
+                category="Food",
+            )
+        )
+        repo.replace_records_and_transfers(records, [])
+
+        restored_records = repo.load_all()
+        restored_payments = repo.load_debt_payments()
+
+        assert len(restored_payments) == 1
+        linked_record = next(record for record in restored_records if record.related_debt_id == 1)
+        assert restored_payments[0].record_id == linked_record.id
+    finally:
+        repo.close()
+
+
 def test_sqlite_debt_delete_reindexes_ids_and_links(tmp_path: Path) -> None:
     repo = _make_repo(tmp_path / "debt_delete_reindex.db")
 
@@ -891,3 +1005,65 @@ def test_sqlite_transfer_delete_cascades_linked_records(tmp_path: Path) -> None:
         assert controller.net_worth_fixed() == 1800.0
     finally:
         repo.close()
+
+
+def test_sqlite_storage_save_record_inserts_new_record(tmp_path: Path) -> None:
+    storage = SQLiteStorage(str(tmp_path / "storage_record.db"))
+
+    try:
+        storage.initialize_schema(_schema_path())
+        storage.save_wallet(
+            Wallet(
+                id=1,
+                name="Main wallet",
+                currency="KZT",
+                initial_balance=0.0,
+                system=True,
+                allow_negative=False,
+                is_active=True,
+            )
+        )
+        storage.save_record(
+            IncomeRecord(
+                id=7,
+                date="2026-03-01",
+                wallet_id=1,
+                amount_original=100.0,
+                currency="KZT",
+                rate_at_operation=1.0,
+                amount_kzt=100.0,
+                category="Salary",
+                description="March salary",
+            )
+        )
+
+        records = storage.get_records()
+        assert len(records) == 1
+        assert records[0].id == 7
+        assert records[0].category == "Salary"
+    finally:
+        storage.close()
+
+
+def test_sqlite_storage_save_wallet_preserves_explicit_wallet_id(tmp_path: Path) -> None:
+    storage = SQLiteStorage(str(tmp_path / "storage_wallet.db"))
+
+    try:
+        storage.initialize_schema(_schema_path())
+        storage.save_wallet(
+            Wallet(
+                id=5,
+                name="Reserve",
+                currency="KZT",
+                initial_balance=250.0,
+                system=False,
+                allow_negative=False,
+                is_active=True,
+            )
+        )
+
+        wallets = storage.get_wallets()
+        saved_wallet = next(wallet for wallet in wallets if wallet.name == "Reserve")
+        assert saved_wallet.id == 5
+    finally:
+        storage.close()

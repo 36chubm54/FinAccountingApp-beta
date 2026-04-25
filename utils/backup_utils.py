@@ -377,7 +377,7 @@ def _derive_transfers_from_linked_records(
                     description=str(expense_record.description or ""),
                 )
             )
-        except Exception as exc:
+        except (TypeError, ValueError, KeyError) as exc:
             errors.append(f"Transfer #{transfer_id}: invalid linked records ({exc})")
 
     return transfers, errors
@@ -465,7 +465,7 @@ def export_full_backup_to_json(
             fp.flush()
             os.fsync(fp.fileno())
         os.replace(temp_path, filepath)
-    except Exception:
+    except (OSError, TypeError, ValueError):
         try:
             os.unlink(temp_path)
         except FileNotFoundError:
@@ -558,7 +558,7 @@ def import_full_backup_from_json(
                 )
                 wallets.append(wallet)
                 imported += 1
-            except Exception as exc:
+            except (TypeError, ValueError, KeyError) as exc:
                 skipped += 1
                 errors.append(f"wallets[{idx}]: invalid wallet ({exc})")
     else:
@@ -666,7 +666,7 @@ def import_full_backup_from_json(
                     amount_kzt=to_money_float(item.get("amount_kzt", 0.0) or 0.0),
                     description=str(item.get("description", "") or ""),
                 )
-            except Exception as exc:
+            except (TypeError, ValueError, KeyError) as exc:
                 skipped += 1
                 errors.append(f"transfers[{idx}]: invalid transfer ({exc})")
                 continue
@@ -710,7 +710,7 @@ def import_full_backup_from_json(
                     str(item.get("closed_at")) if item.get("closed_at") not in (None, "") else None
                 ),
             )
-        except Exception as exc:
+        except (TypeError, ValueError, KeyError) as exc:
             skipped += 1
             errors.append(f"debts[{idx}]: invalid debt ({exc})")
             continue
@@ -747,7 +747,7 @@ def import_full_backup_from_json(
                 is_write_off=bool(item.get("is_write_off", False)),
                 payment_date=str(item.get("payment_date", "") or ""),
             )
-        except Exception as exc:
+        except (TypeError, ValueError, KeyError) as exc:
             skipped += 1
             errors.append(f"debt_payments[{idx}]: invalid debt payment ({exc})")
             continue
@@ -778,7 +778,7 @@ def import_full_backup_from_json(
                 created_at=str(item.get("created_at", "") or ""),
                 description=str(item.get("description", "") or ""),
             )
-        except Exception as exc:
+        except (TypeError, ValueError, KeyError) as exc:
             skipped += 1
             errors.append(f"assets[{idx}]: invalid asset ({exc})")
             continue
@@ -801,7 +801,7 @@ def import_full_backup_from_json(
                 currency=str(item.get("currency", "KZT") or "KZT").upper(),
                 note=str(item.get("note", "") or ""),
             )
-        except Exception as exc:
+        except (TypeError, ValueError, KeyError) as exc:
             skipped += 1
             errors.append(f"asset_snapshots[{idx}]: invalid asset snapshot ({exc})")
             continue
@@ -831,7 +831,7 @@ def import_full_backup_from_json(
                 else None,
                 description=str(item.get("description", "") or ""),
             )
-        except Exception as exc:
+        except (TypeError, ValueError, KeyError) as exc:
             skipped += 1
             errors.append(f"goals[{idx}]: invalid goal ({exc})")
             continue
