@@ -337,6 +337,38 @@ def test_records_xlsx_export_applies_readability_styles():
                 time.sleep(0.1)
 
 
+def test_report_xlsx_surfaces_grouped_section_warning(monkeypatch):
+    report = Report(
+        [IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")],
+        initial_balance=25.0,
+    )
+
+    def _boom(_self):
+        raise RuntimeError("grouping unavailable")
+
+    monkeypatch.setattr(Report, "grouped_by_category", _boom)
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        tmp_path = tmp.name
+    try:
+        report_to_xlsx(report, tmp_path)
+        wb = load_workbook(tmp_path, data_only=True)
+        try:
+            assert "Warnings" in wb.sheetnames
+            ws = wb["Warnings"]
+            assert ws.cell(1, 1).value == "Warning"
+            assert "grouping unavailable" in str(ws.cell(2, 1).value)
+        finally:
+            wb.close()
+    finally:
+        for _ in range(5):
+            try:
+                os.unlink(tmp_path)
+                break
+            except PermissionError:
+                time.sleep(0.1)
+
+
 def test_import_records_from_xlsx_quantizes_existing_initial_balance():
     from openpyxl import Workbook
 

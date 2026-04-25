@@ -4,18 +4,19 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
-from tkinter import ttk
+from tkinter import TclError, ttk
 from typing import Any
 
 from app.services import CurrencyService
 from bootstrap import bootstrap_repository, run_post_startup_maintenance
 from domain.import_policy import ImportPolicy
 from gui.controllers import FinancialController
-from gui.i18n import tr
+from gui.i18n import get_available_languages, get_language, set_language, tr
+from gui.logging_utils import log_ui_error
 from gui.record_colors import KIND_TO_FOREGROUND, foreground_for_kind
 from gui.ui_helpers import show_error, show_info
 from gui.ui_text import app_title, get_import_formats, get_tab_titles
-from gui.ui_theme import bootstrap_ui
+from gui.ui_theme import DEFAULT_THEME, bootstrap_ui, get_palette, get_theme, set_theme
 from utils.charting import (
     aggregate_daily_cashflow,
     aggregate_expenses_by_category,
@@ -41,7 +42,7 @@ class FinancialApp(tk.Tk):
             # Windows native icon
             if ico_path.exists():
                 self.iconbitmap(default=str(ico_path))
-        except Exception:
+        except (TclError, OSError):
             pass
 
         try:
@@ -50,15 +51,13 @@ class FinancialApp(tk.Tk):
                 app_icon = tk.PhotoImage(file=str(png_path))
                 self.iconphoto(True, app_icon)
                 self._app_icon_ref = app_icon  # so that GC does not gather
-        except Exception:
+        except (TclError, OSError):
             pass
 
-        self._import_formats = get_import_formats()
-        self.title(app_title())
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
-        min_width = min(1440, int(screen_w * 0.8))
-        min_height = min(880, int(screen_h * 0.82))
+        min_width = min(1640, int(screen_w * 0.9))
+        min_height = min(1080, int(screen_h * 0.87))
         self.geometry(f"{min_width}x{min_height}")
         self.minsize(min_width, min_height)
         # Make shutdown explicit: ensures background executor and repository are closed
@@ -68,6 +67,11 @@ class FinancialApp(tk.Tk):
         self.repository = bootstrap_repository(run_maintenance=False)
         self.currency = CurrencyService()
         self.controller = FinancialController(self.repository, self.currency)
+        self._apply_saved_ui_preferences()
+        self._import_formats = get_import_formats()
+        self.title(app_title())
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
         self._executor = ThreadPoolExecutor(max_workers=2)
         self._busy = False
@@ -88,29 +92,35 @@ class FinancialApp(tk.Tk):
         self.refresh_wallets: Callable[[], None] | None = None
         self.refresh_budgets: Callable[[], None] | None = None
         self.refresh_all: Callable[[], None] | None = None
-        self._status_refresh_job: str | None = None
+        self._after_jobs: dict[str, str] = {}
         self._online_var: tk.BooleanVar | None = None
         self._currency_status_label: ttk.Label | None = None
         self._price_status_label: ttk.Label | None = None
+        self._language_var: tk.StringVar | None = None
+        self._language_combo: ttk.Combobox | None = None
+        self._theme_var: tk.StringVar | None = None
+        self._theme_combo: ttk.Combobox | None = None
+        self._theme_label_to_key: dict[str, str] = {}
+        self._reload_tabs_pending = False
         self._online_toggle_running = False
 
         self.pie_month_var: tk.StringVar | None = None
-        self.pie_month_menu: ttk.OptionMenu | None = None
+        self.pie_month_menu: ttk.Combobox | None = None
         self.chart_month_var: tk.StringVar | None = None
-        self.chart_month_menu: ttk.OptionMenu | None = None
+        self.chart_month_menu: ttk.Combobox | None = None
         self.chart_year_var: tk.StringVar | None = None
-        self.chart_year_menu: ttk.OptionMenu | None = None
+        self.chart_year_menu: ttk.Combobox | None = None
         self.expense_pie_canvas: tk.Canvas | None = None
         self.expense_legend_canvas: tk.Canvas | None = None
-        self.expense_legend_frame: tk.Widget | None = None
+        self.expense_legend_frame: tk.Frame | None = None
         self.daily_bar_canvas: tk.Canvas | None = None
         self.monthly_bar_canvas: tk.Canvas | None = None
 
         self._status_bar = self._build_status_bar()
-        self._status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        self._status_bar.grid(row=2, column=0, sticky="ew")
 
         notebook = ttk.Notebook(self)
-        notebook.pack(fill=tk.BOTH, expand=True)
+        notebook.grid(row=0, column=0, sticky="nsew")
         self._notebook = notebook
 
         self.tab_infographics = ttk.Frame(notebook)
@@ -122,6 +132,28 @@ class FinancialApp(tk.Tk):
         self.tab_debts = ttk.Frame(notebook)
         self.tab_distribution = ttk.Frame(notebook)
         self.tab_settings = ttk.Frame(notebook)
+        self._tab_order = [
+            "infographics",
+            "operations",
+            "reports",
+            "analytics",
+            "dashboard",
+            "budget",
+            "debts",
+            "distribution",
+            "settings",
+        ]
+        self._tab_widgets = {
+            "infographics": self.tab_infographics,
+            "operations": self.tab_operations,
+            "reports": self.tab_reports,
+            "analytics": self.tab_analytics,
+            "dashboard": self.tab_dashboard,
+            "budget": self.tab_budget,
+            "debts": self.tab_debts,
+            "distribution": self.tab_distribution,
+            "settings": self.tab_settings,
+        }
 
         tab_titles = get_tab_titles()
         notebook.add(self.tab_infographics, text=tab_titles["infographics"])
@@ -150,64 +182,187 @@ class FinancialApp(tk.Tk):
         self._ensure_tab_built("operations")
 
         self.progress = ttk.Progressbar(self, mode="indeterminate")
-        self.progress.pack(fill=tk.X, padx=8, pady=(0, 8))
-        self.progress.pack_forget()
+        self.progress.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
+        self.progress.grid_remove()
 
-        self.after_idle(self._start_deferred_startup)
+        self._schedule_after_idle("deferred_startup", self._start_deferred_startup)
 
     def destroy(self) -> None:
-        if self._status_refresh_job is not None:
-            try:
-                self.after_cancel(self._status_refresh_job)
-            except Exception:
-                pass
+        self._cancel_all_after_jobs()
         self._executor.shutdown(wait=False, cancel_futures=True)
         close_method = getattr(self.repository, "close", None)
         if callable(close_method):
             close_method()
         super().destroy()
 
-    def reload_strings(self) -> None:
+    def _cancel_all_after_jobs(self) -> None:
+        for key in list(self._after_jobs):
+            self._cancel_after_job(key)
+
+    def _cancel_after_job(self, key: str) -> None:
+        job_id = self._after_jobs.pop(key, None)
+        if not job_id:
+            return
+        try:
+            self.after_cancel(job_id)
+        except TclError:
+            return
+
+    def _schedule_after(self, key: str, delay_ms: int, callback: Callable[[], None]) -> str:
+        self._cancel_after_job(key)
+
+        def _run() -> None:
+            self._after_jobs.pop(key, None)
+            callback()
+
+        job_id = self.after(delay_ms, _run)
+        self._after_jobs[key] = str(job_id)
+        return str(job_id)
+
+    def _schedule_after_idle(self, key: str, callback: Callable[[], None]) -> str:
+        self._cancel_after_job(key)
+
+        def _run() -> None:
+            self._after_jobs.pop(key, None)
+            callback()
+
+        job_id = self.after_idle(_run)
+        self._after_jobs[key] = str(job_id)
+        return str(job_id)
+
+    def _apply_saved_ui_preferences(self) -> None:
+        saved_language = self.controller.load_language_preference()
+        if saved_language:
+            try:
+                set_language(saved_language)
+            except ValueError:
+                logger.warning("Unsupported saved language preference: %s", saved_language)
+        saved_theme = self.controller.load_theme_preference()
+        bootstrap_ui(self, saved_theme or get_theme() or DEFAULT_THEME)
+
+    def _reset_tab_bindings(self) -> None:
+        self.records_tree = None
+        self.refresh_operation_wallet_menu = None
+        self.refresh_transfer_wallet_menus = None
+        self.refresh_wallets = None
+        self.refresh_budgets = None
+        self.refresh_all = None
+        self._analytics_bindings = None
+        self._dashboard_bindings = None
+        self._budget_bindings = None
+        self._debt_bindings = None
+        self._distribution_bindings = None
+        self.pie_month_var = None
+        self.pie_month_menu = None
+        self.chart_month_var = None
+        self.chart_month_menu = None
+        self.chart_year_var = None
+        self.chart_year_menu = None
+        self.expense_pie_canvas = None
+        self.expense_legend_canvas = None
+        self.expense_legend_frame = None
+        self.daily_bar_canvas = None
+        self.monthly_bar_canvas = None
+
+    def _rebuild_status_bar(self) -> None:
+        if hasattr(self, "_status_bar") and self._status_bar is not None:
+            try:
+                self._status_bar.destroy()
+            except (TclError, RuntimeError):
+                pass
+        self._status_bar = self._build_status_bar()
+        self._status_bar.grid(row=2, column=0, sticky="ew")
+        self._refresh_status_bar()
+
+    def _rebuild_built_tabs(self) -> None:
+        if not hasattr(self, "_notebook"):
+            return
+        selected = self._notebook.select()
+        selected_key = self._tab_keys_by_widget.get(str(selected))
+        built_keys = [key for key in self._tab_order if key in self._built_tabs]
+        for key in built_keys:
+            frame = self._tab_widgets[key]
+            for child in frame.winfo_children():
+                child.destroy()
+        self._built_tabs.clear()
+        self._reset_tab_bindings()
+        for key in built_keys:
+            self._ensure_tab_built(key)
+        if selected_key in self._tab_widgets:
+            self._notebook.select(self._tab_widgets[selected_key])
+        if "operations" in built_keys:
+            self._refresh_list()
+        if "infographics" in built_keys:
+            self._refresh_charts()
+        if "budget" in built_keys:
+            self._refresh_budgets()
+        if "distribution" in built_keys:
+            self._refresh_all()
+
+    def reload_strings(self, *, rebuild_tabs: bool = False) -> None:
         self._import_formats = get_import_formats()
         self.title(app_title())
         if hasattr(self, "_notebook"):
             tab_titles = get_tab_titles()
-            for tab_widget, key in (
-                (self.tab_infographics, "infographics"),
-                (self.tab_operations, "operations"),
-                (self.tab_reports, "reports"),
-                (self.tab_analytics, "analytics"),
-                (self.tab_dashboard, "dashboard"),
-                (self.tab_budget, "budget"),
-                (self.tab_debts, "debts"),
-                (self.tab_distribution, "distribution"),
-                (self.tab_settings, "settings"),
-            ):
+            for key, tab_widget in self._tab_widgets.items():
                 self._notebook.tab(tab_widget, text=tab_titles[key])
-        if self._currency_status_label is not None and not self._online_toggle_running:
-            self._currency_status_label.config(
-                text=tr("app.status.currency_offline", "Курсы: офлайн")
-            )
-        if self._price_status_label is not None:
-            self._price_status_label.config(
-                text=tr("app.status.prices_local", "Цены активов: локально")
-            )
+        self._rebuild_status_bar()
+        if rebuild_tabs:
+            self._rebuild_built_tabs()
+
+    def _schedule_reload_strings(self, *, rebuild_tabs: bool = False) -> None:
+        self._reload_tabs_pending = self._reload_tabs_pending or rebuild_tabs
+        if "reload_strings" in self._after_jobs:
+            return
+
+        def _run() -> None:
+            pending_tabs = self._reload_tabs_pending
+            self._reload_tabs_pending = False
+            self.reload_strings(rebuild_tabs=pending_tabs)
+
+        self._schedule_after_idle("reload_strings", _run)
+
+    def _on_language_changed(self, _event: tk.Event | None = None) -> None:
+        if self._language_var is None:
+            return
+        selected = str(self._language_var.get() or "").strip().lower()
+        if not selected or selected == get_language():
+            return
+        try:
+            set_language(selected)
+        except ValueError:
+            logger.warning("Unsupported language selected: %s", selected)
+            return
+        self.controller.save_language_preference(selected)
+        self._schedule_reload_strings(rebuild_tabs=True)
+
+    def _on_theme_changed(self, _event: tk.Event | None = None) -> None:
+        if self._theme_var is None:
+            return
+        selected_label = str(self._theme_var.get() or "")
+        selected_theme = self._theme_label_to_key.get(selected_label, DEFAULT_THEME)
+        if selected_theme == get_theme():
+            return
+        set_theme(selected_theme)
+        bootstrap_ui(self, selected_theme)
+        self.controller.save_theme_preference(selected_theme)
+        self._schedule_reload_strings(rebuild_tabs=True)
 
     def _set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = busy
         try:
             self.attributes("-disabled", busy)
-        except Exception:
+        except TclError:
             pass
         if busy:
-            self.progress.pack(fill=tk.X, padx=8, pady=(0, 8))
+            self.progress.grid()
             self.progress.start(12)
             base_title = app_title()
             self.title(f"{base_title} - {message}" if message else base_title)
             self.config(cursor="watch")
         else:
             self.progress.stop()
-            self.progress.pack_forget()
+            self.progress.grid_remove()
             self.title(app_title())
             self.config(cursor="")
 
@@ -229,10 +384,11 @@ class FinancialApp(tk.Tk):
         if block_ui:
             self._set_busy(True, busy_message)
         future: Future[Any] = self._executor.submit(task)
+        poll_job_key = f"background_poll:{id(future)}"
 
         def _poll() -> None:
             if not future.done():
-                self.after(100, _poll)
+                self._schedule_after(poll_job_key, 100, _poll)
                 return
             if block_ui:
                 self._set_busy(False)
@@ -246,11 +402,11 @@ class FinancialApp(tk.Tk):
                 return
             on_success(future.result())
 
-        self.after(100, _poll)
+        self._schedule_after(poll_job_key, 100, _poll)
 
     def _build_status_bar(self) -> ttk.Frame:
         bar = ttk.Frame(self, style="StatusBar.TFrame", padding=(0, 1))
-        bar.grid_columnconfigure(4, weight=1)
+        bar.grid_columnconfigure(5, weight=1)
         self._online_var = tk.BooleanVar(value=False)
         online_check = ttk.Checkbutton(
             bar,
@@ -285,9 +441,60 @@ class FinancialApp(tk.Tk):
         )
         ttk.Label(
             bar,
+            text=tr("common.language", "Язык:"),
+            style="StatusBarMuted.TLabel",
+        ).grid(row=0, column=6, sticky="w", padx=(0, 6), pady=4)
+        language_codes = [code.upper() for code in get_available_languages()] or ["RU"]
+        current_language = get_language().upper()
+        if current_language not in language_codes:
+            language_codes.insert(0, current_language)
+        self._language_var = tk.StringVar(value=current_language)
+        self._language_combo = ttk.Combobox(
+            bar,
+            textvariable=self._language_var,
+            values=language_codes,
+            width=max(4, min(6, max(len(code) for code in language_codes))),
+            state="readonly",
+            style="StatusBar.TCombobox",
+        )
+        self._language_combo.grid(row=0, column=7, sticky="w", padx=(0, 8), pady=2)
+        self._language_combo.bind("<<ComboboxSelected>>", self._on_language_changed, add="+")
+        ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
+            row=0, column=8, sticky="ns", pady=5, padx=(0, 8)
+        )
+        ttk.Label(
+            bar,
+            text=tr("common.theme", "Тема:"),
+            style="StatusBarMuted.TLabel",
+        ).grid(row=0, column=9, sticky="w", padx=(0, 6), pady=4)
+        self._theme_label_to_key = {
+            tr("app.theme.light", "Светлая"): "light",
+            tr("app.theme.dark", "Темная"): "dark",
+        }
+        theme_labels = list(self._theme_label_to_key.keys())
+        current_theme_label = next(
+            (label for label, key in self._theme_label_to_key.items() if key == get_theme()),
+            theme_labels[0],
+        )
+        self._theme_var = tk.StringVar(value=current_theme_label)
+        self._theme_combo = ttk.Combobox(
+            bar,
+            textvariable=self._theme_var,
+            values=theme_labels,
+            width=max(10, max(len(label) for label in theme_labels)),
+            state="readonly",
+            style="StatusBar.TCombobox",
+        )
+        self._theme_combo.grid(row=0, column=10, sticky="w", padx=(0, 8), pady=2)
+        self._theme_combo.bind("<<ComboboxSelected>>", self._on_theme_changed, add="+")
+        ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
+            row=0, column=11, sticky="ns", pady=5, padx=(0, 8)
+        )
+        ttk.Label(
+            bar,
             text=tr("app.status.version", "v{version}", version=__version__),
             style="StatusBarMuted.TLabel",
-        ).grid(row=0, column=6, sticky="e", padx=(0, 10), pady=4)
+        ).grid(row=0, column=12, sticky="e", padx=(0, 10), pady=4)
         return bar
 
     def _on_online_toggle(self) -> None:
@@ -333,7 +540,7 @@ class FinancialApp(tk.Tk):
             return
         try:
             status = self.controller.get_online_status()
-        except Exception:
+        except (RuntimeError, ValueError, TypeError):
             return
         self._online_var.set(self.controller.get_online_mode())
         self._currency_status_label.config(text=status["currency"])
@@ -345,7 +552,7 @@ class FinancialApp(tk.Tk):
     def _start_status_refresh_timer(self) -> None:
         """Refresh status bar every 60 seconds to update timestamps."""
         self._refresh_status_bar()
-        self._status_refresh_job = self.after(60_000, self._start_status_refresh_timer)
+        self._schedule_after("status_refresh", 60_000, self._start_status_refresh_timer)
 
     def _apply_saved_online_mode(self) -> None:
         """Load and apply the saved online mode preference."""
@@ -409,7 +616,7 @@ class FinancialApp(tk.Tk):
         for kind, color in KIND_TO_FOREGROUND.items():
             try:
                 self.records_tree.tag_configure(kind, foreground=color)
-            except Exception:
+            except TclError:
                 pass
 
         list_items = (
@@ -454,7 +661,7 @@ class FinancialApp(tk.Tk):
             )
             try:
                 self.records_tree.insert("", "end", iid=item.record_id, values=values, tags=tags)
-            except Exception:
+            except TclError:
                 self.records_tree.insert("", "end", values=values, tags=tags)
 
     def _refresh_charts(self, records: list[Any] | None = None) -> None:
@@ -586,7 +793,8 @@ class FinancialApp(tk.Tk):
             logger.exception("Deferred startup sync failed", exc_info=exc)
             try:
                 records = self.repository.load_all()
-            except Exception:
+            except (RuntimeError, ValueError, TypeError, OSError) as load_error:
+                log_ui_error(logger, "UI_APP_STARTUP_LOAD_FAILED", load_error)
                 records = None
             if records is not None:
                 self._refresh_list(records=records)
@@ -632,31 +840,31 @@ class FinancialApp(tk.Tk):
         if self.refresh_wallets is not None:
             try:
                 self.refresh_wallets()
-            except Exception:
+            except (TclError, RuntimeError, ValueError, TypeError):
                 pass
         if self.refresh_operation_wallet_menu is not None:
             try:
                 self.refresh_operation_wallet_menu()
-            except Exception:
+            except (TclError, RuntimeError, ValueError, TypeError):
                 pass
         if self.refresh_transfer_wallet_menus is not None:
             try:
                 self.refresh_transfer_wallet_menus()
-            except Exception:
+            except (TclError, RuntimeError, ValueError, TypeError):
                 pass
 
     def _refresh_budgets(self) -> None:
         if self.refresh_budgets is not None:
             try:
                 self.refresh_budgets()
-            except Exception:
+            except (TclError, RuntimeError, ValueError, TypeError):
                 pass
 
     def _refresh_all(self) -> None:
         if self.refresh_all is not None:
             try:
                 self.refresh_all()
-            except Exception:
+            except (TclError, RuntimeError, ValueError, TypeError):
                 pass
 
     def _on_chart_filter_change(self, *_args: Any) -> None:
@@ -674,12 +882,13 @@ class FinancialApp(tk.Tk):
             months.append(current_month)
         months = sorted(set(months))
 
-        menu = self.chart_month_menu["menu"]
-        menu.delete(0, "end")
-        for month in months:
-            menu.add_command(label=month, command=lambda value=month: chart_month_var.set(value))
+        # menu = self.chart_month_menu["menu"]
+        # menu.delete(0, "end")
+        # for month in months:
+        #     menu.add_command(label=month, command=lambda value=month: chart_month_var.set(value))
+        self.chart_month_menu["values"] = months
         if not chart_month_var.get() or chart_month_var.get() not in months:
-            chart_month_var.set(months[-1])
+            chart_month_var.set(months[-1] if months else "")
 
     def _update_pie_month_options(self, records: Any) -> None:
         if self.pie_month_menu is None or self.pie_month_var is None:
@@ -691,21 +900,25 @@ class FinancialApp(tk.Tk):
             months.append(current_month)
         months = sorted(set(months))
 
-        menu = self.pie_month_menu["menu"]
-        menu.delete(0, "end")
-        menu.add_command(
-            label=tr("infographics.all_time", "Все время"),
-            command=lambda value="all": pie_month_var.set(value),
-        )
-        for month in months:
-            menu.add_command(label=month, command=lambda value=month: pie_month_var.set(value))
+        # menu = self.pie_month_menu["menu"]
+        # menu.delete(0, "end")
+        # menu.add_command(
+        #     label=tr("infographics.all_time", "Все время"),
+        #     command=lambda value="all": pie_month_var.set(value),
+        # )
+        # for month in months:
+        #     menu.add_command(label=month, command=lambda value=month: pie_month_var.set(value))
+        all_time_label = tr("infographics.all_time", "Все время")
+        values = [all_time_label] + months
+        self.pie_month_menu["values"] = values
+        # Установим значение "Все время" если текущее значение невалидно
 
         current_value = pie_month_var.get()
         if not current_value:
-            pie_month_var.set("all")
+            pie_month_var.set(all_time_label)
             return
-        if current_value != "all" and current_value not in months:
-            pie_month_var.set(months[-1] if months else "all")
+        if current_value != all_time_label and current_value not in months:
+            pie_month_var.set(months[-1] if months else all_time_label)
 
     def _update_year_options(self, records: Any) -> None:
         if self.chart_year_menu is None or self.chart_year_var is None:
@@ -717,15 +930,16 @@ class FinancialApp(tk.Tk):
             years.append(current_year)
         years = sorted(set(years))
 
-        menu = self.chart_year_menu["menu"]
-        menu.delete(0, "end")
-        for year in years:
-            menu.add_command(
-                label=str(year),
-                command=lambda value=year: chart_year_var.set(str(value)),
-            )
+        # menu = self.chart_year_menu["menu"]
+        # menu.delete(0, "end")
+        # for year in years:
+        #     menu.add_command(
+        #         label=str(year),
+        #         command=lambda value=year: chart_year_var.set(str(value)),
+        #     )
+        self.chart_year_menu["values"] = [str(year) for year in years]
         if not chart_year_var.get() or int(chart_year_var.get()) not in years:
-            chart_year_var.set(str(years[-1]))
+            chart_year_var.set(str(years[-1]) if years else "")
 
     def _draw_expense_pie(self, records: Any) -> None:
         if (
@@ -735,6 +949,19 @@ class FinancialApp(tk.Tk):
             or self.expense_legend_canvas is None
         ):
             return
+        palette = get_palette()
+        try:
+            self.expense_pie_canvas.configure(
+                bg=palette.surface_elevated,
+                highlightbackground=palette.border_soft,
+            )
+            self.expense_legend_canvas.configure(
+                bg=palette.surface_elevated,
+                highlightbackground=palette.border_soft,
+            )
+            self.expense_legend_frame.configure(bg=palette.surface_elevated)
+        except TclError:
+            pass
 
         month_value = self.pie_month_var.get()
         filtered = records
@@ -755,7 +982,7 @@ class FinancialApp(tk.Tk):
                 10,
                 anchor="nw",
                 text=tr("common.empty", "Нет данных для отображения"),
-                fill="#6b7280",
+                fill=palette.chart_empty,
                 font=("Segoe UI", 11),
             )
             return
@@ -787,11 +1014,11 @@ class FinancialApp(tk.Tk):
                 start=start,
                 extent=extent,
                 fill=color,
-                outline="white",
+                outline=palette.chart_outline,
             )
             start += extent
 
-            legend_row = tk.Frame(self.expense_legend_frame, bg="white")
+            legend_row = tk.Frame(self.expense_legend_frame, bg=palette.surface_elevated)
             legend_row.pack(fill="x", anchor="w", pady=1, padx=6)
             legend_row.grid_columnconfigure(1, weight=1)
             color_box = tk.Canvas(
@@ -799,7 +1026,7 @@ class FinancialApp(tk.Tk):
                 width=10,
                 height=10,
                 highlightthickness=0,
-                bg="white",
+                bg=palette.surface_elevated,
             )
             color_box.create_rectangle(0, 0, 10, 10, fill=color, outline=color)
             color_box.grid(row=0, column=0, sticky="nw", padx=(0, 6), pady=2)
@@ -810,8 +1037,8 @@ class FinancialApp(tk.Tk):
                 wraplength=max(96, self.expense_legend_canvas.winfo_width() - 42),
                 justify="left",
                 anchor="w",
-                bg="white",
-                fg="#1f2937",
+                bg=palette.surface_elevated,
+                fg=palette.chart_text,
             ).grid(row=0, column=1, sticky="w")
 
     def _group_minor_categories(
@@ -828,7 +1055,7 @@ class FinancialApp(tk.Tk):
     def _filter_records_by_month(self, records: Any, month_value: str) -> list[Any]:
         try:
             year, month = map(int, month_value.split("-"))
-        except Exception:
+        except (TypeError, ValueError, AttributeError):
             return records
 
         filtered: list[Any] = []
@@ -838,7 +1065,7 @@ class FinancialApp(tk.Tk):
                     dt = datetime.combine(record.date, datetime.min.time())
                 else:
                     dt = datetime.strptime(record.date, "%Y-%m-%d")
-            except Exception:
+            except (TypeError, ValueError):
                 continue
             if dt.year == year and dt.month == month:
                 filtered.append(record)
@@ -847,21 +1074,7 @@ class FinancialApp(tk.Tk):
     def _generate_colors(self, count: int) -> list[str]:
         if count <= 0:
             return []
-
-        base_palette = [
-            "#4f46e5",
-            "#06b6d4",
-            "#f59e0b",
-            "#10b981",
-            "#ec4899",
-            "#8b5cf6",
-            "#14b8a6",
-            "#ef4444",
-            "#f97316",
-            "#22c55e",
-            "#0ea5e9",
-            "#a855f7",
-        ]
+        base_palette = list(get_palette().chart_series)
 
         if count <= len(base_palette):
             return base_palette[:count]
@@ -957,6 +1170,11 @@ class FinancialApp(tk.Tk):
         max_labels: int,
     ) -> None:
         canvas.delete("all")
+        palette = get_palette()
+        try:
+            canvas.configure(bg=palette.surface_elevated, highlightbackground=palette.border_soft)
+        except TclError:
+            pass
         width = max(canvas.winfo_width(), 300)
         height = max(canvas.winfo_height(), 220)
 
@@ -970,7 +1188,7 @@ class FinancialApp(tk.Tk):
                 10,
                 anchor="nw",
                 text=tr("common.empty", "Нет данных для отображения"),
-                fill="#6b7280",
+                fill=palette.chart_empty,
                 font=("Segoe UI", 11),
             )
             return
@@ -987,32 +1205,39 @@ class FinancialApp(tk.Tk):
         scale = (chart_h / 2 - 10) / max_value
 
         canvas.create_line(
-            padding["left"], zero_y, padding["left"] + chart_w, zero_y, fill="#d1d5db"
+            padding["left"],
+            zero_y,
+            padding["left"] + chart_w,
+            zero_y,
+            fill=palette.chart_axis,
         )
 
         group_width = chart_w / max(1, len(labels))
-        bar_gap = 1 if group_width < 18 else 2
-        bar_width = max(3, min(16, group_width * 0.34))
+        # Income and expense should share one x-position per label:
+        # income grows upward from the axis, expense downward.
+        bar_width = max(4, min(18, group_width * 0.28))
 
         for idx, label in enumerate(labels):
             x_center = padding["left"] + group_width * idx + group_width / 2
             income_h = income_values[idx] * scale
             expense_h = expense_values[idx] * scale
+            x1 = x_center - bar_width / 2
+            x2 = x_center + bar_width / 2
 
             canvas.create_rectangle(
-                x_center - bar_width - bar_gap,
+                x1,
                 zero_y - income_h,
-                x_center - bar_gap,
+                x2,
                 zero_y,
-                fill="#10b981",
+                fill=palette.chart_income,
                 outline="",
             )
             canvas.create_rectangle(
-                x_center + bar_gap,
+                x1,
                 zero_y,
-                x_center + bar_width + bar_gap,
+                x2,
                 zero_y + expense_h,
-                fill="#ef4444",
+                fill=palette.chart_expense,
                 outline="",
             )
 
@@ -1026,23 +1251,23 @@ class FinancialApp(tk.Tk):
                     x_center,
                     padding["top"] + chart_h + 10,
                     text=label,
-                    fill="#6b7280",
+                    fill=palette.chart_empty,
                     font=("Segoe UI", 9),
                 )
 
         canvas.create_text(
             padding["left"],
             padding["top"] - 6,
-            text="Доходы",
-            fill="#10b981",
+            text=tr("operations.type.income", "Доход"),
+            fill=palette.chart_income,
             anchor="sw",
             font=("Segoe UI", 9),
         )
         canvas.create_text(
             padding["left"] + 60,
             padding["top"] - 6,
-            text="Расходы",
-            fill="#ef4444",
+            text=tr("operations.type.expense", "Расход"),
+            fill=palette.chart_expense,
             anchor="sw",
             font=("Segoe UI", 9),
         )

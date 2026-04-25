@@ -2,7 +2,7 @@
 
 Graphical application for personal financial accounting with multicurrency support, import/export, budgets, debts, assets, and goals.
 
-The current `v1.11.0` release focuses on UI and localization polish: the app now uses a unified soft-blue minimal theme, external language packs (`ru/en`) are wired through a shared i18n loader, translation coverage is expanded across tabs/dialogs (including enum status labels in `Budget/Debts`), table/chart layouts behave better at compact window sizes, and Windows startup now applies HiDPI awareness for Tk and native file dialogs.
+The current `v1.12.0` release focuses on import/export and runtime-storage resilience: imports are now section-aware for partial `JSON` payloads, `related_debt_id` and `debt_payments` links survive normalization more reliably, SQLite runtime storage uses a synchronized connection wrapper for background work, the JSON repository can quarantine corrupt files and preserve unsaved payloads on replace failures, and report exporters now surface warnings when grouped breakdowns cannot be built.
 
 ## 🚀 Quick Start
 
@@ -61,6 +61,9 @@ The app starts a Tkinter GUI on top of SQLite runtime storage. Core tabs can be 
 - Read-only Data Audit Engine for runtime consistency checks
 - External `locales/*.txt` language packs with a shared i18n loader and fallback chain
 - Custom window icon support (`.ico` + `iconphoto` fallback) with forward compatibility for packaged `exe` icon usage
+- Section-aware `JSON` import so records-only restore does not wipe unrelated `debts/assets/goals/budgets`
+- Safer persistence behavior: corrupt JSON quarantine, `.error` copies on save failure, atomic backup/export paths
+- `XLSX` / `PDF` report export now shows explicit degradation warnings instead of silently dropping grouped sections
 
 ## 🖥️ Application Tabs
 
@@ -106,6 +109,13 @@ Also important:
 | `services.distribution_service.DistributionService` | Monthly distribution and frozen rows |
 | `infrastructure.sqlite_repository.SQLiteRecordRepository` | Primary runtime repository |
 | `storage.sqlite_storage.SQLiteStorage` | Low-level SQLite adapter / schema bootstrap |
+
+Practical `v1.12.0` highlights:
+
+- `FinanceService.get_import_capabilities()` — a single capability model for the import pipeline instead of ad-hoc attribute probing
+- `FinancialController.load_debts()` and `related_debt_id` in `create_income(...)` / `create_expense(...)` — important hooks for debt-aware import/restore flows
+- `SQLiteRecordRepository.replace_records_and_transfers(...)` — safe bulk operation replacement with debt-payment link remapping
+- `gui.logging_utils.log_ui_error(...)` — shared structured logging helper for GUI errors and degraded flows
 
 ### Import / backup entry points
 
@@ -154,6 +164,10 @@ pytest --cov=. --cov-report=term-missing
 - `JSON` full backup restores runtime entities including `budgets`, `debts`, `debt_payments`, and distribution/wealth payloads when supported by the repository
 - Readonly snapshots require `force=True`
 - For `JSON` under `ImportPolicy.CURRENT_RATE`, the fast bulk-replace path is still allowed when the repository supports it
+- `ImportCapabilities` defines which bulk-replace and load-* operations are actually available for the current runtime service
+- Partial `JSON` import is now section-aware: when a payload only contains `records`, current `debts/assets/goals/budgets/distribution` data is preserved
+- If the `debts` section is explicitly absent, the pipeline tries to preserve existing `related_debt_id` links; if the section is present, links are normalized only against allowed debt IDs
+- `CSV` / `XLSX` imports still use the create-path instead of bulk replace, and `related_debt_id` is now propagated there as well
 - `v1.10.1` adds stricter early payload validation: broken references, duplicate `wallet.id`, multiple `system` wallets, and invalid/duplicate `distribution_snapshots` are rejected earlier in the import pipeline
 
 ### Backup
@@ -162,6 +176,9 @@ pytest --cov=. --cov-report=term-missing
 - Main low-level parser: `import_full_backup_from_json(...)`
 - `import_backup(...)` remains only as a deprecated compatibility wrapper
 - JSON export and backup-copy paths are written atomically through a temporary file plus `fsync` and `os.replace`
+- `backup.export_to_json(...)` now raises `BackupExportError` so bootstrap and the GUI can distinguish export failures from other startup issues
+- On JSON repository save failure, an `.error` snapshot of the unsaved payload is written and `RepositorySaveError` is raised
+- Corrupt or empty JSON runtime files are quarantined as `.corrupt_*` and raise `RepositoryDataCorruptionError`
 - `requirements-pdf.txt` is only needed for PDF export, not for the default runtime install
 
 ### Migration
@@ -174,6 +191,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - The script migrates a JSON payload into SQLite in one explicit transaction
 - Pre-schema compatibility supports legacy SQLite databases where `records` still lacks `related_debt_id`
 - Migration and bootstrap should stay aligned with the current `db/schema.sql`
+- On OneDrive-managed paths, bootstrap also accounts for sync/coherence risks, runs `PRAGMA quick_check`, and may force synchronous export for large databases instead of background export
 
 ## 🧭 Link to Detailed Architecture
 

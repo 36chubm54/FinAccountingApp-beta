@@ -231,7 +231,7 @@ class Report:
                 return None
             parsed = parse_ymd(date_str)
             return parsed.year, parsed.month
-        except Exception:
+        except (TypeError, ValueError):
             return None
 
     def _year_months(self) -> list[tuple[int, int]]:

@@ -23,7 +23,7 @@ def import_records_from_csv(
             wallet_ids=wallet_ids,
             existing_initial_balance=existing_initial_balance,
         )
-    except Exception:
+    except (ImportError, OSError, TypeError, ValueError, RuntimeError):
         logger.exception("Failed to import records from csv: %s", filepath)
         raise
 
@@ -47,7 +47,7 @@ def import_records_from_xlsx(
             wallet_ids=wallet_ids,
             existing_initial_balance=existing_initial_balance,
         )
-    except Exception:
+    except (ImportError, OSError, TypeError, ValueError, RuntimeError):
         logger.exception("Failed to import records from xlsx: %s", filepath)
         raise
 
@@ -63,7 +63,7 @@ def import_mandatory_expenses_from_csv(
         return import_mandatory_expenses_from_csv(
             filepath, policy=policy, currency_service=currency_service
         )
-    except Exception:
+    except (ImportError, OSError, TypeError, ValueError, RuntimeError):
         logger.exception("Failed to import mandatory expenses from csv: %s", filepath)
         raise
 
@@ -79,7 +79,7 @@ def import_mandatory_expenses_from_xlsx(
         return import_mandatory_expenses_from_xlsx(
             filepath, policy=policy, currency_service=currency_service
         )
-    except Exception:
+    except (ImportError, OSError, TypeError, ValueError, RuntimeError):
         logger.exception("Failed to import mandatory expenses from xlsx: %s", filepath)
         raise
 
@@ -95,6 +95,6 @@ def import_full_backup(filepath: str, *, force: bool = False):
         from utils.backup_utils import import_full_backup_from_json
 
         return import_full_backup_from_json(filepath, force=force)
-    except Exception:
+    except (ImportError, OSError, TypeError, ValueError, RuntimeError):
         logger.exception("Failed to import full backup from json: %s", filepath)
         raise

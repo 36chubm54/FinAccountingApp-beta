@@ -4,7 +4,7 @@ import logging
 import threading
 from pathlib import Path
 
-from backup import create_backup, export_to_json
+from backup import BackupExportError, create_backup, export_to_json
 from config import JSON_BACKUP_KEEP_LAST, JSON_PATH, LAZY_EXPORT_SIZE_THRESHOLD, SQLITE_PATH
 from infrastructure.repositories import RecordRepository
 from infrastructure.sqlite_repository import SQLiteRecordRepository
@@ -15,6 +15,11 @@ def _resolve_schema_path(schema_path: str) -> str:
     if candidate.is_absolute():
         return str(candidate)
     return str((Path(__file__).resolve().parent / candidate).resolve())
+
+
+def _is_onedrive_path(path: Path) -> bool:
+    parts = {part.casefold() for part in path.resolve().parts}
+    return "onedrive" in parts
 
 
 def _ensure_schema_meta(sqlite_repo: SQLiteRecordRepository) -> None:
@@ -47,6 +52,11 @@ def _freeze_closed_distribution_months(sqlite_repo: SQLiteRecordRepository) -> N
 
 
 def _validate_sqlite_integrity_only(sqlite_repo: SQLiteRecordRepository) -> None:
+    integrity_row = sqlite_repo.query_one("PRAGMA quick_check")
+    if integrity_row is None or str(integrity_row[0]).strip().lower() != "ok":
+        detail = str(integrity_row[0]) if integrity_row is not None else "<no result>"
+        raise RuntimeError(f"Аварийный режим: SQLite quick_check failed ({detail})")
+
     fk_issues = sqlite_repo.foreign_key_issues()
     if fk_issues:
         raise RuntimeError(f"Аварийный режим: foreign key violations found ({len(fk_issues)})")
@@ -189,8 +199,8 @@ def _export_in_background() -> None:
             )
             create_backup(JSON_PATH, keep_last=JSON_BACKUP_KEEP_LAST)
             logging.info("[bootstrap] Background JSON export completed")
-        except Exception as e:
-            logging.error("[bootstrap] Background JSON export failed: %s", e)
+        except BackupExportError:
+            logging.exception("[bootstrap] Background JSON export failed")
 
     thread = threading.Thread(target=_export, daemon=True)
     thread.start()
@@ -209,7 +219,8 @@ def _run_post_startup_maintenance(db_path: Path) -> None:
 
     if _should_export_json():
         sqlite_size = db_path.stat().st_size if db_path.exists() else 0
-        if sqlite_size > LAZY_EXPORT_SIZE_THRESHOLD:
+        onedrive_managed = _is_onedrive_path(db_path)
+        if sqlite_size > LAZY_EXPORT_SIZE_THRESHOLD and not onedrive_managed:
             logging.info(
                 "[bootstrap] SQLite database is large (%d bytes), "
                 "scheduling JSON export in background",
@@ -217,6 +228,11 @@ def _run_post_startup_maintenance(db_path: Path) -> None:
             )
             _export_in_background()
         else:
+            if onedrive_managed and sqlite_size > LAZY_EXPORT_SIZE_THRESHOLD:
+                logging.warning(
+                    "[bootstrap] OneDrive-managed SQLite path detected; "
+                    "forcing synchronous JSON export to reduce concurrent file sync races"
+                )
             export_to_json(
                 SQLITE_PATH,
                 JSON_PATH,
@@ -248,6 +264,12 @@ def bootstrap_repository(*, run_maintenance: bool = True) -> RecordRepository:
         logging.info("[bootstrap] Existing SQLite database detected")
     else:
         logging.info("[bootstrap] SQLite database created and schema initialized")
+    if _is_onedrive_path(db_path):
+        logging.warning(
+            "[bootstrap] SQLite database is inside a OneDrive-synced directory. "
+            "Concurrent sync can affect WAL/SHM coherence; keep app single-writer and "
+            "prefer graceful shutdowns."
+        )
 
     _ensure_system_wallet(repository)
     if not _is_migration_verified(repository):

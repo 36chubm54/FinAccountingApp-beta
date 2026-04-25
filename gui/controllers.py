@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import replace
 
+from app.finance_service import ImportCapabilities
 from app.record_service import RecordService
 from app.services import CurrencyService
 from app.use_cases import (
@@ -90,6 +91,7 @@ from gui.controller_support import (
     build_list_items,
     wallets_with_system_initial_balance,
 )
+from gui.i18n import tr
 from infrastructure.repositories import RecordRepository
 from infrastructure.sqlite_repository import SQLiteRecordRepository
 from services.asset_service import AssetService
@@ -116,7 +118,6 @@ class FinancialController:
         self._debt_service_instance: DebtService | None = None
         self._distribution_service_instance: DistributionService | None = None
         self._goal_service_instance: GoalService | None = None
-        self.supports_bulk_import_replace = True
 
     def build_record_list_items(self, records: list[Record] | None = None) -> list[RecordListItem]:
         if records is None:
@@ -189,20 +190,46 @@ class FinancialController:
         if isinstance(self._repository, SQLiteRecordRepository):
             self._repository.set_schema_meta("online_mode", "1" if enabled else "0")
 
+    def save_language_preference(self, code: str) -> None:
+        if isinstance(self._repository, SQLiteRecordRepository):
+            self._repository.set_schema_meta("app_language", str(code or "").strip().lower())
+
+    def load_language_preference(self) -> str | None:
+        if not isinstance(self._repository, SQLiteRecordRepository):
+            return None
+        value = self._repository.get_schema_meta("app_language")
+        return str(value).strip().lower() if value else None
+
+    def save_theme_preference(self, name: str) -> None:
+        if isinstance(self._repository, SQLiteRecordRepository):
+            self._repository.set_schema_meta("app_theme", str(name or "").strip().lower())
+
+    def load_theme_preference(self) -> str | None:
+        if not isinstance(self._repository, SQLiteRecordRepository):
+            return None
+        value = self._repository.get_schema_meta("app_theme")
+        return str(value).strip().lower() if value else None
+
     def get_online_mode(self) -> bool:
         """Return current online mode state."""
         return self._currency.is_online
 
     def get_online_status(self) -> dict[str, str]:
         """Return human-readable status strings for the status bar."""
-        mode = "Online" if self._currency.is_online else "Offline"
+        mode = (
+            tr("app.status.online", "Онлайн")
+            if self._currency.is_online
+            else tr("app.status.offline", "Офлайн")
+        )
         last = self._currency.last_fetched_at
         if last is not None:
-            currency_status = f"Updated {last.strftime('%H:%M')}"
+            currency_status = tr(
+                "app.status.updated", "Обновлено {time}", time=last.strftime("%H:%M")
+            )
         elif self._currency.is_online:
-            currency_status = "Fetching..."
+            currency_status = tr("app.status.currency_fetching", "Обновляем курсы...")
         else:
-            currency_status = "Offline rates"
+            currency_status = tr("app.status.currency_offline", "Курсы: офлайн")
         return {"mode": mode, "currency": currency_status}
 
     def load_online_mode_preference(self) -> bool:
@@ -223,6 +250,7 @@ class FinancialController:
         description: str = "",
         amount_kzt: float | None = None,
         rate_at_operation: float | None = None,
+        related_debt_id: int | None = None,
     ) -> None:
         CreateIncome(self._repository, self._currency).execute(
             date=date,
@@ -233,6 +261,7 @@ class FinancialController:
             description=description,
             amount_kzt=amount_kzt,
             rate_at_operation=rate_at_operation,
+            related_debt_id=related_debt_id,
         )
 
     def create_expense(
@@ -246,6 +275,7 @@ class FinancialController:
         description: str = "",
         amount_kzt: float | None = None,
         rate_at_operation: float | None = None,
+        related_debt_id: int | None = None,
     ) -> None:
         CreateExpense(self._repository, self._currency).execute(
             date=date,
@@ -256,6 +286,7 @@ class FinancialController:
             description=description,
             amount_kzt=amount_kzt,
             rate_at_operation=rate_at_operation,
+            related_debt_id=related_debt_id,
         )
 
     def generate_report(self) -> Report:
@@ -615,13 +646,22 @@ class FinancialController:
             mandatory_payload.extend(self._repository.load_mandatory_expenses())
         mandatory_payload.extend(mandatory_templates)
 
+        debt_payload: list[Debt]
+        debt_payment_payload: list[DebtPayment]
+        if debts is None or debt_payments is None:
+            debt_payload = list(self._repository.load_debts())
+            debt_payment_payload = list(self._repository.load_debt_payments())
+        else:
+            debt_payload = list(debts)
+            debt_payment_payload = list(debt_payments)
+
         self._repository.replace_all_data(
             wallets=target_wallets,
             records=records,
             mandatory_expenses=mandatory_payload,
             transfers=transfers,
-            debts=list(debts or []),
-            debt_payments=list(debt_payments or []),
+            debts=debt_payload,
+            debt_payments=debt_payment_payload,
         )
         if assets is not None or asset_snapshots is not None:
             self.replace_assets(list(assets or []), list(asset_snapshots or []))
@@ -630,6 +670,17 @@ class FinancialController:
 
     def replace_budgets(self, budgets: list[Budget]) -> None:
         self._budget_service().replace_budgets(budgets)
+
+    def get_import_capabilities(self) -> ImportCapabilities:
+        return ImportCapabilities(
+            supports_bulk_replace=True,
+            supports_distribution_snapshots_replace=True,
+            supports_assets_replace=True,
+            supports_goals_replace=True,
+            supports_budgets_replace=True,
+            supports_distribution_structure_replace=True,
+            supports_load_debts=True,
+        )
 
     def run_import_transaction(self, operation):
         return run_import_op(self._repository, operation, logger)
@@ -759,6 +810,9 @@ class FinancialController:
             if record.related_debt_id is not None and int(record.wallet_id) == int(wallet_id)
         }
         return [debt for debt in debts if int(debt.id) in linked_debt_ids]
+
+    def load_debts(self) -> list[Debt]:
+        return GetDebts(self._debt_service()).execute()
 
     def get_open_debts(self) -> list[Debt]:
         return GetOpenDebts(self._debt_service()).execute()

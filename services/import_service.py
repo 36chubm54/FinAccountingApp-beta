@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
-from app.finance_service import FinanceService
+from app.finance_service import FinanceService, ImportCapabilities
 from domain.asset import Asset, AssetCategory, AssetSnapshot
 from domain.budget import Budget
 from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
@@ -56,6 +57,16 @@ class PreparedImportPayload:
     imported: int
     skipped: int
     errors: list[str]
+
+
+@dataclass(frozen=True)
+class ReplaceSectionFlags:
+    can_replace_debts: bool
+    can_replace_assets: bool
+    can_replace_goals: bool
+    can_replace_budgets: bool
+    can_replace_distribution_structure: bool
+    can_replace_distribution_snapshots: bool
 
 
 class ImportService:
@@ -229,7 +240,10 @@ class ImportService:
 
         parsed_records = self._normalize_record_debt_links(
             parsed_records,
-            debts=debts,
+            allowed_debt_ids=self._resolve_allowed_debt_ids_for_record_links(
+                parsed=parsed,
+                imported_debts=debts,
+            ),
             strict=strict_distribution,
         )
         debt_payments = self._debt_payments_from_payload(
@@ -300,62 +314,246 @@ class ImportService:
         ):
             return ImportResult(imported=0, skipped=skipped, errors=errors)
 
-        replace_all_for_import = getattr(self._finance_service, "replace_all_for_import", None)
-        fast_replace_enabled = (
-            getattr(self._finance_service, "supports_bulk_import_replace", False) is True
+        flags = self._resolve_replace_flags(
+            parsed=parsed,
+            debts=debts,
+            debt_payments=debt_payments,
+            assets=assets,
+            asset_snapshots=asset_snapshots,
+            goals=goals,
+            budgets=budgets,
+            distribution_items=distribution_items,
+            distribution_subitems_by_item=distribution_subitems_by_item,
+            frozen_distribution_rows=frozen_distribution_rows,
         )
+        capabilities: ImportCapabilities = self._finance_service.get_import_capabilities()
+        fast_replace_enabled = capabilities.supports_bulk_replace is True
         json_bulk_replace_allowed = parsed.file_type == "json"
         if (
             fast_replace_enabled
-            and callable(replace_all_for_import)
+            and json_bulk_replace_allowed
             and (self._policy != ImportPolicy.CURRENT_RATE or json_bulk_replace_allowed)
         ):
-            target_wallets = wallets if wallets else None
-            if target_wallets:
-                wallet_ids = {wallet.id for wallet in target_wallets}
-            else:
-                wallet_ids = {wallet.id for wallet in self._finance_service.load_wallets()}
-
-            self._ensure_wallets_exist(parsed_records, raw_transfer_ops, wallet_ids)
-            records, transfers, counters = self._build_import_operations(
-                parsed_records=parsed_records,
-                transfer_rows=raw_transfer_ops,
-                counters=ImportCounters(wallets=imported_wallets),
-            )
-            mandatory_templates = self._normalize_mandatory_templates(parsed_mandatory_templates)
-            replace_all_for_import(
-                wallets=target_wallets,
+            return self._commit_bulk_prepared_records_payload(
+                parsed=parsed,
                 initial_balance=initial_balance,
-                records=records,
-                transfers=transfers,
-                mandatory_templates=mandatory_templates,
+                wallets=wallets,
+                imported_wallets=imported_wallets,
+                parsed_records=parsed_records,
+                parsed_mandatory_templates=parsed_mandatory_templates,
+                budgets=budgets,
                 debts=debts,
                 debt_payments=debt_payments,
                 assets=assets,
                 asset_snapshots=asset_snapshots,
                 goals=goals,
-                preserve_existing_mandatory=not bool(target_wallets),
+                distribution_items=distribution_items,
+                distribution_subitems_by_item=distribution_subitems_by_item,
+                frozen_distribution_rows=frozen_distribution_rows,
+                raw_transfer_ops=raw_transfer_ops,
+                imported=imported,
+                skipped=skipped,
+                errors=errors,
+                capabilities=capabilities,
+                flags=flags,
             )
-            self._replace_distribution_structure_if_supported(
-                parsed.file_type,
-                distribution_items,
-                distribution_subitems_by_item,
-            )
-            self._replace_budgets_if_supported(parsed.file_type, budgets)
-            self._replace_distribution_snapshots_if_supported(
-                parsed.file_type,
-                frozen_distribution_rows,
-            )
-            self._finance_service.normalize_operation_ids_for_import()
-            logger.info(
-                "Import completed (bulk) file=%s wallets=%s records=%s transfers=%s",
-                parsed.path,
-                counters.wallets,
-                counters.records,
-                counters.transfers,
-            )
-            return ImportResult(imported=imported, skipped=skipped, errors=errors)
 
+        return self._commit_incremental_prepared_records_payload(
+            parsed=parsed,
+            initial_balance=initial_balance,
+            wallets=wallets,
+            imported_wallets=imported_wallets,
+            parsed_records=parsed_records,
+            parsed_mandatory_templates=parsed_mandatory_templates,
+            budgets=budgets,
+            assets=assets,
+            asset_snapshots=asset_snapshots,
+            goals=goals,
+            distribution_items=distribution_items,
+            distribution_subitems_by_item=distribution_subitems_by_item,
+            frozen_distribution_rows=frozen_distribution_rows,
+            raw_transfer_ops=raw_transfer_ops,
+            imported=imported,
+            skipped=skipped,
+            errors=errors,
+            capabilities=capabilities,
+            flags=flags,
+        )
+
+    def _resolve_replace_flags(
+        self,
+        *,
+        parsed: ParsedImportData,
+        debts: list[Debt],
+        debt_payments: list[DebtPayment],
+        assets: list[Asset],
+        asset_snapshots: list[AssetSnapshot],
+        goals: list[Goal],
+        budgets: list[Budget],
+        distribution_items: list[DistributionItem],
+        distribution_subitems_by_item: dict[int, list[DistributionSubitem]],
+        frozen_distribution_rows: list[FrozenDistributionRow],
+    ) -> ReplaceSectionFlags:
+        section_keys, fallback_used = self._resolve_json_section_keys(
+            parsed=parsed,
+            debts=debts,
+            debt_payments=debt_payments,
+            assets=assets,
+            asset_snapshots=asset_snapshots,
+            goals=goals,
+            budgets=budgets,
+            distribution_items=distribution_items,
+            distribution_subitems_by_item=distribution_subitems_by_item,
+            frozen_distribution_rows=frozen_distribution_rows,
+        )
+        if fallback_used:
+            logger.warning(
+                "Import JSON section metadata is missing; enabling fallback detection from payload"
+            )
+        return ReplaceSectionFlags(
+            can_replace_debts=self._section_present_or_payload_nonempty(
+                section_keys,
+                required_keys=("debts", "debt_payments"),
+                payloads=(debts, debt_payments),
+            ),
+            can_replace_assets=self._section_present_or_payload_nonempty(
+                section_keys,
+                required_keys=("assets", "asset_snapshots"),
+                payloads=(assets, asset_snapshots),
+            ),
+            can_replace_goals=self._section_present_or_payload_nonempty(
+                section_keys,
+                required_keys=("goals",),
+                payloads=(goals,),
+            ),
+            can_replace_budgets=self._section_present_or_payload_nonempty(
+                section_keys,
+                required_keys=("budgets",),
+                payloads=(budgets,),
+            ),
+            can_replace_distribution_structure=self._section_present_or_payload_nonempty(
+                section_keys,
+                required_keys=("distribution_items", "distribution_subitems"),
+                payloads=(distribution_items, list(distribution_subitems_by_item.values())),
+            ),
+            can_replace_distribution_snapshots=self._section_present_or_payload_nonempty(
+                section_keys,
+                required_keys=("distribution_snapshots",),
+                payloads=(frozen_distribution_rows,),
+            ),
+        )
+
+    def _commit_bulk_prepared_records_payload(
+        self,
+        *,
+        parsed: ParsedImportData,
+        initial_balance: float,
+        wallets: list[Wallet],
+        imported_wallets: int,
+        parsed_records: list[Record],
+        parsed_mandatory_templates: list[MandatoryExpenseRecord],
+        budgets: list[Budget],
+        debts: list[Debt],
+        debt_payments: list[DebtPayment],
+        assets: list[Asset],
+        asset_snapshots: list[AssetSnapshot],
+        goals: list[Goal],
+        distribution_items: list[DistributionItem],
+        distribution_subitems_by_item: dict[int, list[DistributionSubitem]],
+        frozen_distribution_rows: list[FrozenDistributionRow],
+        raw_transfer_ops: list[dict[str, Any]],
+        imported: int,
+        skipped: int,
+        errors: tuple[str, ...],
+        capabilities: ImportCapabilities,
+        flags: ReplaceSectionFlags,
+    ) -> ImportResult:
+        target_wallets = wallets if wallets else None
+        if target_wallets:
+            wallet_ids = {wallet.id for wallet in target_wallets}
+        else:
+            wallet_ids = {wallet.id for wallet in self._finance_service.load_wallets()}
+
+        self._ensure_wallets_exist(parsed_records, raw_transfer_ops, wallet_ids)
+        records, transfers, counters = self._build_import_operations(
+            parsed_records=parsed_records,
+            transfer_rows=raw_transfer_ops,
+            counters=ImportCounters(wallets=imported_wallets),
+        )
+        mandatory_templates = self._normalize_mandatory_templates(parsed_mandatory_templates)
+        self._finance_service.replace_all_for_import(
+            wallets=target_wallets,
+            initial_balance=initial_balance,
+            records=records,
+            transfers=transfers,
+            mandatory_templates=mandatory_templates,
+            debts=debts if flags.can_replace_debts else None,
+            debt_payments=debt_payments if flags.can_replace_debts else None,
+            assets=assets
+            if flags.can_replace_assets and capabilities.supports_assets_replace
+            else None,
+            asset_snapshots=(
+                asset_snapshots
+                if flags.can_replace_assets and capabilities.supports_assets_replace
+                else None
+            ),
+            goals=goals
+            if flags.can_replace_goals and capabilities.supports_goals_replace
+            else None,
+            preserve_existing_mandatory=not bool(target_wallets),
+        )
+        self._replace_distribution_structure_if_supported(
+            parsed.file_type,
+            distribution_items,
+            distribution_subitems_by_item,
+            capabilities=capabilities,
+            enabled=flags.can_replace_distribution_structure,
+        )
+        self._replace_budgets_if_supported(
+            parsed.file_type,
+            budgets,
+            capabilities=capabilities,
+            enabled=flags.can_replace_budgets,
+        )
+        self._replace_distribution_snapshots_if_supported(
+            parsed.file_type,
+            frozen_distribution_rows,
+            capabilities=capabilities,
+            enabled=flags.can_replace_distribution_snapshots,
+        )
+        self._finance_service.normalize_operation_ids_for_import()
+        logger.info(
+            "Import completed (bulk) file=%s wallets=%s records=%s transfers=%s",
+            parsed.path,
+            counters.wallets,
+            counters.records,
+            counters.transfers,
+        )
+        return ImportResult(imported=imported, skipped=skipped, errors=errors)
+
+    def _commit_incremental_prepared_records_payload(
+        self,
+        *,
+        parsed: ParsedImportData,
+        initial_balance: float,
+        wallets: list[Wallet],
+        imported_wallets: int,
+        parsed_records: list[Record],
+        parsed_mandatory_templates: list[MandatoryExpenseRecord],
+        budgets: list[Budget],
+        assets: list[Asset],
+        asset_snapshots: list[AssetSnapshot],
+        goals: list[Goal],
+        distribution_items: list[DistributionItem],
+        distribution_subitems_by_item: dict[int, list[DistributionSubitem]],
+        frozen_distribution_rows: list[FrozenDistributionRow],
+        raw_transfer_ops: list[dict[str, Any]],
+        imported: int,
+        skipped: int,
+        errors: tuple[str, ...],
+        capabilities: ImportCapabilities,
+        flags: ReplaceSectionFlags,
+    ) -> ImportResult:
         if wallets:
             self._finance_service.reset_all_for_import(
                 wallets=wallets, initial_balance=initial_balance
@@ -373,19 +571,38 @@ class ImportService:
             counters=counters,
         )
         self._apply_mandatory_templates(parsed_mandatory_templates)
-        self._replace_assets_if_supported(parsed.file_type, assets, asset_snapshots)
-        self._replace_goals_if_supported(parsed.file_type, goals)
+        self._replace_assets_if_supported(
+            parsed.file_type,
+            assets,
+            asset_snapshots,
+            capabilities=capabilities,
+            enabled=flags.can_replace_assets,
+        )
+        self._replace_goals_if_supported(
+            parsed.file_type,
+            goals,
+            capabilities=capabilities,
+            enabled=flags.can_replace_goals,
+        )
         self._replace_distribution_structure_if_supported(
             parsed.file_type,
             distribution_items,
             distribution_subitems_by_item,
+            capabilities=capabilities,
+            enabled=flags.can_replace_distribution_structure,
         )
-        self._replace_budgets_if_supported(parsed.file_type, budgets)
+        self._replace_budgets_if_supported(
+            parsed.file_type,
+            budgets,
+            capabilities=capabilities,
+            enabled=flags.can_replace_budgets,
+        )
         self._replace_distribution_snapshots_if_supported(
             parsed.file_type,
             frozen_distribution_rows,
+            capabilities=capabilities,  # type: ignore
+            enabled=flags.can_replace_distribution_snapshots,
         )
-
         logger.info(
             "Import completed file=%s wallets=%s records=%s transfers=%s",
             parsed.path,
@@ -400,50 +617,136 @@ class ImportService:
         self,
         file_type: str,
         rows: list[FrozenDistributionRow],
+        *,
+        capabilities: ImportCapabilities,
+        enabled: bool = True,
     ) -> None:
-        if file_type != "json":
+        if (
+            file_type != "json"
+            or not enabled
+            or not capabilities.supports_distribution_snapshots_replace
+        ):
             return
-        replace_snapshots = getattr(self._finance_service, "replace_distribution_snapshots", None)
-        if callable(replace_snapshots):
-            replace_snapshots(rows)
+        self._finance_service.replace_distribution_snapshots(rows)
 
     def _replace_assets_if_supported(
         self,
         file_type: str,
         assets: list[Asset],
         snapshots: list[AssetSnapshot],
+        *,
+        capabilities: ImportCapabilities,
+        enabled: bool = True,
     ) -> None:
-        if file_type != "json":
+        if file_type != "json" or not enabled or not capabilities.supports_assets_replace:
             return
-        replace_assets = getattr(self._finance_service, "replace_assets", None)
-        if callable(replace_assets):
-            replace_assets(assets, snapshots)
+        self._finance_service.replace_assets(assets, snapshots)
 
-    def _replace_goals_if_supported(self, file_type: str, goals: list[Goal]) -> None:
-        if file_type != "json":
+    def _replace_goals_if_supported(
+        self,
+        file_type: str,
+        goals: list[Goal],
+        *,
+        capabilities: ImportCapabilities,
+        enabled: bool = True,
+    ) -> None:
+        if file_type != "json" or not enabled or not capabilities.supports_goals_replace:
             return
-        replace_goals = getattr(self._finance_service, "replace_goals", None)
-        if callable(replace_goals):
-            replace_goals(goals)
+        self._finance_service.replace_goals(goals)
 
-    def _replace_budgets_if_supported(self, file_type: str, budgets: list[Budget]) -> None:
-        if file_type != "json":
+    def _replace_budgets_if_supported(
+        self,
+        file_type: str,
+        budgets: list[Budget],
+        *,
+        capabilities: ImportCapabilities,
+        enabled: bool = True,
+    ) -> None:
+        if file_type != "json" or not enabled or not capabilities.supports_budgets_replace:
             return
-        replace_budgets = getattr(self._finance_service, "replace_budgets", None)
-        if callable(replace_budgets):
-            replace_budgets(budgets)
+        self._finance_service.replace_budgets(budgets)
 
     def _replace_distribution_structure_if_supported(
         self,
         file_type: str,
         items: list[DistributionItem],
         subitems_by_item: dict[int, list[DistributionSubitem]],
+        *,
+        capabilities: ImportCapabilities,
+        enabled: bool = True,
     ) -> None:
-        if file_type != "json":
+        if (
+            file_type != "json"
+            or not enabled
+            or not capabilities.supports_distribution_structure_replace
+        ):
             return
-        replace_structure = getattr(self._finance_service, "replace_distribution_structure", None)
-        if callable(replace_structure):
-            replace_structure(items, subitems_by_item)
+        self._finance_service.replace_distribution_structure(items, subitems_by_item)
+
+    @staticmethod
+    def _section_present_or_payload_nonempty(
+        section_keys: set[str],
+        *,
+        required_keys: tuple[str, ...],
+        payloads: tuple[Any, ...],
+    ) -> bool:
+        if all(key in section_keys for key in required_keys):
+            return True
+        for payload in payloads:
+            if isinstance(payload, dict):
+                if payload:
+                    return True
+                continue
+            if isinstance(payload, (list, tuple, set)):
+                if len(payload) > 0:
+                    return True
+        return False
+
+    @staticmethod
+    def _resolve_json_section_keys(
+        *,
+        parsed: ParsedImportData,
+        debts: list[Debt],
+        debt_payments: list[DebtPayment],
+        assets: list[Asset],
+        asset_snapshots: list[AssetSnapshot],
+        goals: list[Goal],
+        budgets: list[Budget],
+        distribution_items: list[DistributionItem],
+        distribution_subitems_by_item: dict[int, list[DistributionSubitem]],
+        frozen_distribution_rows: list[FrozenDistributionRow],
+    ) -> tuple[set[str], bool]:
+        if parsed.file_type != "json":
+            return set(), False
+
+        section_keys = {str(key) for key in parsed.json_sections_present}
+        if section_keys:
+            return section_keys, False
+
+        fallback_sections: set[str] = set()
+        if parsed.wallets:
+            fallback_sections.add("wallets")
+        if parsed.rows:
+            fallback_sections.add("records")
+        if parsed.debts or debts:
+            fallback_sections.add("debts")
+        if parsed.debt_payments or debt_payments:
+            fallback_sections.add("debt_payments")
+        if parsed.assets or assets:
+            fallback_sections.add("assets")
+        if parsed.asset_snapshots or asset_snapshots:
+            fallback_sections.add("asset_snapshots")
+        if parsed.goals or goals:
+            fallback_sections.add("goals")
+        if parsed.budgets or budgets:
+            fallback_sections.add("budgets")
+        if parsed.distribution_items or distribution_items:
+            fallback_sections.add("distribution_items")
+        if parsed.distribution_subitems or distribution_subitems_by_item:
+            fallback_sections.add("distribution_subitems")
+        if parsed.distribution_snapshots or frozen_distribution_rows:
+            fallback_sections.add("distribution_snapshots")
+        return fallback_sections, True
 
     def _build_import_operations(
         self,
@@ -834,7 +1137,7 @@ class ImportService:
                     created_at=str(item.get("created_at", "") or "").strip(),
                     description=str(item.get("description", "") or ""),
                 )
-            except Exception:
+            except (TypeError, ValueError):
                 if strict:
                     raise
                 continue
@@ -882,7 +1185,7 @@ class ImportService:
                     currency=str(item.get("currency", "KZT") or "KZT").upper(),
                     note=str(item.get("note", "") or ""),
                 )
-            except Exception:
+            except (TypeError, ValueError):
                 if strict:
                     raise
                 continue
@@ -925,7 +1228,7 @@ class ImportService:
                     target_date=str(item.get("target_date", "") or "").strip() or None,
                     description=str(item.get("description", "") or ""),
                 )
-            except Exception:
+            except (TypeError, ValueError):
                 if strict:
                     raise
                 continue
@@ -968,7 +1271,7 @@ class ImportService:
                     created_at=str(item.get("created_at", "") or "").strip(),
                     closed_at=str(item.get("closed_at", "") or "").strip() or None,
                 )
-            except Exception:
+            except (TypeError, ValueError):
                 if strict:
                     raise
                 continue
@@ -1034,7 +1337,7 @@ class ImportService:
                     is_write_off=bool(item.get("is_write_off", False)),
                     payment_date=str(item.get("payment_date", "") or "").strip(),
                 )
-            except Exception:
+            except (TypeError, ValueError):
                 if strict:
                     raise
                 continue
@@ -1042,17 +1345,37 @@ class ImportService:
             payments.append(payment)
         return payments
 
+    def _resolve_allowed_debt_ids_for_record_links(
+        self,
+        *,
+        parsed: ParsedImportData,
+        imported_debts: list[Debt],
+    ) -> set[int] | None:
+        if parsed.file_type == "json" and "debts" in set(parsed.json_sections_present):
+            return {int(debt.id) for debt in imported_debts}
+
+        capabilities = self._finance_service.get_import_capabilities()
+        if capabilities.supports_load_debts:
+            debts = self._finance_service.load_debts()
+            if isinstance(debts, Iterable):
+                return {int(debt.id) for debt in debts}
+
+        # When debt source is unavailable, keep links unchanged instead of
+        # destructive clearing on records-only imports.
+        return None
+
     @staticmethod
     def _normalize_record_debt_links(
         records: list[Record],
         *,
-        debts: list[Debt],
+        allowed_debt_ids: set[int] | None,
         strict: bool = False,
     ) -> list[Record]:
-        debt_ids = {int(debt.id) for debt in debts}
+        if allowed_debt_ids is None:
+            return list(records)
         normalized_records: list[Record] = []
         for record in records:
-            if record.related_debt_id is None or int(record.related_debt_id) in debt_ids:
+            if record.related_debt_id is None or int(record.related_debt_id) in allowed_debt_ids:
                 normalized_records.append(record)
                 continue
             if strict:
@@ -1208,15 +1531,20 @@ class ImportService:
                 transfers_count += 1
                 continue
             if isinstance(record, IncomeRecord):
+                create_income_payload: dict[str, Any] = {
+                    "date": str(record.date),
+                    "wallet_id": int(record.wallet_id),
+                    "amount": to_money_float(record.amount_original or 0.0),
+                    "currency": str(record.currency).upper(),
+                    "category": str(record.category),
+                    "description": str(record.description or ""),
+                    "amount_kzt": self._fixed_amount_kzt(record.amount_kzt),
+                    "rate_at_operation": self._fixed_rate(record.rate_at_operation),
+                }
+                if record.related_debt_id is not None:
+                    create_income_payload["related_debt_id"] = int(record.related_debt_id)
                 self._finance_service.create_income(
-                    date=str(record.date),
-                    wallet_id=int(record.wallet_id),
-                    amount=to_money_float(record.amount_original or 0.0),
-                    currency=str(record.currency).upper(),
-                    category=str(record.category),
-                    description=str(record.description or ""),
-                    amount_kzt=self._fixed_amount_kzt(record.amount_kzt),
-                    rate_at_operation=self._fixed_rate(record.rate_at_operation),
+                    **create_income_payload,
                 )
                 records_count += 1
                 continue
@@ -1238,16 +1566,19 @@ class ImportService:
                 )
                 records_count += 1
                 continue
-            self._finance_service.create_expense(
-                date=str(record.date),
-                wallet_id=int(record.wallet_id),
-                amount=to_money_float(record.amount_original or 0.0),
-                currency=str(record.currency).upper(),
-                category=str(record.category),
-                description=str(record.description or ""),
-                amount_kzt=self._fixed_amount_kzt(record.amount_kzt),
-                rate_at_operation=self._fixed_rate(record.rate_at_operation),
-            )
+            create_expense_payload: dict[str, Any] = {
+                "date": str(record.date),
+                "wallet_id": int(record.wallet_id),
+                "amount": to_money_float(record.amount_original or 0.0),
+                "currency": str(record.currency).upper(),
+                "category": str(record.category),
+                "description": str(record.description or ""),
+                "amount_kzt": self._fixed_amount_kzt(record.amount_kzt),
+                "rate_at_operation": self._fixed_rate(record.rate_at_operation),
+            }
+            if record.related_debt_id is not None:
+                create_expense_payload["related_debt_id"] = int(record.related_debt_id)
+            self._finance_service.create_expense(**create_expense_payload)
             records_count += 1
         return ImportCounters(
             wallets=counters.wallets,
@@ -1414,6 +1745,7 @@ class ImportService:
             distribution_snapshots=list(parsed.distribution_snapshots),
             wallets=wallets,
             initial_balance=parsed.initial_balance,
+            json_sections_present=parsed.json_sections_present,
         )
 
     @staticmethod

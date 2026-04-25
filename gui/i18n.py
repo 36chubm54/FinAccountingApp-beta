@@ -45,6 +45,10 @@ def load_language(code: str) -> dict[str, str]:
     return _catalogs[normalized]
 
 
+def get_available_languages() -> list[str]:
+    return sorted(path.stem.lower() for path in LOCALES_DIR.glob("*.txt"))
+
+
 def set_language(code: str) -> dict[str, str]:
     global _current_language
     normalized = str(code or "").strip().lower() or DEFAULT_LANGUAGE
@@ -65,6 +69,6 @@ def tr(key: str, default: str | None = None, **fmt: object) -> str:
     if fmt:
         try:
             return template.format(**fmt)
-        except Exception:
+        except (KeyError, IndexError, ValueError):
             return template
     return template

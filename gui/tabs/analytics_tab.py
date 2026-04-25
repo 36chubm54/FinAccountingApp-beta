@@ -7,27 +7,15 @@ import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from tkinter import messagebox, ttk
+from tkinter import ttk
 from typing import Any, Protocol
 
 from gui.i18n import tr
 from gui.tooltip import Tooltip
-from gui.ui_helpers import attach_treeview_scrollbars
+from gui.ui_helpers import attach_treeview_scrollbars, show_error
+from gui.ui_theme import get_palette
 
 logger = logging.getLogger(__name__)
-
-PALETTE = [
-    "#3b82f6",
-    "#10b981",
-    "#f59e0b",
-    "#ef4444",
-    "#8b5cf6",
-    "#ec4899",
-    "#06b6d4",
-    "#84cc16",
-    "#f97316",
-    "#6366f1",
-]
 
 
 class AnalyticsTabContext(Protocol):
@@ -54,13 +42,15 @@ class AnalyticsTabBindings:
 
 def _draw_net_worth_line(canvas: tk.Canvas, data: list) -> None:
     canvas.delete("all")
+    palette = get_palette()
+    canvas.configure(bg=palette.surface_elevated, highlightbackground=palette.border_soft)
     if not data:
         canvas.create_text(
             10,
             10,
             anchor="nw",
             text=tr("common.empty_short", "Нет данных"),
-            fill="#6b7280",
+            fill=palette.chart_empty,
             font=("Segoe UI", 11),
         )
         return
@@ -85,14 +75,14 @@ def _draw_net_worth_line(canvas: tk.Canvas, data: list) -> None:
             y0,
             w - pad["right"],
             y0,
-            fill="#d1d5db",
+            fill=palette.chart_grid,
             dash=(4, 4),
         )
 
     for i in range(len(values) - 1):
         x1, y1 = to_xy(i, values[i])
         x2, y2 = to_xy(i + 1, values[i + 1])
-        canvas.create_line(x1, y1, x2, y2, fill="#3b82f6", width=2)
+        canvas.create_line(x1, y1, x2, y2, fill=palette.accent_blue, width=2)
 
     for i, item in enumerate(data):
         x, y = to_xy(i, float(getattr(item, "balance", 0.0)))
@@ -101,8 +91,8 @@ def _draw_net_worth_line(canvas: tk.Canvas, data: list) -> None:
             y - 3,
             x + 3,
             y + 3,
-            fill="#3b82f6",
-            outline="white",
+            fill=palette.accent_blue,
+            outline=palette.chart_outline,
             width=1,
         )
 
@@ -114,7 +104,7 @@ def _draw_net_worth_line(canvas: tk.Canvas, data: list) -> None:
                 x,
                 h - pad["bottom"] + 10,
                 text=str(getattr(item, "month", "")),
-                fill="#6b7280",
+                fill=palette.chart_empty,
                 font=("Segoe UI", 8),
             )
 
@@ -122,7 +112,7 @@ def _draw_net_worth_line(canvas: tk.Canvas, data: list) -> None:
         pad["left"] - 4,
         pad["top"],
         text=f"{max_v:,.0f}",
-        fill="#6b7280",
+        fill=palette.chart_empty,
         font=("Segoe UI", 8),
         anchor="e",
     )
@@ -130,7 +120,7 @@ def _draw_net_worth_line(canvas: tk.Canvas, data: list) -> None:
         pad["left"] - 4,
         h - pad["bottom"],
         text=f"{min_v:,.0f}",
-        fill="#6b7280",
+        fill=palette.chart_empty,
         font=("Segoe UI", 8),
         anchor="e",
     )
@@ -139,6 +129,8 @@ def _draw_net_worth_line(canvas: tk.Canvas, data: list) -> None:
 def _draw_category_pie(canvas: tk.Canvas, data: list) -> None:
     """Draw a pie chart of category spending."""
     canvas.delete("all")
+    palette = get_palette()
+    canvas.configure(bg=palette.surface_elevated, highlightbackground=palette.border_soft)
     if not data:
         return
     total = sum(float(getattr(item, "total_kzt", 0.0)) for item in data)
@@ -155,7 +147,7 @@ def _draw_category_pie(canvas: tk.Canvas, data: list) -> None:
     for i, item in enumerate(data[:10]):
         value = float(getattr(item, "total_kzt", 0.0))
         sweep = value / total * 360.0
-        color = PALETTE[i % len(PALETTE)]
+        color = palette.chart_series[i % len(palette.chart_series)]
         canvas.create_arc(
             cx - r,
             cy - r,
@@ -164,7 +156,7 @@ def _draw_category_pie(canvas: tk.Canvas, data: list) -> None:
             start=angle,
             extent=-sweep,
             fill=color,
-            outline="white",
+            outline=palette.chart_outline,
             width=1,
         )
         angle -= sweep
@@ -174,6 +166,7 @@ def build_analytics_tab(
     parent: tk.Frame | ttk.Frame,
     context: AnalyticsTabContext,
 ) -> AnalyticsTabBindings:
+    palette = get_palette()
     parent.grid_columnconfigure(0, weight=1)
     parent.grid_columnconfigure(1, weight=1)
     parent.grid_rowconfigure(1, weight=1)
@@ -241,7 +234,7 @@ def build_analytics_tab(
     burn_rate_label.grid(row=2, column=0, sticky="w")
 
     tooltip_label = ttk.Label(dashboard_left, text="ⓘ", font=("Segoe UI", 10))
-    tooltip_label.config(foreground="gray")
+    tooltip_label.config(foreground=palette.text_muted)
     tooltip_label.grid(row=3, column=0, sticky="sw")
 
     Tooltip(
@@ -319,7 +312,12 @@ def build_analytics_tab(
     timeline_frame.grid(row=1, column=1, sticky="nsew", padx=(6, 10), pady=(6, 10))
     timeline_frame.grid_columnconfigure(0, weight=1)
     timeline_frame.grid_rowconfigure(0, weight=1)
-    timeline_canvas = tk.Canvas(timeline_frame, height=180, bg="white", highlightthickness=0)
+    timeline_canvas = tk.Canvas(
+        timeline_frame,
+        height=180,
+        bg=palette.surface_elevated,
+        highlightthickness=0,
+    )
     timeline_canvas.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
     breakdown_frame = ttk.LabelFrame(
@@ -383,7 +381,11 @@ def build_analytics_tab(
     breakdown_right.grid_columnconfigure(0, weight=1)
     breakdown_right.grid_rowconfigure(0, weight=1)
     category_canvas = tk.Canvas(
-        breakdown_right, width=200, height=200, bg="white", highlightthickness=0
+        breakdown_right,
+        width=200,
+        height=200,
+        bg=palette.surface_elevated,
+        highlightthickness=0,
     )
     category_canvas.grid(row=0, column=0, sticky="nsew")
 
@@ -415,8 +417,8 @@ def build_analytics_tab(
     monthly_tree.column("cashflow", width=120, minwidth=120, anchor="e")
     monthly_tree.column("savings", width=70, minwidth=70, anchor="e")
 
-    monthly_tree.tag_configure("positive", foreground="#10b981")
-    monthly_tree.tag_configure("negative", foreground="#ef4444")
+    monthly_tree.tag_configure("positive", foreground=palette.chart_income)
+    monthly_tree.tag_configure("negative", foreground=palette.chart_expense)
 
     attach_treeview_scrollbars(monthly_container, monthly_tree, row=0, column=0, horizontal=True)
 
@@ -429,7 +431,7 @@ def build_analytics_tab(
         if redraw_job is not None:
             try:
                 context.after_cancel(redraw_job)
-            except Exception:
+            except (tk.TclError, RuntimeError):
                 pass
         redraw_job = context.after(120, _redraw_canvases)
 
@@ -492,7 +494,7 @@ def build_analytics_tab(
                     "Норма сбережений:  {value}%",
                     value=f"{savings_rate:.1f}",
                 ),
-                foreground="#10b981" if savings_rate >= 0 else "#ef4444",
+                foreground=palette.chart_income if savings_rate >= 0 else palette.chart_expense,
             )
             burn_rate_label.config(
                 text=tr(
@@ -616,17 +618,17 @@ def build_analytics_tab(
                     ),
                     tags=(tag,),
                 )
-        except Exception as error:
+        except (ValueError, TypeError, RuntimeError, tk.TclError) as error:
             logger.warning("Analytics refresh error: %s", error)
             if isinstance(error, ValueError):
-                messagebox.showerror(
-                    tr("analytics.error.invalid_period_title", "Некорректный период"),
+                show_error(
                     tr(
                         "analytics.error.invalid_period",
                         "{error}\n\nИспользуйте формат YYYY-MM-DD и убедитесь, "
                         "что даты не из будущего.",
                         error=error,
                     ),
+                    title=tr("analytics.error.invalid_period_title", "Некорректный период"),
                 )
 
     refresh_button.configure(command=_refresh_analytics)
@@ -640,7 +642,7 @@ def build_analytics_tab(
     timeline_canvas.bind("<Configure>", lambda _event: _schedule_redraw())
     category_canvas.bind("<Configure>", lambda _event: _schedule_redraw())
 
-    parent.after(100, _refresh_analytics)
+    _refresh_analytics()
 
     return AnalyticsTabBindings(
         period_from_entry=period_from_entry,
