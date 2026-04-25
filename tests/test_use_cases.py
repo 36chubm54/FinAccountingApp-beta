@@ -411,7 +411,6 @@ class TestDebtUseCases:
         csv_file.write("bad-date,income,Salary,10,USD,500,5000\n")
         csv_file.close()
         try:
-            os.unlink(repo_file.name)
             repository = JsonFileRecordRepository(repo_file.name)
             repository.save_initial_balance(77.0)
             repository.save(IncomeRecord(date="2025-01-01", _amount_init=10.0, category="Salary"))

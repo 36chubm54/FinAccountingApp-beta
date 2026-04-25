@@ -7,7 +7,6 @@ from tkinter import scrolledtext, ttk
 from domain.audit import AuditFinding, AuditReport
 from gui.i18n import tr
 from gui.ui_helpers import center_dialog
-from gui.ui_theme import get_palette
 
 
 def safe_destroy(widget) -> None:
@@ -32,21 +31,8 @@ def _populate_audit_section(
     passed: bool = False,
     background: str | None = None,
 ) -> None:
-    palette = get_palette()
-    effective_background = background or palette.surface_elevated
-    widget.configure(
-        background=effective_background,
-        foreground=palette.text_primary,
-        insertbackground=palette.text_primary,
-        selectbackground=palette.accent_blue,
-        selectforeground=palette.surface_elevated,
-        highlightbackground=palette.border_soft,
-        highlightcolor=palette.border_soft,
-        relief="flat",
-        borderwidth=1,
-    )
     if background is not None:
-        widget.configure(background=effective_background)
+        widget.configure(background=background)
     widget.configure(state="normal")
     widget.delete("1.0", tk.END)
     if findings:
@@ -58,13 +44,10 @@ def _populate_audit_section(
 
 
 def show_audit_report_dialog(report: AuditReport, parent: tk.Misc) -> None:
-    palette = get_palette()
     dialog = tk.Toplevel(parent)
-    dialog.withdraw()
     dialog.title(tr("settings.audit.report.title", "Отчет аудита"))
     dialog.minsize(560, 480)
     dialog.transient(parent.winfo_toplevel())
-    dialog.configure(background=palette.background)
     dialog.grid_columnconfigure(0, weight=1)
     dialog.grid_rowconfigure(0, weight=1)
 
@@ -119,18 +102,18 @@ def show_audit_report_dialog(report: AuditReport, parent: tk.Misc) -> None:
     _populate_audit_section(
         errors_text,
         report.errors,
-        background=palette.danger_tint if report.errors else None,
+        background="#ffe6e6" if report.errors else None,
     )
     _populate_audit_section(
         warnings_text,
         report.warnings,
-        background=palette.warning_tint if report.warnings else None,
+        background="#fff9e6" if report.warnings else None,
     )
     _populate_audit_section(
         passed_text,
         report.passed,
         passed=True,
-        background=palette.success_tint if report.is_clean else None,
+        background="#e6f9e6" if report.is_clean else None,
     )
 
     close_button = ttk.Button(
@@ -141,6 +124,5 @@ def show_audit_report_dialog(report: AuditReport, parent: tk.Misc) -> None:
     close_button.grid(row=6, column=0, sticky="e")
 
     center_dialog(dialog, parent, min_width=560, min_height=480)
-    dialog.deiconify()
     dialog.grab_set()
     close_button.focus_set()

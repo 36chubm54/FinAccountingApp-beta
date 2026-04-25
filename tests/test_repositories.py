@@ -3,19 +3,13 @@ import os
 import tempfile
 import threading
 from datetime import date
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 import infrastructure.repositories as repositories_module
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
-from infrastructure.repositories import (
-    JsonFileRecordRepository,
-    RecordRepository,
-    RepositoryDataCorruptionError,
-    RepositorySaveError,
-)
+from infrastructure.repositories import JsonFileRecordRepository, RecordRepository
 
 
 class TestRecordRepository:
@@ -30,21 +24,12 @@ class TestJsonFileRecordRepository:
         # Create a temporary file for each test
         self.temp_file = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json")
         self.temp_file.close()
-        os.unlink(self.temp_file.name)
         self.repo = JsonFileRecordRepository(self.temp_file.name)
 
     def teardown_method(self):
         # Clean up the temporary file
         if os.path.exists(self.temp_file.name):
             os.unlink(self.temp_file.name)
-        parent = os.path.dirname(self.temp_file.name) or "."
-        basename = os.path.basename(self.temp_file.name)
-        for entry in os.listdir(parent):
-            if entry.startswith(basename + ".corrupt_"):
-                try:
-                    os.unlink(os.path.join(parent, entry))
-                except FileNotFoundError:
-                    pass
 
     def test_save_and_load_single_income(self):
         record = IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
@@ -79,38 +64,14 @@ class TestJsonFileRecordRepository:
         assert len(records) == 3
 
     def test_load_all_empty_file(self):
-        with open(self.temp_file.name, "w", encoding="utf-8"):
-            pass
-
-        with pytest.raises(RepositoryDataCorruptionError, match="Repository JSON is corrupted"):
-            self.repo.load_all()
-
-        quarantine_candidates = [
-            path
-            for path in os.listdir(os.path.dirname(self.temp_file.name) or ".")
-            if path.startswith(os.path.basename(self.temp_file.name) + ".corrupt_")
-        ]
-        assert quarantine_candidates
+        records = self.repo.load_all()
+        assert records == []
 
     def test_load_all_nonexistent_file(self):
         # Create repo with non-existent file
         nonexistent_repo = JsonFileRecordRepository("nonexistent.json")
         records = nonexistent_repo.load_all()
         assert records == []
-
-    def test_load_all_corrupted_json_raises_data_corruption_error(self):
-        with open(self.temp_file.name, "w", encoding="utf-8") as f:
-            f.write('{"records": [}')
-
-        with pytest.raises(RepositoryDataCorruptionError, match="Repository JSON is corrupted"):
-            self.repo.load_all()
-
-        quarantine_candidates = [
-            path
-            for path in os.listdir(os.path.dirname(self.temp_file.name) or ".")
-            if path.startswith(os.path.basename(self.temp_file.name) + ".corrupt_")
-        ]
-        assert quarantine_candidates
 
     def test_json_file_format(self):
         # Test that the JSON file has the correct format
@@ -139,33 +100,6 @@ class TestJsonFileRecordRepository:
             self.repo.save(IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"))
 
         fsync_mock.assert_called_once()
-
-    def test_save_surfaces_onedrive_like_lock_without_overwriting_existing_data(self):
-        self.repo.save(IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"))
-        original_payload = json.loads(Path(self.temp_file.name).read_text(encoding="utf-8"))
-
-        def _locked_replace(_src, _dst):
-            error = PermissionError("file is locked")
-            error.winerror = 32
-            raise error
-
-        with (
-            patch.object(repositories_module.os, "replace", side_effect=_locked_replace),
-            patch.object(repositories_module.time, "sleep"),
-        ):
-            with pytest.raises(RepositorySaveError, match="Temporary file saved to"):
-                self.repo.save(
-                    IncomeRecord(date="2025-01-02", _amount_init=50.0, category="Bonus")
-                )
-
-        current_payload = json.loads(Path(self.temp_file.name).read_text(encoding="utf-8"))
-        assert current_payload == original_payload
-
-        error_copy = Path(self.temp_file.name + ".error")
-        assert error_copy.exists()
-        error_payload = json.loads(error_copy.read_text(encoding="utf-8"))
-        assert len(error_payload["records"]) == 2
-        error_copy.unlink()
 
     def test_load_records_with_backward_compatibility(self):
         # Test loading records without category (backward compatibility)

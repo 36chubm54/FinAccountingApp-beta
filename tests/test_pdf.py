@@ -1,6 +1,5 @@
 import os
 import tempfile
-import logging
 from datetime import date as dt_date
 
 import domain.reports as reports_module
@@ -96,26 +95,3 @@ def test_pdf_debt_filter_skips_debts_outside_report_period(monkeypatch):
     ]
 
     assert debts_for_report_period(report, debts) == []
-
-
-def test_report_pdf_logs_visible_group_warning(caplog, monkeypatch):
-    report = Report(
-        [IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")],
-        initial_balance=25.0,
-    )
-
-    def _boom(_self):
-        raise RuntimeError("grouping unavailable")
-
-    monkeypatch.setattr(Report, "grouped_by_category", _boom)
-    caplog.set_level(logging.WARNING)
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        path = tmp.name
-    try:
-        report_to_pdf(report, path)
-        assert os.path.getsize(path) > 0
-        assert "Failed to build grouped report sections for PDF export" in caplog.text
-        assert "grouping unavailable" in caplog.text
-    finally:
-        os.unlink(path)

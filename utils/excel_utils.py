@@ -120,23 +120,6 @@ def _style_total_row(
         )
 
 
-def _grouped_sections_with_warning(report: Report) -> tuple[dict[str, Report], str | None]:
-    try:
-        return report.grouped_by_category(), None
-    except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
-        logger.warning("Failed to build grouped report sections for XLSX export: %s", exc)
-        return {}, f"Category breakdown unavailable: {exc}"
-
-
-def _append_warning_sheet(wb: Workbook, message: str) -> None:
-    ws = wb.create_sheet(title="Warnings")
-    ws.append(["Warning"])
-    _style_header_row(ws, 1)
-    ws.append([message])
-    ws.cell(row=2, column=1).alignment = Alignment(wrap_text=True, vertical="top")
-    ws.column_dimensions["A"].width = min(max(len(message) // 2, 24), 120)
-
-
 def _set_auto_width(ws) -> None:
     widths: dict[int, int] = {}
     for row in ws.iter_rows():
@@ -267,7 +250,10 @@ def report_to_xlsx(report: Report, filepath: str, *, debts: list[Debt] | None = 
         summary_ws.auto_filter.ref = f"A1:C{summary_ws.max_row}"
         _set_auto_width(summary_ws)
 
-    groups, grouped_warning = _grouped_sections_with_warning(report)
+    try:
+        groups = report.grouped_by_category()
+    except Exception:
+        groups = {}
 
     if _should_add_by_category_sheet(report, groups):
         bycat_ws = wb.create_sheet(title="By Category", index=1)
@@ -304,8 +290,6 @@ def report_to_xlsx(report: Report, filepath: str, *, debts: list[Debt] | None = 
             bycat_ws.append([""])
         bycat_ws.freeze_panes = "A2"
         _set_auto_width(bycat_ws)
-    elif grouped_warning:
-        _append_warning_sheet(wb, grouped_warning)
 
     _append_debts_sheet(wb, debts_for_report_period(report, list(debts or [])))
 

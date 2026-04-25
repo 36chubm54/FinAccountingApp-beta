@@ -6,7 +6,7 @@ import logging
 import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
-from tkinter import ttk
+from tkinter import simpledialog, ttk
 from typing import Any, Protocol
 
 from domain.budget import Budget, BudgetResult, BudgetStatus, PaceStatus
@@ -14,15 +14,21 @@ from gui.i18n import tr
 from gui.tooltip import Tooltip
 from gui.ui_helpers import (
     ask_confirm,
-    ask_text,
     attach_treeview_scrollbars,
     bind_label_wrap,
     set_status,
     show_error,
 )
-from gui.ui_theme import get_palette
 
 logger = logging.getLogger(__name__)
+
+_PACE_FILL = {
+    PaceStatus.ON_TRACK: "#10b981",
+    PaceStatus.OVERPACE: "#f59e0b",
+    PaceStatus.OVERSPENT: "#ef4444",
+}
+_TRACK_BG = "#e5e7eb"
+_TIME_COLOR = "#3b82f6"
 
 
 class BudgetTabContext(Protocol):
@@ -45,14 +51,7 @@ class BudgetTabBindings:
 
 
 def _draw_progress_bars(canvas: tk.Canvas, results: list[BudgetResult]) -> None:
-    palette = get_palette()
-    pace_fill = {
-        PaceStatus.ON_TRACK: palette.success,
-        PaceStatus.OVERPACE: palette.warning,
-        PaceStatus.OVERSPENT: palette.danger,
-    }
     canvas.delete("all")
-    canvas.configure(bg=palette.surface_elevated, highlightbackground=palette.border_soft)
     if not results:
         return
 
@@ -73,7 +72,7 @@ def _draw_progress_bars(canvas: tk.Canvas, results: list[BudgetResult]) -> None:
             y + bar_h // 2,
             text=result.budget.category[:15],
             anchor="e",
-            fill=palette.chart_text,
+            fill="#374151",
             font=("Segoe UI", 9),
         )
         canvas.create_rectangle(
@@ -81,16 +80,16 @@ def _draw_progress_bars(canvas: tk.Canvas, results: list[BudgetResult]) -> None:
             y,
             pad_l + bar_w,
             y + bar_h,
-            fill=palette.surface_alt,
+            fill=_TRACK_BG,
             outline="",
         )
 
         fill_w = min(bar_w, max(0, int(bar_w * result.usage_pct / 100.0)))
         if fill_w > 0:
             fill_color = (
-                palette.text_muted
+                "#9ca3af"
                 if result.status != BudgetStatus.ACTIVE
-                else pace_fill.get(result.pace_status, palette.success)
+                else _PACE_FILL.get(result.pace_status, "#10b981")
             )
             canvas.create_rectangle(
                 pad_l,
@@ -103,14 +102,14 @@ def _draw_progress_bars(canvas: tk.Canvas, results: list[BudgetResult]) -> None:
 
         if result.status == BudgetStatus.ACTIVE:
             tx = pad_l + max(0, min(bar_w, int(bar_w * result.time_pct / 100.0)))
-            canvas.create_line(tx, y - 1, tx, y + bar_h + 1, fill=palette.accent_blue, width=2)
+            canvas.create_line(tx, y - 1, tx, y + bar_h + 1, fill=_TIME_COLOR, width=2)
 
         canvas.create_text(
             pad_l + bar_w + 6,
             y + bar_h // 2,
             text=f"{result.usage_pct:.0f}%",
             anchor="w",
-            fill=palette.chart_text,
+            fill="#374151",
             font=("Segoe UI", 9),
         )
 
@@ -120,7 +119,6 @@ def build_budget_tab(
     *,
     context: BudgetTabContext,
 ) -> BudgetTabBindings:
-    palette = get_palette()
     parent.grid_columnconfigure(0, weight=1)
     parent.grid_rowconfigure(1, weight=1)
 
@@ -201,22 +199,16 @@ def build_budget_tab(
         budget_tree.heading(col, text=text)
         budget_tree.column(col, width=width, anchor=anchor)  # type: ignore[arg-type]
 
-    budget_tree.tag_configure("overspent", foreground=palette.danger)
-    budget_tree.tag_configure("overpace", foreground=palette.warning)
-    budget_tree.tag_configure("on_track", foreground=palette.success)
-    budget_tree.tag_configure("future", foreground=palette.text_muted)
-    budget_tree.tag_configure("expired", foreground=palette.text_muted)
+    budget_tree.tag_configure("overspent", foreground="#ef4444")
+    budget_tree.tag_configure("overpace", foreground="#f59e0b")
+    budget_tree.tag_configure("on_track", foreground="#10b981")
+    budget_tree.tag_configure("future", foreground="#6b7280")
+    budget_tree.tag_configure("expired", foreground="#9ca3af")
 
     budget_tree.grid(row=0, column=0, sticky="nsew")
     attach_treeview_scrollbars(list_frame, budget_tree, row=0, column=0, horizontal=True)
 
-    progress_canvas = tk.Canvas(
-        list_frame,
-        height=40,
-        bg=palette.surface_elevated,
-        highlightthickness=0,
-        highlightbackground=palette.border_soft,
-    )
+    progress_canvas = tk.Canvas(list_frame, height=40, bg="white", highlightthickness=0)
     progress_canvas.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(2, 0))
     legend_label = ttk.Label(
         list_frame,
@@ -267,12 +259,12 @@ def build_budget_tab(
             categories = set(context.controller.get_expense_categories())
             categories.update(context.controller.get_mandatory_expense_categories())
             category_combo["values"] = sorted(categories, key=lambda value: value.casefold())
-        except (ValueError, TypeError, RuntimeError, tk.TclError):
+        except Exception:
             logger.debug("Failed to refresh budget category suggestions", exc_info=True)
 
         try:
             results = context.controller.get_budget_results()
-        except (ValueError, TypeError, RuntimeError) as err:
+        except Exception as err:
             logger.warning("Budget refresh error: %s", err)
             return
 
@@ -389,7 +381,7 @@ def build_budget_tab(
         if target is None:
             show_error(tr("budget.error.select_first", "Сначала выберите бюджет."))
             return
-        new_limit_str = ask_text(
+        new_limit_str = simpledialog.askstring(
             tr("budget.limit.title", "Изменение лимита"),
             tr(
                 "budget.limit.prompt",
@@ -434,7 +426,7 @@ def build_budget_tab(
         side=tk.LEFT, padx=4
     )
 
-    _refresh()
+    parent.after(100, _refresh)
     return BudgetTabBindings(
         category_combo=category_combo,
         start_date_entry=start_date_entry,

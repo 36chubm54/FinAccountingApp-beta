@@ -75,17 +75,16 @@ class Tooltip:
         x = self.widget.winfo_rootx() + 20
         y_bottom = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
         self.tipwindow = tw = tk.Toplevel(self.widget)
-        tw.withdraw()  # Скрыть окно до установки позиции
         tw.wm_overrideredirect(True)
         # Создаём label, чтобы вычислить размеры подсказки
         label = tk.Label(
             tw,
             text=self.text,
             justify=tk.LEFT,
-            background="#ffffe1",
+            background="#ffffff",
             relief=tk.SOLID,
             borderwidth=1,
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 10),
         )
         label.pack(ipadx=1)
         tw.update_idletasks()  # Обновляем геометрию для получения размеров
@@ -122,7 +121,6 @@ class Tooltip:
         )
 
         tw.wm_geometry(f"+{x}+{y}")
-        tw.deiconify()  # Показать окно после установки позиции
 
     def hidetip(self):
         if self.tipwindow:

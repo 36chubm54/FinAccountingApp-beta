@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import replace
 from datetime import date as dt_date
 
 from domain.asset import Asset, AssetCategory, AssetSnapshot
@@ -184,70 +183,6 @@ class SQLiteRecordRepository(RecordRepository):
                 raise ValueError(
                     f"Debt payment #{payment.id} references missing record #{payment.record_id}"
                 )
-
-    @staticmethod
-    def _payment_expected_record_type(payment: DebtPayment) -> str | None:
-        if payment.is_write_off:
-            return None
-        if payment.operation_type is DebtOperationType.DEBT_REPAY:
-            return "expense"
-        if payment.operation_type is DebtOperationType.LOAN_COLLECT:
-            return "income"
-        return None
-
-    def _restore_debt_payment_record_ids(
-        self,
-        records: list[Record],
-        payments: list[DebtPayment],
-    ) -> list[DebtPayment]:
-        if not payments:
-            return []
-
-        record_ids = {int(record.id) for record in records}
-        reserved_record_ids = {
-            int(payment.record_id)
-            for payment in payments
-            if payment.record_id is not None and int(payment.record_id) in record_ids
-        }
-        candidate_groups: dict[tuple[int, str, int, str], list[int]] = {}
-        for record in sorted(records, key=lambda item: int(item.id)):
-            if record.related_debt_id is None:
-                continue
-            record_type = self._record_type(record)
-            if record_type == "mandatory_expense":
-                continue
-            key = (
-                int(record.related_debt_id),
-                self._date_as_text(record.date),
-                to_minor_units(record.amount_kzt or 0.0),
-                record_type,
-            )
-            candidate_groups.setdefault(key, []).append(int(record.id))
-
-        normalized: list[DebtPayment] = []
-        for payment in payments:
-            current_record_id = int(payment.record_id) if payment.record_id is not None else None
-            if current_record_id in record_ids:
-                normalized.append(payment)
-                continue
-
-            expected_record_type = self._payment_expected_record_type(payment)
-            restored_record_id = None
-            if expected_record_type is not None:
-                key = (
-                    int(payment.debt_id),
-                    str(payment.payment_date),
-                    int(payment.principal_paid_minor),
-                    expected_record_type,
-                )
-                for candidate_id in candidate_groups.get(key, []):
-                    if candidate_id in reserved_record_ids:
-                        continue
-                    restored_record_id = candidate_id
-                    reserved_record_ids.add(candidate_id)
-                    break
-            normalized.append(replace(payment, record_id=restored_record_id))
-        return normalized
 
     def _reset_autoincrement(self, table: str) -> None:
         self._conn.execute("DELETE FROM sqlite_sequence WHERE name = ?", (table,))
@@ -1413,9 +1348,6 @@ class SQLiteRecordRepository(RecordRepository):
 
     def replace_debts(self, debts: list[Debt], payments: list[DebtPayment] | None = None) -> None:
         normalized_payments = list(payments or [])
-        normalized_payments = self._restore_debt_payment_record_ids(
-            self.load_all(), normalized_payments
-        )
         self._validate_debt_integrity(self.load_all(), debts, normalized_payments)
         with self._conn:
             self._conn.execute("DELETE FROM debt_payments")
@@ -1581,7 +1513,6 @@ class SQLiteRecordRepository(RecordRepository):
         self._validate_transfer_integrity(records, transfers)
 
         with self._conn:
-            payment_record_links = self._load_debt_payment_record_links()
             self._conn.execute("DELETE FROM records")
             self._conn.execute("DELETE FROM transfers")
             self._reset_autoincrement_many(("records", "transfers"))
@@ -1591,7 +1522,6 @@ class SQLiteRecordRepository(RecordRepository):
                 new_transfer_id = self._insert_transfer_row(transfer)
                 transfer_id_map[int(transfer.id)] = new_transfer_id
 
-            record_id_map: dict[int, int] = {}
             for record in sorted(records, key=lambda item: item.id):
                 transfer_id = None
                 if record.transfer_id is not None:
@@ -1602,9 +1532,7 @@ class SQLiteRecordRepository(RecordRepository):
                             f"#{original_transfer_id}"
                         )
                     transfer_id = int(transfer_id_map[original_transfer_id])
-                new_record_id = self._insert_record_row(record, transfer_id=transfer_id)
-                record_id_map[int(record.id)] = int(new_record_id)
-            self._remap_debt_payment_record_ids(record_id_map, payment_record_links)
+                self._insert_record_row(record, transfer_id=transfer_id)
 
     def save(self, record: Record) -> None:
         with self._conn:
@@ -1834,52 +1762,19 @@ class SQLiteRecordRepository(RecordRepository):
 
     def replace_records(self, records: list[Record], initial_balance: float) -> None:
         with self._conn:
-            payment_record_links = self._load_debt_payment_record_links()
             self._upsert_system_wallet_balance(to_money_float(initial_balance))
             self._conn.execute("DELETE FROM records")
             self._reset_autoincrement("records")
-            record_id_map: dict[int, int] = {}
             for record in sorted(records, key=lambda item: item.id):
                 transfer_id = int(record.transfer_id) if record.transfer_id is not None else None
                 related_debt_id = (
                     int(record.related_debt_id) if record.related_debt_id is not None else None
                 )
-                new_record_id = self._insert_record_row(
+                self._insert_record_row(
                     record,
                     transfer_id=transfer_id,
                     related_debt_id=related_debt_id,
                 )
-                record_id_map[int(record.id)] = int(new_record_id)
-            self._remap_debt_payment_record_ids(record_id_map, payment_record_links)
-
-    def _load_debt_payment_record_links(self) -> dict[int, int]:
-        rows = self._conn.execute(
-            """
-            SELECT id, record_id
-            FROM debt_payments
-            WHERE record_id IS NOT NULL
-            """
-        ).fetchall()
-        return {
-            int(row["id"]): int(row["record_id"]) for row in rows if row["record_id"] is not None
-        }
-
-    def _remap_debt_payment_record_ids(
-        self,
-        record_id_map: dict[int, int],
-        payment_record_links: dict[int, int],
-    ) -> None:
-        if not payment_record_links:
-            return
-        for payment_id, source_record_id in payment_record_links.items():
-            mapped_record_id = record_id_map.get(int(source_record_id))
-            self._conn.execute(
-                "UPDATE debt_payments SET record_id = ? WHERE id = ?",
-                (
-                    int(mapped_record_id) if mapped_record_id is not None else None,
-                    int(payment_id),
-                ),
-            )
 
     def replace_mandatory_expenses(self, expenses: list[MandatoryExpenseRecord]) -> None:
         with self._conn:
@@ -1899,43 +1794,6 @@ class SQLiteRecordRepository(RecordRepository):
         debts: list[Debt] | None = None,
         debt_payments: list[DebtPayment] | None = None,
     ) -> None:
-        (
-            normalized_wallets,
-            normalized_transfers,
-            normalized_debts,
-            normalized_debt_payments,
-        ) = self._normalize_replace_all_data_inputs(
-            initial_balance=initial_balance,
-            wallets=wallets,
-            transfers=transfers,
-            debts=debts,
-            debt_payments=debt_payments,
-            records=records,
-        )
-        self._validate_transfer_integrity(records, normalized_transfers)
-        self._validate_debt_integrity(records, normalized_debts, normalized_debt_payments)
-
-        with self._conn:
-            self._truncate_replace_all_tables()
-            wallet_id_map = self._replace_all_wallets(normalized_wallets)
-            transfer_id_map = self._replace_all_transfers(normalized_transfers, wallet_id_map)
-            debt_id_map = self._replace_all_debts(normalized_debts)
-            record_id_map = self._replace_all_records(
-                records, wallet_id_map, transfer_id_map, debt_id_map
-            )
-            self._replace_all_mandatory_expenses(mandatory_expenses, wallet_id_map)
-            self._replace_all_debt_payments(normalized_debt_payments, debt_id_map, record_id_map)
-
-    def _normalize_replace_all_data_inputs(
-        self,
-        *,
-        initial_balance: float,
-        wallets: list[Wallet] | None,
-        transfers: list[Transfer] | None,
-        debts: list[Debt] | None,
-        debt_payments: list[DebtPayment] | None,
-        records: list[Record],
-    ) -> tuple[list[Wallet], list[Transfer], list[Debt], list[DebtPayment]]:
         normalized_wallets = list(wallets or [])
         if not normalized_wallets:
             normalized_wallets = [
@@ -1952,127 +1810,92 @@ class SQLiteRecordRepository(RecordRepository):
         normalized_transfers = list(transfers or [])
         normalized_debts = list(debts or [])
         normalized_debt_payments = list(debt_payments or [])
-        normalized_debt_payments = self._restore_debt_payment_record_ids(
-            records,
-            normalized_debt_payments,
-        )
-        return (
-            normalized_wallets,
-            normalized_transfers,
-            normalized_debts,
-            normalized_debt_payments,
-        )
+        self._validate_transfer_integrity(records, normalized_transfers)
+        self._validate_debt_integrity(records, normalized_debts, normalized_debt_payments)
 
-    def _truncate_replace_all_tables(self) -> None:
-        self._conn.execute("DELETE FROM debt_payments")
-        self._conn.execute("DELETE FROM debts")
-        self._conn.execute("DELETE FROM records")
-        self._conn.execute("DELETE FROM mandatory_expenses")
-        self._conn.execute("DELETE FROM transfers")
-        self._conn.execute("DELETE FROM wallets")
-        self._reset_autoincrement_many(
-            ("debt_payments", "debts", "records", "mandatory_expenses", "transfers", "wallets")
-        )
-
-    def _replace_all_wallets(self, wallets: list[Wallet]) -> dict[int, int]:
-        wallet_id_map: dict[int, int] = {}
-        for wallet in sorted(wallets, key=lambda item: item.id):
-            new_wallet_id = self._insert_wallet_row(wallet)
-            wallet_id_map[int(wallet.id)] = new_wallet_id
-        return wallet_id_map
-
-    def _replace_all_transfers(
-        self,
-        transfers: list[Transfer],
-        wallet_id_map: dict[int, int],
-    ) -> dict[int, int]:
-        transfer_id_map: dict[int, int] = {}
-        for transfer in sorted(transfers, key=lambda item: item.id):
-            from_wallet_id = wallet_id_map.get(int(transfer.from_wallet_id))
-            to_wallet_id = wallet_id_map.get(int(transfer.to_wallet_id))
-            if from_wallet_id is None or to_wallet_id is None:
-                raise ValueError(f"Transfer #{transfer.id} references missing wallet")
-            new_transfer_id = self._insert_transfer_row(
-                transfer,
-                from_wallet_id=from_wallet_id,
-                to_wallet_id=to_wallet_id,
+        with self._conn:
+            self._conn.execute("DELETE FROM debt_payments")
+            self._conn.execute("DELETE FROM debts")
+            self._conn.execute("DELETE FROM records")
+            self._conn.execute("DELETE FROM mandatory_expenses")
+            self._conn.execute("DELETE FROM transfers")
+            self._conn.execute("DELETE FROM wallets")
+            self._reset_autoincrement_many(
+                ("debt_payments", "debts", "records", "mandatory_expenses", "transfers", "wallets")
             )
-            transfer_id_map[int(transfer.id)] = new_transfer_id
-        return transfer_id_map
 
-    def _replace_all_debts(self, debts: list[Debt]) -> dict[int, int]:
-        debt_id_map: dict[int, int] = {}
-        for debt in sorted(debts, key=lambda item: item.id):
-            debt_id_map[int(debt.id)] = self._insert_debt_row(debt)
-        return debt_id_map
+            wallet_id_map: dict[int, int] = {}
+            for wallet in sorted(normalized_wallets, key=lambda item: item.id):
+                new_wallet_id = self._insert_wallet_row(wallet)
+                wallet_id_map[int(wallet.id)] = new_wallet_id
 
-    def _replace_all_records(
-        self,
-        records: list[Record],
-        wallet_id_map: dict[int, int],
-        transfer_id_map: dict[int, int],
-        debt_id_map: dict[int, int],
-    ) -> dict[int, int]:
-        record_id_map: dict[int, int] = {}
-        for record in sorted(records, key=lambda item: item.id):
-            wallet_id = wallet_id_map.get(int(record.wallet_id))
-            if wallet_id is None:
-                raise ValueError(f"Record #{record.id} references missing wallet")
-            transfer_id = None
-            if record.transfer_id is not None:
-                transfer_id = transfer_id_map.get(int(record.transfer_id))
-                if transfer_id is None:
-                    raise ValueError(
-                        f"Record #{record.id} references missing transfer #{record.transfer_id}"
-                    )
-            related_debt_id = None
-            if record.related_debt_id is not None:
-                related_debt_id = debt_id_map.get(int(record.related_debt_id))
-                if related_debt_id is None:
-                    raise ValueError(
-                        f"Record #{record.id} references missing debt #{record.related_debt_id}"
-                    )
-            new_record_id = self._insert_record_row(
-                record,
-                wallet_id=wallet_id,
-                transfer_id=transfer_id,
-                related_debt_id=related_debt_id,
-            )
-            record_id_map[int(record.id)] = new_record_id
-        return record_id_map
-
-    def _replace_all_mandatory_expenses(
-        self,
-        mandatory_expenses: list[MandatoryExpenseRecord],
-        wallet_id_map: dict[int, int],
-    ) -> None:
-        for expense in sorted(mandatory_expenses, key=lambda item: item.id):
-            wallet_id = wallet_id_map.get(int(expense.wallet_id))
-            if wallet_id is None:
-                raise ValueError(f"Mandatory expense #{expense.id} references missing wallet")
-            self._insert_mandatory_row(expense, wallet_id=wallet_id)
-
-    def _replace_all_debt_payments(
-        self,
-        debt_payments: list[DebtPayment],
-        debt_id_map: dict[int, int],
-        record_id_map: dict[int, int],
-    ) -> None:
-        for payment in sorted(debt_payments, key=lambda item: item.id):
-            mapped_debt_id = debt_id_map.get(int(payment.debt_id))
-            if mapped_debt_id is None:
-                raise ValueError(
-                    f"Debt payment #{payment.id} references missing debt #{payment.debt_id}"
+            transfer_id_map: dict[int, int] = {}
+            for transfer in sorted(normalized_transfers, key=lambda item: item.id):
+                from_wallet_id = wallet_id_map.get(int(transfer.from_wallet_id))
+                to_wallet_id = wallet_id_map.get(int(transfer.to_wallet_id))
+                if from_wallet_id is None or to_wallet_id is None:
+                    raise ValueError(f"Transfer #{transfer.id} references missing wallet")
+                new_transfer_id = self._insert_transfer_row(
+                    transfer,
+                    from_wallet_id=from_wallet_id,
+                    to_wallet_id=to_wallet_id,
                 )
-            mapped_record_id = None
-            if payment.record_id is not None:
-                mapped_record_id = record_id_map.get(int(payment.record_id))
-                if mapped_record_id is None:
+                transfer_id_map[int(transfer.id)] = new_transfer_id
+
+            debt_id_map: dict[int, int] = {}
+            for debt in sorted(normalized_debts, key=lambda item: item.id):
+                debt_id_map[int(debt.id)] = self._insert_debt_row(debt)
+
+            record_id_map: dict[int, int] = {}
+
+            for record in sorted(records, key=lambda item: item.id):
+                wallet_id = wallet_id_map.get(int(record.wallet_id))
+                if wallet_id is None:
+                    raise ValueError(f"Record #{record.id} references missing wallet")
+                transfer_id = None
+                if record.transfer_id is not None:
+                    transfer_id = transfer_id_map.get(int(record.transfer_id))
+                    if transfer_id is None:
+                        raise ValueError(
+                            f"Record #{record.id} references missing transfer #{record.transfer_id}"
+                        )
+                related_debt_id = None
+                if record.related_debt_id is not None:
+                    related_debt_id = debt_id_map.get(int(record.related_debt_id))
+                    if related_debt_id is None:
+                        raise ValueError(
+                            f"Record #{record.id} references missing debt #{record.related_debt_id}"
+                        )
+                new_record_id = self._insert_record_row(
+                    record,
+                    wallet_id=wallet_id,
+                    transfer_id=transfer_id,
+                    related_debt_id=related_debt_id,
+                )
+                record_id_map[int(record.id)] = new_record_id
+
+            for expense in sorted(mandatory_expenses, key=lambda item: item.id):
+                wallet_id = wallet_id_map.get(int(expense.wallet_id))
+                if wallet_id is None:
+                    raise ValueError(f"Mandatory expense #{expense.id} references missing wallet")
+                self._insert_mandatory_row(expense, wallet_id=wallet_id)
+
+            for payment in sorted(normalized_debt_payments, key=lambda item: item.id):
+                mapped_debt_id = debt_id_map.get(int(payment.debt_id))
+                if mapped_debt_id is None:
                     raise ValueError(
-                        f"Debt payment #{payment.id} references missing record #{payment.record_id}"
+                        f"Debt payment #{payment.id} references missing debt #{payment.debt_id}"
                     )
-            self._insert_debt_payment_row(
-                payment,
-                debt_id=mapped_debt_id,
-                record_id=mapped_record_id,
-            )
+                mapped_record_id = None
+                if payment.record_id is not None:
+                    mapped_record_id = record_id_map.get(int(payment.record_id))
+                    if mapped_record_id is None:
+                        raise ValueError(
+                            f"Debt payment #{payment.id} references "
+                            f"missing record #{payment.record_id}"
+                        )
+                self._insert_debt_payment_row(
+                    payment,
+                    debt_id=mapped_debt_id,
+                    record_id=mapped_record_id,
+                )

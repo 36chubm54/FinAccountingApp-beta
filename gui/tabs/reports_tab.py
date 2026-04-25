@@ -2,23 +2,18 @@
 
 from __future__ import annotations
 
-import logging
 import os
 import tkinter as tk
-from tkinter import VERTICAL, filedialog, ttk
+from tkinter import VERTICAL, filedialog, messagebox, ttk
 from typing import Any, Protocol
 
 from gui.helpers import open_in_file_manager
 from gui.i18n import tr
-from gui.logging_utils import log_ui_error
 from gui.record_colors import KIND_TO_FOREGROUND, foreground_for_kind
 from gui.tabs.reports_controller import ReportsController
 from gui.tooltip import Tooltip
-from gui.ui_helpers import show_error, show_info
 from services.report_service import ReportFilters, build_category_group_rows
 from utils.csv_utils import report_to_csv
-
-logger = logging.getLogger(__name__)
 
 
 class ReportsTabContext(Protocol):
@@ -83,14 +78,7 @@ class ReportsFrame(ttk.Frame):
         self.category_combo.grid(row=0, column=5, sticky="ew", padx=(6, 12))
 
         ttk.Label(controls, text=tr("common.wallet", "Кошелек:")).grid(row=0, column=6, sticky="w")
-        # self.wallet_menu = ttk.OptionMenu(controls, self.wallet_var, self.wallet_var.get())
-        # self.wallet_menu.grid(row=0, column=7, sticky="ew", padx=(6, 0))
-        self.wallet_menu = ttk.Combobox(
-            controls,
-            textvariable=self.wallet_var,
-            values=[],
-            state="readonly",
-        )
+        self.wallet_menu = ttk.OptionMenu(controls, self.wallet_var, self.wallet_var.get())
         self.wallet_menu.grid(row=0, column=7, sticky="ew", padx=(6, 0))
 
         ttk.Checkbutton(
@@ -234,7 +222,7 @@ class ReportsFrame(ttk.Frame):
         for kind, color in KIND_TO_FOREGROUND.items():
             try:
                 self.operations_tree.tag_configure(kind, foreground=color)
-            except tk.TclError:
+            except Exception:
                 pass
 
         # (D) Monthly summary
@@ -287,11 +275,10 @@ class ReportsFrame(ttk.Frame):
             self._wallet_label_to_id[f"[{wallet.id}] {wallet.name} ({wallet.currency})"] = wallet.id
         labels = list(self._wallet_label_to_id.keys())
         selected_label = selected if selected in self._wallet_label_to_id else all_wallets
-        # menu = self.wallet_menu["menu"]
-        # menu.delete(0, "end")
-        # for label in labels:
-        #     menu.add_command(label=label, command=tk._setit(self.wallet_var, label))
-        self.wallet_menu["values"] = labels
+        menu = self.wallet_menu["menu"]
+        menu.delete(0, "end")
+        for label in labels:
+            menu.add_command(label=label, command=tk._setit(self.wallet_var, label))
         self.wallet_var.set(selected_label)
 
     def _current_filters(self) -> ReportFilters:
@@ -309,13 +296,12 @@ class ReportsFrame(ttk.Frame):
         try:
             result = self._controller.generate(self._current_filters())
         except ValueError as error:
-            show_error(str(error), title=tr("common.error", "Ошибка"))
+            messagebox.showerror(tr("common.error", "Ошибка"), str(error))
             return
-        except (TypeError, RuntimeError, ValueError) as error:  # noqa: B025
-            log_ui_error(logger, "UI_REPORTS_GENERATE_FAILED", error)
-            show_error(
+        except Exception as error:
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
                 tr("reports.error.generate", "Не удалось сформировать отчет: {error}", error=error),
-                title=tr("common.error", "Ошибка"),
             )
             return
 
@@ -466,7 +452,7 @@ class ReportsFrame(ttk.Frame):
         enabled = bool(self.group_var.get())
         try:
             self.group_back_button.configure(state=("normal" if enabled else "disabled"))
-        except tk.TclError:
+        except Exception:
             pass
         if not enabled:
             self._group_drill_category = None
@@ -511,21 +497,21 @@ class ReportsFrame(ttk.Frame):
     def _export(self, fmt: str) -> None:
         result = self._last_result
         if result is None:
-            show_error(
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
                 tr("reports.error.generate_first", "Сначала сформируйте отчет."),
-                title=tr("common.error", "Ошибка"),
             )
             return
 
         fmt = (fmt or "csv").strip().lower()
         if fmt not in ("csv", "xlsx", "pdf"):
-            show_error(
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
                 tr(
                     "reports.error.unsupported_format",
                     "Неподдерживаемый формат экспорта: {fmt}",
                     fmt=fmt,
                 ),
-                title=tr("common.error", "Ошибка"),
             )
             return
 
@@ -590,16 +576,15 @@ class ReportsFrame(ttk.Frame):
                         fmt,
                         debts=self._context.controller.get_debts(result.filters.wallet_id),
                     )
-            show_info(
+            messagebox.showinfo(
+                tr("common.done", "Готово"),
                 tr("reports.export.success", "Экспортировано в {filepath}", filepath=filepath),
-                title=tr("common.done", "Готово"),
             )
             open_in_file_manager(os.path.dirname(filepath))
-        except (OSError, TypeError, ValueError, RuntimeError) as error:
-            log_ui_error(logger, "UI_REPORTS_EXPORT_FAILED", error, filepath=filepath)
-            show_error(
+        except Exception as error:
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
                 tr("reports.export.error", "Не удалось экспортировать: {error}", error=error),
-                title=tr("common.error", "Ошибка"),
             )
 
 
@@ -607,5 +592,5 @@ def _fmt_kzt(value: float) -> str:
     # 1 000 000.00 style (space-grouped).
     try:
         return f"{float(value):,.2f}".replace(",", " ")
-    except (TypeError, ValueError):
+    except Exception:
         return "0.00"

@@ -38,7 +38,6 @@ class ParsedImportData:
     distribution_snapshots: list[dict[str, Any]] = field(default_factory=list)
     wallets: list[dict[str, Any]] = field(default_factory=list)
     initial_balance: float | None = None
-    json_sections_present: frozenset[str] = field(default_factory=frozenset)
 
 
 def parse_import_file(path: str, *, force: bool = False) -> ParsedImportData:
@@ -267,7 +266,6 @@ def _read_json_payload(path: str, *, force: bool = False) -> ParsedImportData:
     with open(path, encoding="utf-8") as fp:
         payload = json.load(fp)
     payload = unwrap_backup_payload(payload, force=force)
-    json_sections_present = frozenset(str(key) for key in payload.keys())
 
     wallets = payload.get("wallets", [])
     if not isinstance(wallets, list):
@@ -354,7 +352,6 @@ def _read_json_payload(path: str, *, force: bool = False) -> ParsedImportData:
         distribution_snapshots=[item for item in distribution_snapshots if isinstance(item, dict)],
         wallets=[wallet for wallet in wallets if isinstance(wallet, dict)],
         initial_balance=initial_balance,
-        json_sections_present=json_sections_present,
     )
 
 

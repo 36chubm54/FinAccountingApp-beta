@@ -8,7 +8,6 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import replace as dc_replace
 from datetime import date as dt_date
-from datetime import datetime
 from typing import TypeVar, cast
 
 from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
@@ -223,14 +222,6 @@ class RecordRepository(ABC):
         pass
 
 
-class RepositoryDataCorruptionError(ValueError):
-    """Raised when repository JSON exists but cannot be decoded."""
-
-
-class RepositorySaveError(OSError):
-    """Raised when repository data cannot be persisted safely."""
-
-
 class JsonFileRecordRepository(RecordRepository):
     _path_locks: dict[str, threading.RLock] = {}
     _path_locks_guard = threading.Lock()
@@ -332,18 +323,9 @@ class JsonFileRecordRepository(RecordRepository):
     def _load_data(self) -> dict:
         with self._lock:
             try:
-                if os.path.exists(self._file_path) and os.path.getsize(self._file_path) == 0:
-                    quarantine_path = self._quarantine_corrupted_file()
-                    detail = (
-                        f"Repository JSON is corrupted: {self._file_path}. "
-                        f"Quarantine copy: {quarantine_path}"
-                        if quarantine_path
-                        else f"Repository JSON is corrupted: {self._file_path}"
-                    )
-                    raise RepositoryDataCorruptionError(detail)
                 with open(self._file_path, encoding="utf-8") as f:
                     data = json.load(f)
-            except FileNotFoundError:
+            except (FileNotFoundError, json.JSONDecodeError):
                 logger.warning(
                     "Failed to load JSON data from %s, using empty dataset",
                     self._file_path,
@@ -356,15 +338,6 @@ class JsonFileRecordRepository(RecordRepository):
                     "debts": [],
                     "debt_payments": [],
                 }
-            except json.JSONDecodeError as exc:
-                quarantine_path = self._quarantine_corrupted_file()
-                detail = (
-                    f"Repository JSON is corrupted: {self._file_path}. "
-                    f"Quarantine copy: {quarantine_path}"
-                    if quarantine_path
-                    else f"Repository JSON is corrupted: {self._file_path}"
-                )
-                raise RepositoryDataCorruptionError(detail) from exc
         if isinstance(data, list):
             # Migrate old format
             logger.info("Migrating JSON repository format: list -> object")
@@ -526,7 +499,7 @@ class JsonFileRecordRepository(RecordRepository):
             except PermissionError as e:
                 error_path = self._file_path + ".error"
                 shutil.copy2(tmp_path, error_path)
-                raise RepositorySaveError(
+                raise Exception(
                     f"Failed to save data to {self._file_path}. "
                     f"Temporary file saved to {error_path}"
                 ) from e
@@ -536,23 +509,6 @@ class JsonFileRecordRepository(RecordRepository):
                         os.remove(tmp_path)
                 except Exception:
                     logger.exception("Failed to cleanup temporary file during save: %s", tmp_path)
-
-    def _quarantine_corrupted_file(self) -> str | None:
-        if not os.path.exists(self._file_path):
-            return None
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        quarantine_path = f"{self._file_path}.corrupt_{stamp}"
-        try:
-            shutil.copy2(self._file_path, quarantine_path)
-            logger.error(
-                "Corrupted repository file quarantined: source=%s quarantine=%s",
-                self._file_path,
-                quarantine_path,
-            )
-            return quarantine_path
-        except OSError:
-            logger.exception("Failed to quarantine corrupted repository file: %s", self._file_path)
-            return None
 
     @staticmethod
     def _is_retryable_windows_permission_error(error: PermissionError) -> bool:
@@ -953,7 +909,7 @@ class JsonFileRecordRepository(RecordRepository):
                 )
                 if target_debt_id is None or int(payment.debt_id) == target_debt_id:
                     payments.append(payment)
-            except (TypeError, ValueError):
+            except Exception:
                 logger.exception("Skipping invalid debt payment at index %s", index)
         return payments
 
@@ -1051,7 +1007,7 @@ class JsonFileRecordRepository(RecordRepository):
                         description=str(item.get("description", "") or ""),
                     )
                 )
-            except (TypeError, ValueError):
+            except Exception:
                 logger.exception("Skipping invalid transfer at index %s", index)
         return transfers
 
@@ -1095,7 +1051,7 @@ class JsonFileRecordRepository(RecordRepository):
                     logger.warning("Unknown record type '%s' at index %s, skipping", typ, index)
                     continue
                 records.append(record)
-            except (TypeError, ValueError) as e:
+            except Exception as e:
                 logger.exception("Skipping invalid record at index %s: %s", index, e)
                 continue
         return records
@@ -1200,7 +1156,7 @@ class JsonFileRecordRepository(RecordRepository):
                     auto_pay=auto_pay,
                 )
                 expenses.append(expense)
-            except (TypeError, ValueError):
+            except Exception:
                 logger.exception(
                     "Skipping invalid mandatory expense at index %s",
                     index,

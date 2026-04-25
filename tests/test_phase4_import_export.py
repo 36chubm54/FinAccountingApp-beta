@@ -276,7 +276,6 @@ def test_repository_does_not_store_global_initial_balance_key():
     with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as fp:
         path = fp.name
     try:
-        os.unlink(path)
         repo = JsonFileRecordRepository(path)
         repo.save_initial_balance(55.0)
         with open(path, encoding="utf-8") as raw:

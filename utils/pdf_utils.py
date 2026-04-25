@@ -284,34 +284,12 @@ def report_to_pdf(report: Report, filepath: str, *, debts: list[Debt] | None = N
 
     elems: list[Table] = [title_table, table]
     # After the detailed listing, add grouped tables by category
-    grouped_warning: str | None = None
     try:
         groups = report.grouped_by_category()
-    except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
-        logger.warning("Failed to build grouped report sections for PDF export: %s", exc)
+    except Exception:
         groups = {}
-        grouped_warning = f"Warning: category breakdown unavailable ({exc})"
 
     summary_year, monthly_rows = report.monthly_income_expense_rows()
-
-    if grouped_warning is not None:
-        warning_table = Table([[grouped_warning]], colWidths=[available_width])
-        warning_table.setStyle(
-            TableStyle(
-                [
-                    ("FONT", (0, 0), (-1, -1), font_name),
-                    ("FONTSIZE", (0, 0), (-1, -1), 10),
-                    ("BACKGROUND", (0, 0), (-1, -1), colors.whitesmoke),
-                    ("TEXTCOLOR", (0, 0), (-1, -1), colors.darkgoldenrod),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                    ("TOPPADDING", (0, 0), (-1, -1), 4),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                ]
-            )
-        )
-        elems.append(Spacer(1, 8))  # type: ignore
-        elems.append(warning_table)
 
     if _should_add_by_category_section(report, groups):
         # Insert category tables after the main table

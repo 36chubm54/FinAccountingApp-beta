@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from gui.i18n import get_available_languages, get_language, parse_language_file, set_language, tr
+from gui.i18n import get_language, parse_language_file, set_language, tr
 
 
 def test_parse_language_file_ignores_comments_and_blank_lines(tmp_path: Path) -> None:
@@ -62,10 +62,3 @@ def test_parse_language_file_unescapes_special_sequences(tmp_path: Path) -> None
 
     assert data["key1"] == "line1\nline2"
     assert data["key2"] == "tab\tseparated"
-
-
-def test_get_available_languages_lists_existing_locale_packs() -> None:
-    languages = get_available_languages()
-
-    assert "ru" in languages
-    assert "en" in languages

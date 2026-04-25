@@ -47,7 +47,6 @@ def test_repository_replace_updates_record():
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
     tmp.close()
     try:
-        os.unlink(tmp.name)
         repo = JsonFileRecordRepository(tmp.name)
         record = IncomeRecord(
             date="2026-01-01",

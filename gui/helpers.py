@@ -20,5 +20,5 @@ def open_in_file_manager(path: str | None) -> None:
         else:
             # Assume Linux/Unix
             subprocess.Popen(["xdg-open", path])
-    except (OSError, subprocess.SubprocessError):
+    except Exception:
         logger.exception("Failed to open file manager for %s", path)

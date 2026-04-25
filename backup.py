@@ -18,10 +18,6 @@ logger = logging.getLogger(__name__)
 _BACKUP_RE = re.compile(r"^(?P<stem>.+)_backup_(?P<stamp>\d{8}_\d{6})$")
 
 
-class BackupExportError(RuntimeError):
-    """Raised when SQLite -> JSON export fails."""
-
-
 def _copy_backup_atomically(source: Path, destination: Path) -> None:
     fd, temp_path_str = tempfile.mkstemp(
         prefix=f".{destination.stem}_",
@@ -102,63 +98,60 @@ def export_to_json(
     sqlite_repo = SQLiteRecordRepository(sqlite_path, schema_path=schema_path)
     snapshot_path = None
     try:
+        live_distribution_service = DistributionService(sqlite_repo)
+        if autofreeze_closed_months:
+            live_distribution_service.freeze_closed_months()
+
+        snapshot_fd, snapshot_path = tempfile.mkstemp(suffix=".db")
+        os.close(snapshot_fd)
+        snapshot_conn = sqlite3.connect(snapshot_path)
         try:
-            live_distribution_service = DistributionService(sqlite_repo)
-            if autofreeze_closed_months:
-                live_distribution_service.freeze_closed_months()
+            sqlite_repo._conn.backup(snapshot_conn)
+            snapshot_conn.commit()
+        finally:
+            snapshot_conn.close()
 
-            snapshot_fd, snapshot_path = tempfile.mkstemp(suffix=".db")
-            os.close(snapshot_fd)
-            snapshot_conn = sqlite3.connect(snapshot_path)
-            try:
-                sqlite_repo._conn.backup(snapshot_conn)
-                snapshot_conn.commit()
-            finally:
-                snapshot_conn.close()
-
-            snapshot_repo = SQLiteRecordRepository(snapshot_path, schema_path=schema_path)
-            try:
-                budget_service = BudgetService(snapshot_repo)
-                distribution_service = DistributionService(snapshot_repo)
-                distribution_items, distribution_subitems_by_item = (
-                    distribution_service.export_structure()
-                )
-                wallets = snapshot_repo.load_wallets()
-                records = snapshot_repo.load_all()
-                transfers = snapshot_repo.load_transfers()
-                mandatory_expenses = snapshot_repo.load_mandatory_expenses()
-                debts = snapshot_repo.load_debts()
-                debt_payments = snapshot_repo.load_debt_payments()
-                assets = snapshot_repo.load_assets()
-                asset_snapshots = snapshot_repo.load_asset_snapshots()
-                goals = snapshot_repo.load_goals()
-                export_full_backup_to_json(
-                    json_path,
-                    wallets=wallets,
-                    records=records,
-                    mandatory_expenses=mandatory_expenses,
-                    budgets=budget_service.get_budgets(),
-                    debts=debts,
-                    debt_payments=debt_payments,
-                    assets=assets,
-                    asset_snapshots=asset_snapshots,
-                    goals=goals,
-                    distribution_items=distribution_items,
-                    distribution_subitems=[
-                        subitem
-                        for item_id in sorted(distribution_subitems_by_item)
-                        for subitem in distribution_subitems_by_item[item_id]
-                    ],
-                    distribution_snapshots=distribution_service.get_frozen_rows(),
-                    transfers=transfers,
-                    readonly=False,
-                    storage_mode="sqlite",
-                )
-            finally:
-                snapshot_repo.close()
-            logger.info("SQLite exported to JSON: %s", json_path)
-        except (OSError, sqlite3.Error, TypeError, ValueError, RuntimeError) as exc:
-            raise BackupExportError("Failed to export SQLite snapshot to JSON") from exc
+        snapshot_repo = SQLiteRecordRepository(snapshot_path, schema_path=schema_path)
+        try:
+            budget_service = BudgetService(snapshot_repo)
+            distribution_service = DistributionService(snapshot_repo)
+            distribution_items, distribution_subitems_by_item = (
+                distribution_service.export_structure()
+            )
+            wallets = snapshot_repo.load_wallets()
+            records = snapshot_repo.load_all()
+            transfers = snapshot_repo.load_transfers()
+            mandatory_expenses = snapshot_repo.load_mandatory_expenses()
+            debts = snapshot_repo.load_debts()
+            debt_payments = snapshot_repo.load_debt_payments()
+            assets = snapshot_repo.load_assets()
+            asset_snapshots = snapshot_repo.load_asset_snapshots()
+            goals = snapshot_repo.load_goals()
+            export_full_backup_to_json(
+                json_path,
+                wallets=wallets,
+                records=records,
+                mandatory_expenses=mandatory_expenses,
+                budgets=budget_service.get_budgets(),
+                debts=debts,
+                debt_payments=debt_payments,
+                assets=assets,
+                asset_snapshots=asset_snapshots,
+                goals=goals,
+                distribution_items=distribution_items,
+                distribution_subitems=[
+                    subitem
+                    for item_id in sorted(distribution_subitems_by_item)
+                    for subitem in distribution_subitems_by_item[item_id]
+                ],
+                distribution_snapshots=distribution_service.get_frozen_rows(),
+                transfers=transfers,
+                readonly=False,
+                storage_mode="sqlite",
+            )
+        finally:
+            snapshot_repo.close()
+        logger.info("SQLite exported to JSON: %s", json_path)
     finally:
         sqlite_repo.close()
         if snapshot_path is not None:

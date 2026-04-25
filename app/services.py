@@ -11,10 +11,6 @@ from domain.currency import CurrencyService as DomainCurrencyService
 logger = logging.getLogger(__name__)
 
 
-class CurrencyCacheError(OSError):
-    """Raised when currency cache cannot be read or written reliably."""
-
-
 class CurrencyService:
     """Адаптер сервиса валют для приложения.
 
@@ -103,7 +99,7 @@ class CurrencyService:
                 try:
                     if self._fetch_online_rates():
                         self._last_fetched_at = datetime.now()
-                except (OSError, ValueError, RuntimeError):
+                except Exception:
                     logger.warning(
                         "CurrencyService: failed to fetch rates on mode switch",
                         exc_info=True,
@@ -122,24 +118,17 @@ class CurrencyService:
                     return False
                 self._last_fetched_at = datetime.now()
                 return True
-            except (OSError, ValueError, RuntimeError):
+            except Exception:
                 logger.warning("CurrencyService: manual rate refresh failed", exc_info=True)
                 return False
 
     def _load_offline_rates(self) -> None:
-        cached = self._safe_load_cached()
+        cached = self._load_cached()
         if cached:
             self._service = DomainCurrencyService(rates=cached, base=self.base_currency)
             return
         defaults = {"USD": 500.0, "EUR": 590.0, "RUB": 6.5}
         self._service = DomainCurrencyService(rates=defaults, base=self.base_currency)
-
-    def _safe_load_cached(self) -> dict[str, float] | None:
-        try:
-            return self._load_cached()
-        except CurrencyCacheError:
-            logger.exception("Failed to load cached currency rates")
-            return None
 
     def _fetch_online_rates(self) -> dict[str, float] | None:
         """Попытаться получить курсы с RSS-фида НБРК и сохранить в кеш.
@@ -153,7 +142,7 @@ class CurrencyService:
             import requests
         except ImportError as e:
             logger.warning("Missing dependencies for online fetching: %s", e)
-            return self._safe_load_cached()
+            return self._load_cached()
 
         try:
             resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
@@ -162,15 +151,15 @@ class CurrencyService:
         except requests.RequestException as e:
             logger.warning("Network error fetching rates: %s", e)
             logger.info("Falling back to cached currency rates")
-            return self._safe_load_cached()
+            return self._load_cached()
         except ET.ParseError as e:
             logger.warning("XML parsing error: %s", e)
             logger.info("Falling back to cached currency rates")
-            return self._safe_load_cached()
-        except (OSError, ValueError, TypeError) as e:
+            return self._load_cached()
+        except Exception as e:
             logger.exception("Unexpected error fetching rates: %s", e)
             logger.info("Falling back to cached currency rates")
-            return self._safe_load_cached()
+            return self._load_cached()
 
         rates: dict[str, float] = {}
 
@@ -189,13 +178,16 @@ class CurrencyService:
                     continue
 
         if rates:
-            self._save_cache(rates)
+            try:
+                self._save_cache(rates)
+            except Exception as e:
+                logger.warning("Failed to save cache: %s", e)
             self._service = DomainCurrencyService(rates=rates, base=self.base_currency)
             return rates
         else:
             logger.warning("No valid rates found in XML")
             logger.info("Falling back to cached currency rates")
-            cached = self._safe_load_cached()
+            cached = self._load_cached()
             if cached:
                 self._service = DomainCurrencyService(rates=cached, base=self.base_currency)
             return cached
@@ -207,8 +199,9 @@ class CurrencyService:
                     data = json.load(f)
                     # Expect mapping code->rate
                     return {k: float(v) for k, v in data.items()}
-        except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
-            raise CurrencyCacheError("Failed to load cached currency rates") from e
+        except Exception as e:
+            logger.exception("Failed to load cached currency rates: %s", e)
+            return None
         logger.info("Currency rate cache not found, fallback to defaults")
         return None
 
@@ -226,12 +219,12 @@ class CurrencyService:
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(temp_path, self.CACHE_FILE)
-        except (OSError, TypeError, ValueError):
+        except Exception as e:
+            logger.exception("Failed to save currency cache: %s", e)
             if temp_path:
                 try:
                     os.unlink(temp_path)
                 except FileNotFoundError:
                     pass
-                except OSError:
+                except Exception:
                     logger.exception("Failed to cleanup temporary currency cache: %s", temp_path)
-            logger.exception("Failed to save currency cache")

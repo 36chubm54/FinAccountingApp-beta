@@ -39,7 +39,7 @@ def export_report(report, filepath: str, fmt: str, *, debts=None) -> None:
             report_to_pdf(report, filepath, debts=list(debts or []))
         else:
             raise ValueError(f"Unsupported export format: {fmt}")
-    except (ImportError, OSError, TypeError, ValueError, RuntimeError):
+    except Exception:
         logger.exception("Failed to export report to %s (%s)", filepath, fmt)
         raise
 
@@ -74,7 +74,7 @@ def export_grouped_report(
             grouped_report_to_pdf(statement_title, grouped_rows, filepath)
         else:
             raise ValueError(f"Unsupported export format: {fmt}")
-    except (ImportError, OSError, TypeError, ValueError, RuntimeError):
+    except Exception:
         logger.exception("Failed to export grouped report to %s (%s)", filepath, fmt)
         raise
 
@@ -93,7 +93,7 @@ def export_mandatory_expenses(expenses: Iterable, filepath: str, fmt: str) -> No
             export_mandatory_expenses_to_xlsx(list(expenses), filepath)
         else:
             raise ValueError(f"Unsupported export format: {fmt}")
-    except (ImportError, OSError, TypeError, ValueError, RuntimeError):
+    except Exception:
         logger.exception("Failed to export mandatory expenses to %s (%s)", filepath, fmt)
         raise
 
@@ -120,7 +120,7 @@ def export_records(
             export_records_to_xlsx(list(records), filepath, transfers=list(transfers or []))
         else:
             raise ValueError(f"Unsupported export format: {fmt}")
-    except (ImportError, OSError, TypeError, ValueError, RuntimeError):
+    except Exception:
         logger.exception("Failed to export records to %s (%s)", filepath, fmt)
         raise
 
@@ -168,6 +168,6 @@ def export_full_backup(
             readonly=readonly,
             storage_mode=storage_mode,
         )
-    except (ImportError, OSError, TypeError, ValueError, RuntimeError):
+    except Exception:
         logger.exception("Failed to export full backup to %s", filepath)
         raise

@@ -1,15 +1,10 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 from gui.i18n import tr
-from gui.ui_dialogs import ask_confirm as _ask_confirm_dialog
-from gui.ui_dialogs import ask_text as _ask_text_dialog
-from gui.ui_dialogs import show_error as _show_error_dialog
-from gui.ui_dialogs import show_info as _show_info_dialog
-from gui.ui_dialogs import show_warning as _show_warning_dialog
-from gui.ui_theme import get_palette
+from gui.ui_theme import SUBTLE_TEXT
 
 
 def show_error(
@@ -19,7 +14,10 @@ def show_error(
     parent: tk.Misc | None = None,
 ) -> None:
     resolved_title = title or tr("common.error", "Ошибка")
-    _show_error_dialog(message, title=resolved_title, parent=parent)
+    if parent is None:
+        messagebox.showerror(resolved_title, message)
+    else:
+        messagebox.showerror(resolved_title, message, parent=parent)
 
 
 def show_info(
@@ -29,7 +27,10 @@ def show_info(
     parent: tk.Misc | None = None,
 ) -> None:
     resolved_title = title or tr("common.done", "Готово")
-    _show_info_dialog(message, title=resolved_title, parent=parent)
+    if parent is None:
+        messagebox.showinfo(resolved_title, message)
+    else:
+        messagebox.showinfo(resolved_title, message, parent=parent)
 
 
 def show_warning(
@@ -39,7 +40,10 @@ def show_warning(
     parent: tk.Misc | None = None,
 ) -> None:
     resolved_title = title or tr("common.warning", "Внимание")
-    _show_warning_dialog(message, title=resolved_title, parent=parent)
+    if parent is None:
+        messagebox.showwarning(resolved_title, message)
+    else:
+        messagebox.showwarning(resolved_title, message, parent=parent)
 
 
 def ask_confirm(
@@ -49,30 +53,9 @@ def ask_confirm(
     parent: tk.Misc | None = None,
 ) -> bool:
     resolved_title = title or tr("common.confirm", "Подтверждение")
-    return bool(_ask_confirm_dialog(message, title=resolved_title, parent=parent))
-
-
-def ask_text(
-    title: str,
-    prompt: str,
-    *,
-    parent: tk.Misc | None = None,
-    initialvalue: str = "",
-    validator=None,
-    normalize=None,
-    ok_text: str | None = None,
-    cancel_text: str | None = None,
-) -> str | None:
-    return _ask_text_dialog(
-        title,
-        prompt,
-        parent=parent,
-        initialvalue=initialvalue,
-        validator=validator,
-        normalize=normalize,
-        ok_text=ok_text,
-        cancel_text=cancel_text,
-    )
+    if parent is None:
+        return bool(messagebox.askyesno(resolved_title, message))
+    return bool(messagebox.askyesno(resolved_title, message, parent=parent))
 
 
 def center_dialog(
@@ -123,12 +106,11 @@ def create_canvas_empty_state(canvas: tk.Canvas, text: str) -> None:
     canvas.delete("all")
     width = max(canvas.winfo_width(), 240)
     height = max(canvas.winfo_height(), 140)
-    palette = get_palette()
     canvas.create_text(
         width // 2,
         height // 2,
         text=text,
-        fill=palette.text_muted,
+        fill=SUBTLE_TEXT,
         font=("Segoe UI", 11),
     )
 
@@ -170,8 +152,8 @@ def bind_label_wrap(
         try:
             width = max(min_width, min(max_width, target.winfo_width() - padding))
             label.configure(wraplength=width)
-        except (tk.TclError, RuntimeError):
+        except Exception:
             pass
 
     target.bind("<Configure>", _sync_wrap, add="+")
-    _sync_wrap()
+    label.after_idle(_sync_wrap)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sqlite3
-import threading
 from datetime import date as dt_date
 from pathlib import Path
 
@@ -13,142 +12,17 @@ from utils.money import minor_to_money, rate_to_text, to_minor_units, to_money_f
 from .base import Storage
 
 
-class _LockedCursor:
-    def __init__(self, cursor: sqlite3.Cursor, lock: threading.RLock) -> None:
-        self._cursor = cursor
-        self._lock = lock
-        self._released = False
-
-    def _release(self) -> None:
-        if self._released:
-            return
-        self._released = True
-        self._lock.release()
-
-    def fetchone(self):
-        try:
-            return self._cursor.fetchone()
-        finally:
-            self._release()
-
-    def fetchall(self):
-        try:
-            return self._cursor.fetchall()
-        finally:
-            self._release()
-
-    def fetchmany(self, size: int | None = None):
-        rows = self._cursor.fetchmany() if size is None else self._cursor.fetchmany(size)
-        if not rows:
-            self._release()
-        return rows
-
-    def close(self) -> None:
-        try:
-            self._cursor.close()
-        finally:
-            self._release()
-
-    def __iter__(self):
-        try:
-            yield from self._cursor
-        finally:
-            self._release()
-
-    def __next__(self):
-        try:
-            return next(self._cursor)
-        except StopIteration:
-            self._release()
-            raise
-
-    def __getattr__(self, name: str):
-        return getattr(self._cursor, name)
-
-    def __del__(self) -> None:
-        self._release()
-
-
-class _SynchronizedConnection:
-    def __init__(self, conn: sqlite3.Connection) -> None:
-        self._conn = conn
-        self._lock = threading.RLock()
-
-    def __enter__(self):
-        self._lock.acquire()
-        try:
-            self._conn.__enter__()
-        except Exception:
-            self._lock.release()
-            raise
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        try:
-            return self._conn.__exit__(exc_type, exc, tb)
-        finally:
-            self._lock.release()
-
-    def _execute_locked(self, method_name: str, *args):
-        self._lock.acquire()
-        try:
-            cursor = getattr(self._conn, method_name)(*args)
-        except Exception:
-            self._lock.release()
-            raise
-        if cursor.description is None:
-            self._lock.release()
-            return cursor
-        return _LockedCursor(cursor, self._lock)
-
-    def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor | _LockedCursor:
-        return self._execute_locked("execute", sql, params)
-
-    def executemany(self, sql: str, seq_of_parameters) -> sqlite3.Cursor:
-        self._lock.acquire()
-        try:
-            return self._conn.executemany(sql, seq_of_parameters)
-        finally:
-            self._lock.release()
-
-    def executescript(self, sql_script: str) -> sqlite3.Cursor:
-        self._lock.acquire()
-        try:
-            return self._conn.executescript(sql_script)
-        finally:
-            self._lock.release()
-
-    def commit(self) -> None:
-        with self._lock:
-            self._conn.commit()
-
-    def rollback(self) -> None:
-        with self._lock:
-            self._conn.rollback()
-
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()
-
-    def backup(self, target, *args, **kwargs) -> None:
-        raw_target = getattr(target, "_conn", target)
-        with self._lock:
-            self._conn.backup(raw_target, *args, **kwargs)
-
-    def __getattr__(self, name: str):
-        return getattr(self._conn, name)
-
-
 class SQLiteStorage(Storage):
     """SQLite-backed storage adapter without domain/business logic."""
 
     def __init__(self, db_path: str = "records.db") -> None:
         self._db_path = db_path
-        raw_conn = sqlite3.connect(db_path, check_same_thread=False)
-        raw_conn.row_factory = sqlite3.Row
-        raw_conn.execute("PRAGMA foreign_keys = ON;")
-        raw_conn.execute("PRAGMA journal_mode = WAL;")
-        self._conn = _SynchronizedConnection(raw_conn)
+        # GUI import/export tasks run via background worker threads.
+        # A single operation is executed at a time, so cross-thread access is serialized.
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA foreign_keys = ON;")
+        self._conn.execute("PRAGMA journal_mode = WAL;")
 
     def close(self) -> None:
         self._conn.close()
@@ -350,7 +224,6 @@ class SQLiteStorage(Storage):
             cursor = self._conn.execute(
                 """
                 INSERT INTO wallets (
-                    id,
                     name,
                     currency,
                     initial_balance,
@@ -359,10 +232,9 @@ class SQLiteStorage(Storage):
                     allow_negative,
                     is_active
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    int(wallet.id),
                     wallet.name,
                     wallet.currency.upper(),
                     to_money_float(wallet.initial_balance),
@@ -485,7 +357,6 @@ class SQLiteStorage(Storage):
             cursor = self._conn.execute(
                 """
                 INSERT INTO records (
-                    id,
                     type,
                     date,
                     wallet_id,
@@ -502,10 +373,9 @@ class SQLiteStorage(Storage):
                     description,
                     period
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    int(record.id),
                     self._record_type(record),
                     self._date_as_text(record.date),
                     int(record.wallet_id),

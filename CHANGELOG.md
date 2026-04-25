@@ -7,44 +7,6 @@ This project adheres to Semantic Versioning.
 
 ---
 
-## [1.12.0] - 2026-04-25
-
-### Added
-
-- Added `ImportCapabilities` in `app/finance_service.py` so import flows can detect supported bulk-replace/load operations through one explicit capability contract
-- Added `gui/logging_utils.py` with shared structured UI error logging used by deferred startup and audit-related GUI flows
-- Added warning surfaces for degraded grouped report export: `XLSX` exporters now create a `Warnings` sheet and `PDF` exporters embed a visible warning block when grouped sections cannot be built
-- Added thread-safe SQLite connection wrappers in `storage/sqlite_storage.py` to coordinate concurrent reads, backups, and background GUI work
-
-### Changed
-
-- `ImportService` is now section-aware for partial `JSON` payloads and uses `json_sections_present` when available, falling back to payload inspection only when older payloads omit section metadata
-- `JSON` records-only imports now preserve unrelated runtime entities such as `debts`, `assets`, `goals`, `budgets`, and distribution data instead of treating missing sections as an implicit wipe
-- Import normalization now preserves `related_debt_id` links more carefully: when the payload does not supply debt data, existing links are retained when possible; when it does, links are constrained to allowed debt IDs
-- `CreateIncome` / `CreateExpense`, `FinanceService`, and `FinancialController` now propagate `related_debt_id` through create-path imports, including `CSV` / `XLSX`
-- Bootstrap now distinguishes `BackupExportError`, runs `PRAGMA quick_check`, and applies more conservative export behavior for large SQLite databases stored under OneDrive-managed paths
-- JSON repository save/load error handling is more explicit, with corruption quarantine and dedicated save/corruption error types
-
-### Fixed
-
-- Fixed import rollback/remap edge cases so `debt_payments.record_id` and `records.related_debt_id` survive normalization and repository-level record replacement more reliably
-- Fixed runtime persistence so explicit `wallet.id` and `record.id` values are preserved when `SQLiteStorage` inserts imported entities
-- Fixed grouped report export degradation so `XLSX` / `PDF` output still succeeds with a user-visible warning instead of silently dropping grouped content or failing hard
-- Fixed GUI scheduling and tooltip geometry edge cases by tightening `after` job management and safer `TclError` handling around delayed UI work
-- Fixed JSON repository failure modes on damaged or locked files by quarantining unreadable payloads and preserving unsaved data in `.error` snapshots
-
-### Tests
-
-- Added/updated regression coverage for section-aware import behavior, debt-link preservation, repository corruption/save-failure handling, thread-safe SQLite backup/select flows, explicit-ID SQLite inserts, grouped-export warning paths, and GUI compatibility around ttk-based debt forms
-
-### Docs
-
-- Updated `README.md`, `README_EN.md`, and `docs/architecture.md` for `v1.12.0`, import capability negotiation, partial-JSON semantics, repository durability, grouped-export warnings, and OneDrive-aware bootstrap behavior
-
-No breaking changes.
-
----
-
 ## [1.11.0] - 2026-04-08
 
 ### Added
