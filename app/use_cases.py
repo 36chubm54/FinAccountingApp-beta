@@ -60,6 +60,7 @@ class CreateIncome:
         description: str = "",
         amount_kzt: float | None = None,
         rate_at_operation: float | None = None,
+        related_debt_id: int | None = None,
     ) -> None:
         """Create and persist an income record."""
         wallet = wallet_by_id(self._repository, wallet_id)
@@ -72,6 +73,7 @@ class CreateIncome:
         record = IncomeRecord(
             date=date,
             wallet_id=wallet_id,
+            related_debt_id=(int(related_debt_id) if related_debt_id is not None else None),
             amount_original=to_money_float(amount),
             currency=currency.upper(),
             rate_at_operation=to_rate_float(rate_at_operation),
@@ -105,6 +107,7 @@ class CreateExpense:
         description: str = "",
         amount_kzt: float | None = None,
         rate_at_operation: float | None = None,
+        related_debt_id: int | None = None,
     ) -> None:
         """Create and persist an expense record."""
         wallet = wallet_by_id(self._repository, wallet_id)
@@ -126,6 +129,7 @@ class CreateExpense:
         record = ExpenseRecord(
             date=date,
             wallet_id=wallet_id,
+            related_debt_id=(int(related_debt_id) if related_debt_id is not None else None),
             amount_original=to_money_float(amount),
             currency=currency.upper(),
             rate_at_operation=to_rate_float(rate_at_operation),

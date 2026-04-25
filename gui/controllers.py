@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import replace
 
+from app.finance_service import ImportCapabilities
 from app.record_service import RecordService
 from app.services import CurrencyService
 from app.use_cases import (
@@ -117,7 +118,6 @@ class FinancialController:
         self._debt_service_instance: DebtService | None = None
         self._distribution_service_instance: DistributionService | None = None
         self._goal_service_instance: GoalService | None = None
-        self.supports_bulk_import_replace = True
 
     def build_record_list_items(self, records: list[Record] | None = None) -> list[RecordListItem]:
         if records is None:
@@ -250,6 +250,7 @@ class FinancialController:
         description: str = "",
         amount_kzt: float | None = None,
         rate_at_operation: float | None = None,
+        related_debt_id: int | None = None,
     ) -> None:
         CreateIncome(self._repository, self._currency).execute(
             date=date,
@@ -260,6 +261,7 @@ class FinancialController:
             description=description,
             amount_kzt=amount_kzt,
             rate_at_operation=rate_at_operation,
+            related_debt_id=related_debt_id,
         )
 
     def create_expense(
@@ -273,6 +275,7 @@ class FinancialController:
         description: str = "",
         amount_kzt: float | None = None,
         rate_at_operation: float | None = None,
+        related_debt_id: int | None = None,
     ) -> None:
         CreateExpense(self._repository, self._currency).execute(
             date=date,
@@ -283,6 +286,7 @@ class FinancialController:
             description=description,
             amount_kzt=amount_kzt,
             rate_at_operation=rate_at_operation,
+            related_debt_id=related_debt_id,
         )
 
     def generate_report(self) -> Report:
@@ -642,13 +646,22 @@ class FinancialController:
             mandatory_payload.extend(self._repository.load_mandatory_expenses())
         mandatory_payload.extend(mandatory_templates)
 
+        debt_payload: list[Debt]
+        debt_payment_payload: list[DebtPayment]
+        if debts is None or debt_payments is None:
+            debt_payload = list(self._repository.load_debts())
+            debt_payment_payload = list(self._repository.load_debt_payments())
+        else:
+            debt_payload = list(debts)
+            debt_payment_payload = list(debt_payments)
+
         self._repository.replace_all_data(
             wallets=target_wallets,
             records=records,
             mandatory_expenses=mandatory_payload,
             transfers=transfers,
-            debts=list(debts or []),
-            debt_payments=list(debt_payments or []),
+            debts=debt_payload,
+            debt_payments=debt_payment_payload,
         )
         if assets is not None or asset_snapshots is not None:
             self.replace_assets(list(assets or []), list(asset_snapshots or []))
@@ -657,6 +670,17 @@ class FinancialController:
 
     def replace_budgets(self, budgets: list[Budget]) -> None:
         self._budget_service().replace_budgets(budgets)
+
+    def get_import_capabilities(self) -> ImportCapabilities:
+        return ImportCapabilities(
+            supports_bulk_replace=True,
+            supports_distribution_snapshots_replace=True,
+            supports_assets_replace=True,
+            supports_goals_replace=True,
+            supports_budgets_replace=True,
+            supports_distribution_structure_replace=True,
+            supports_load_debts=True,
+        )
 
     def run_import_transaction(self, operation):
         return run_import_op(self._repository, operation, logger)
@@ -786,6 +810,9 @@ class FinancialController:
             if record.related_debt_id is not None and int(record.wallet_id) == int(wallet_id)
         }
         return [debt for debt in debts if int(debt.id) in linked_debt_ids]
+
+    def load_debts(self) -> list[Debt]:
+        return GetDebts(self._debt_service()).execute()
 
     def get_open_debts(self) -> list[Debt]:
         return GetOpenDebts(self._debt_service()).execute()
