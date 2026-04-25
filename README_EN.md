@@ -2,7 +2,7 @@
 
 Graphical application for personal financial accounting with multicurrency support, import/export, budgets, debts, assets, and goals.
 
-The current `v1.12.0` release focuses on import/export and runtime-storage resilience: imports are now section-aware for partial `JSON` payloads, `related_debt_id` and `debt_payments` links survive normalization more reliably, SQLite runtime storage uses a synchronized connection wrapper for background work, the JSON repository can quarantine corrupt files and preserve unsaved payloads on replace failures, and report exporters now surface warnings when grouped breakdowns cannot be built.
+The current `v1.12.0` release combines two main themes: runtime UI personalization and import/export resilience. The app now supports persisted runtime `theme` / `language` preferences, a live theme-aware shell and dialogs, section-aware `JSON` import, stronger debt-link preservation during restore flows, synchronized SQLite runtime access, and explicit warning paths for degraded report export.
 
 ## 🚀 Quick Start
 
@@ -60,6 +60,8 @@ The app starts a Tkinter GUI on top of SQLite runtime storage. Core tabs can be 
 - Full backup / import / migration for `JSON` ↔ `SQLite`
 - Read-only Data Audit Engine for runtime consistency checks
 - External `locales/*.txt` language packs with a shared i18n loader and fallback chain
+- Runtime `theme` / `language` preferences persisted in SQLite schema metadata
+- Light / dark theme system with live theme-aware shell, status bar, audit views, and dialogs
 - Custom window icon support (`.ico` + `iconphoto` fallback) with forward compatibility for packaged `exe` icon usage
 - Section-aware `JSON` import so records-only restore does not wipe unrelated `debts/assets/goals/budgets`
 - Safer persistence behavior: corrupt JSON quarantine, `.error` copies on save failure, atomic backup/export paths
@@ -112,6 +114,8 @@ Also important:
 
 Practical `v1.12.0` highlights:
 
+- `FinancialController.save_theme_preference(...)` / `save_language_preference(...)` — runtime UI preferences persisted in SQLite
+- `gui.ui_theme` — centralized light/dark palette system with runtime switching
 - `FinanceService.get_import_capabilities()` — a single capability model for the import pipeline instead of ad-hoc attribute probing
 - `FinancialController.load_debts()` and `related_debt_id` in `create_income(...)` / `create_expense(...)` — important hooks for debt-aware import/restore flows
 - `SQLiteRecordRepository.replace_records_and_transfers(...)` — safe bulk operation replacement with debt-payment link remapping

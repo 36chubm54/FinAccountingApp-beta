@@ -24,6 +24,7 @@ Supported business areas include:
 - debts and loans
 - monthly distribution
 - strategic assets and goals
+- runtime UI preferences, theming, and localization
 - analytics, reports, and audit
 - import / export / backup / migration
 
@@ -36,7 +37,7 @@ Supported business areas include:
 | `services` | Focused business subsystems and read-only engines | `import_service.py`, `audit_service.py`, `balance_service.py`, `metrics_service.py`, `timeline_service.py`, `budget_service.py`, `debt_service.py`, `distribution_service.py`, `asset_service.py`, `goal_service.py`, `dashboard_service.py` |
 | `infrastructure` | Runtime repository implementation | `sqlite_repository.py`, `repositories.py` |
 | `storage` | Low-level persistence adapters and schema bootstrap | `sqlite_storage.py`, `json_storage.py`, `base.py` |
-| `gui` | Tkinter presentation layer | `tkinter_gui.py`, `controllers.py`, `tabs/*`, `exporters.py`, `importers.py`, `tooltip.py`, `logging_utils.py` |
+| `gui` | Tkinter presentation layer | `tkinter_gui.py`, `controllers.py`, `tabs/*`, `exporters.py`, `importers.py`, `tooltip.py`, `logging_utils.py`, `ui_theme.py`, `i18n.py`, `ui_dialogs.py` |
 | `utils` | Format-specific helpers and shared technical helpers | `backup_utils.py`, `import_core.py`, `csv_utils.py`, `excel_utils.py`, `pdf_utils.py`, `money.py`, `charting.py`, `debt_report_utils.py`, `tabular_utils.py` |
 | `tests` | Regression, contract, and integration-like coverage | `test_*` modules across all subsystems |
 
@@ -55,6 +56,7 @@ Important startup concerns:
 - SQLite integrity and schema readiness
 - JSON export/backup synchronization
 - OneDrive-aware export timing and WAL/SHM coherence
+- applying saved runtime theme/language preferences before shell build
 - optional currency refresh
 - auto-application of mandatory payments
 - deferred GUI work and safe `after(...)` scheduling
@@ -70,6 +72,7 @@ Examples:
 - operations and transfers are initiated from `gui/tabs/operations_tab.py`
 - debts/loans are initiated from `gui/tabs/debts_tab.py`
 - assets/goals are initiated from `gui/tabs/dashboard_tab.py`
+- theme/language preference changes are initiated from the app shell and persisted via `gui/controllers.py`
 
 ### 3.3 Reports and Analytics
 
@@ -213,6 +216,23 @@ This subsystem is responsible for:
 - corruption quarantine and save-failure handling for JSON repositories
 - startup export discipline for SQLite, especially on OneDrive-managed paths
 
+### 4.8 Runtime UI Preferences
+
+Core modules:
+
+- `gui/ui_theme.py`
+- `gui/i18n.py`
+- `gui/tkinter_gui.py`
+- `gui/ui_dialogs.py`
+- `gui/controllers.py`
+
+This subsystem is responsible for:
+
+- light/dark theme palettes and runtime palette switching
+- persisted language/theme preferences stored in SQLite schema metadata
+- live rebuilding of shell strings and theme-aware widgets/dialogs
+- keeping Tk styling, localized strings, and shell state synchronized during runtime preference changes
+
 ## 5. Data Model Overview
 
 Main SQLite tables:
@@ -266,6 +286,8 @@ When changing import/export behavior, review together:
 When changing GUI startup/deferred work, review together:
 
 - `gui/tkinter_gui.py`
+- `gui/ui_theme.py`
+- `gui/i18n.py`
 - `gui/logging_utils.py`
 - `gui/ui_helpers.py`
 - `bootstrap.py`
