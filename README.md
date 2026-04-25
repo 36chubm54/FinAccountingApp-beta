@@ -2,7 +2,7 @@
 
 Графическое приложение для персонального финансового учёта с мультивалютностью, импортом/экспортом, бюджетами, долгами, активами и целями.
 
-Текущий релиз `v1.12.0` фокусируется на надёжности import/export и runtime-storage: импорт стал section-aware для частичных `JSON` payload, улучшено сохранение связей `related_debt_id` и `debt_payments`, SQLite runtime получил синхронизированный connection-wrapper для фоновых операций, JSON repository научился карантинить битые файлы и безопаснее переживать ошибки `os.replace`, а экспорт отчётов теперь показывает предупреждения, если grouped breakdown нельзя построить.
+Текущий релиз `v1.12.0` объединяет две главные темы: runtime-персонализацию интерфейса и надёжность import/export. Приложение теперь поддерживает runtime `theme` / `language` preferences с сохранением в SQLite, live theme-aware shell и диалоги, а также section-aware `JSON` import, более устойчивое сохранение debt-linked связей, синхронизированный SQLite runtime и более явные warning-пути для degraded report export.
 
 ## 🚀 Быстрый старт
 
@@ -60,6 +60,8 @@ python main.py
 - Full backup / import / migration для `JSON` ↔ `SQLite`
 - Read-only Data Audit Engine для проверки консистентности данных
 - Внешние языковые пакеты `locales/*.txt` и единый i18n-loader с fallback-цепочкой
+- Runtime `theme` / `language` preferences с сохранением в SQLite schema metadata
+- Light / dark theme system и live theme-aware shell, status bar, audit views и диалоги
 - Поддержка пользовательской иконки окна (`.ico` + `iconphoto` fallback) и подготовка к иконке будущего `exe`
 - Section-aware `JSON` import: records-only restore не затирает несвязанные `debts/assets/goals/budgets`
 - Более безопасная persistence-слой логика: quarantine для битых JSON-файлов, `.error` copies при save-failure, atomic backup/export paths
@@ -112,6 +114,8 @@ python main.py
 
 Практические акценты для `v1.12.0`:
 
+- `FinancialController.save_theme_preference(...)` / `save_language_preference(...)` — runtime UI preferences, сохраняемые в SQLite
+- `gui.ui_theme` — централизованная light/dark palette system с runtime switching
 - `FinanceService.get_import_capabilities()` — единая capability-модель для import pipeline вместо ad-hoc проверок по атрибутам
 - `FinancialController.load_debts()` и `related_debt_id` в `create_income(...)` / `create_expense(...)` — важные точки для debt-aware import/restore flows
 - `SQLiteRecordRepository.replace_records_and_transfers(...)` — безопасная bulk-замена операций с ремапом связанных debt-payment ссылок

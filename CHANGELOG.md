@@ -11,6 +11,8 @@ This project adheres to Semantic Versioning.
 
 ### Added
 
+- Added persisted runtime `theme` / `language` preferences through SQLite schema metadata
+- Added live light/dark theme support through `gui/ui_theme.py` with runtime palette switching
 - Added `ImportCapabilities` in `app/finance_service.py` so import flows can detect supported bulk-replace/load operations through one explicit capability contract
 - Added `gui/logging_utils.py` with shared structured UI error logging used by deferred startup and audit-related GUI flows
 - Added warning surfaces for degraded grouped report export: `XLSX` exporters now create a `Warnings` sheet and `PDF` exporters embed a visible warning block when grouped sections cannot be built
@@ -18,6 +20,8 @@ This project adheres to Semantic Versioning.
 
 ### Changed
 
+- The application shell, status bar, dialogs, audit report views, and major tabs are now theme-aware at runtime
+- Theme and language can now be switched through runtime UI preferences instead of only startup defaults
 - `ImportService` is now section-aware for partial `JSON` payloads and uses `json_sections_present` when available, falling back to payload inspection only when older payloads omit section metadata
 - `JSON` records-only imports now preserve unrelated runtime entities such as `debts`, `assets`, `goals`, `budgets`, and distribution data instead of treating missing sections as an implicit wipe
 - Import normalization now preserves `related_debt_id` links more carefully: when the payload does not supply debt data, existing links are retained when possible; when it does, links are constrained to allowed debt IDs
@@ -35,11 +39,11 @@ This project adheres to Semantic Versioning.
 
 ### Tests
 
-- Added/updated regression coverage for section-aware import behavior, debt-link preservation, repository corruption/save-failure handling, thread-safe SQLite backup/select flows, explicit-ID SQLite inserts, grouped-export warning paths, and GUI compatibility around ttk-based debt forms
+- Added/updated regression coverage for runtime theme/language preferences, theme palettes, section-aware import behavior, debt-link preservation, repository corruption/save-failure handling, thread-safe SQLite backup/select flows, explicit-ID SQLite inserts, grouped-export warning paths, and GUI compatibility around ttk-based debt forms
 
 ### Docs
 
-- Updated `README.md`, `README_EN.md`, and `docs/architecture.md` for `v1.12.0`, import capability negotiation, partial-JSON semantics, repository durability, grouped-export warnings, and OneDrive-aware bootstrap behavior
+- Updated `README.md`, `README_EN.md`, and `docs/architecture.md` for `v1.12.0`, runtime theme/language preferences, import capability negotiation, partial-JSON semantics, repository durability, grouped-export warnings, and OneDrive-aware bootstrap behavior
 
 No breaking changes.
 
