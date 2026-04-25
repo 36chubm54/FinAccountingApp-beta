@@ -403,7 +403,7 @@ def ask_text(
         try:
             if normalize is not None:
                 value = normalize(value)
-        except Exception as error:
+        except (ValueError, TypeError) as error:
             status_label.configure(text=str(error))
             return
         if validator is not None:

@@ -332,7 +332,7 @@ def build_distribution_tab(
         structure_tree.delete(*structure_tree.get_children())
         try:
             items = context.controller.get_distribution_items()
-        except Exception as exc:
+        except (ValueError, TypeError, RuntimeError, tk.TclError) as exc:
             logger.warning("Failed to refresh distribution structure: %s", exc)
             validation_label.config(text=str(exc), foreground=palette.danger)
             return
@@ -428,7 +428,7 @@ def build_distribution_tab(
                 start_month,
                 end_month,
             )
-        except Exception as exc:
+        except (ValueError, TypeError, RuntimeError, tk.TclError) as exc:
             logger.warning("Failed to refresh distribution results: %s", exc)
             status_label.config(text=str(exc), foreground=palette.danger)
             results_tree.delete(*results_tree.get_children())
@@ -805,7 +805,7 @@ def build_distribution_tab(
     fix_button.configure(command=_toggle_fixed_row, state=tk.DISABLED)
     results_tree.bind("<<TreeviewSelect>>", _update_fix_button_state, add="+")
 
-    parent.after(100, _refresh_all)
+    _refresh_all()
     return DistributionTabBindings(
         structure_tree=structure_tree,
         validation_label=validation_label,

@@ -34,6 +34,7 @@ def show_import_preview_dialog(
     force: bool = False,
 ) -> bool:
     dialog = tk.Toplevel(parent)
+    dialog.withdraw()
     dialog.title(tr("operations.preview.title", "Предпросмотр импорта"))
     dialog.transient(parent.winfo_toplevel())
     dialog.grid_columnconfigure(0, weight=1)
@@ -118,9 +119,6 @@ def show_import_preview_dialog(
         result["confirmed"] = True
         dialog.destroy()
 
-    ttk.Button(buttons, text=tr("common.cancel", "Отмена"), command=close).pack(
-        side=tk.LEFT, padx=(0, 8)
-    )
     if preview.imported > 0:
         ttk.Button(
             buttons,
@@ -128,9 +126,13 @@ def show_import_preview_dialog(
             style="Primary.TButton",
             command=proceed,
         ).pack(side=tk.LEFT)
+    ttk.Button(buttons, text=tr("common.cancel", "Отмена"), command=close).pack(
+        side=tk.LEFT, padx=(0, 8)
+    )
 
     dialog.protocol("WM_DELETE_WINDOW", close)
     center_dialog(dialog, parent)
+    dialog.deiconify()
     dialog.grab_set()
     parent.wait_window(dialog)
     return bool(result["confirmed"])

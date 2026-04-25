@@ -170,8 +170,8 @@ def bind_label_wrap(
         try:
             width = max(min_width, min(max_width, target.winfo_width() - padding))
             label.configure(wraplength=width)
-        except Exception:
+        except (tk.TclError, RuntimeError):
             pass
 
     target.bind("<Configure>", _sync_wrap, add="+")
-    label.after_idle(_sync_wrap)
+    _sync_wrap()

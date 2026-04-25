@@ -69,6 +69,6 @@ def tr(key: str, default: str | None = None, **fmt: object) -> str:
     if fmt:
         try:
             return template.format(**fmt)
-        except Exception:
+        except (KeyError, IndexError, ValueError):
             return template
     return template

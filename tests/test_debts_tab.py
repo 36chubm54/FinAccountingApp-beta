@@ -59,12 +59,12 @@ def _find_button(parent: tk.Misc, text: str) -> tk.Button | ttk.Button | None:
     return None
 
 
-def _find_entry_by_order(parent: tk.Misc, index: int) -> tk.Entry:
-    entries: list[tk.Entry] = []
+def _find_entry_by_order(parent: tk.Misc, index: int) -> tk.Entry | ttk.Entry:
+    entries: list[tk.Entry | ttk.Entry] = []
 
     def _collect(node: tk.Misc) -> None:
         for child in node.winfo_children():
-            if isinstance(child, tk.Entry):
+            if isinstance(child, (tk.Entry, ttk.Entry)) and not isinstance(child, ttk.Combobox):
                 entries.append(child)
             _collect(child)
 

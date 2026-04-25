@@ -267,12 +267,12 @@ def build_budget_tab(
             categories = set(context.controller.get_expense_categories())
             categories.update(context.controller.get_mandatory_expense_categories())
             category_combo["values"] = sorted(categories, key=lambda value: value.casefold())
-        except Exception:
+        except (ValueError, TypeError, RuntimeError, tk.TclError):
             logger.debug("Failed to refresh budget category suggestions", exc_info=True)
 
         try:
             results = context.controller.get_budget_results()
-        except Exception as err:
+        except (ValueError, TypeError, RuntimeError) as err:
             logger.warning("Budget refresh error: %s", err)
             return
 
@@ -434,7 +434,7 @@ def build_budget_tab(
         side=tk.LEFT, padx=4
     )
 
-    parent.after(100, _refresh)
+    _refresh()
     return BudgetTabBindings(
         category_combo=category_combo,
         start_date_entry=start_date_entry,

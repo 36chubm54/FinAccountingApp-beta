@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import tkinter as tk
 from collections.abc import Callable
@@ -10,10 +11,12 @@ from datetime import date
 from tkinter import filedialog, ttk
 from typing import Any, Protocol
 
+from domain.errors import DomainError
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
 from gui.helpers import open_in_file_manager
 from gui.i18n import tr
+from gui.logging_utils import log_ui_error
 from gui.tabs.operations_support import (
     refresh_operation_views,
     safe_destroy,
@@ -26,6 +29,8 @@ from gui.ui_helpers import (
     show_info,
     show_warning,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class OperationsTabContext(Protocol):
@@ -85,10 +90,14 @@ def build_operations_tab(
     ttk.Label(form_frame, text=tr("common.type", "Тип:")).grid(
         row=0, column=0, sticky="w", padx=6, pady=4
     )
-    type_var = tk.StringVar(value=income_label)
-    ttk.OptionMenu(form_frame, type_var, income_label, income_label, expense_label).grid(
-        row=0, column=1, sticky="ew", padx=6, pady=4
-    )
+    # type_var = tk.StringVar(value=income_label)
+    # ttk.OptionMenu(form_frame, type_var, income_label, income_label, expense_label).grid(
+    #     row=0, column=1, sticky="ew", padx=6, pady=4
+    # )
+    type_options = [income_label, expense_label]
+    type_combo = ttk.Combobox(form_frame, values=type_options, state="readonly")
+    type_combo.set(income_label)
+    type_combo.grid(row=0, column=1, sticky="ew", padx=6, pady=4)
 
     ttk.Label(form_frame, text=tr("common.date", "Дата:")).grid(
         row=1, column=0, sticky="w", padx=6, pady=4
@@ -127,17 +136,24 @@ def build_operations_tab(
         row=6, column=0, sticky="w", padx=6, pady=4
     )
     operation_wallet_var = tk.StringVar(value="")
-    operation_wallet_menu = ttk.OptionMenu(form_frame, operation_wallet_var, "")
+    # ttk.OptionMenu(form_frame, operation_wallet_var, "")
+    # operation_wallet_menu.grid(row=6, column=1, sticky="ew", padx=6, pady=4)
+    operation_wallet_menu = ttk.Combobox(
+        form_frame,
+        textvariable=operation_wallet_var,
+        values=[],
+        state="readonly",
+    )
     operation_wallet_menu.grid(row=6, column=1, sticky="ew", padx=6, pady=4)
     operation_wallet_map: dict[str, int] = {}
 
     def _refresh_category_combo() -> None:
         try:
-            if type_var.get() == income_label:
+            if type_combo.get() == income_label:
                 category_combo["values"] = context.controller.get_income_categories()
             else:
                 category_combo["values"] = context.controller.get_expense_categories()
-        except Exception:
+        except (ValueError, RuntimeError):
             pass
         category_combo.set("General")
 
@@ -151,12 +167,13 @@ def build_operations_tab(
             f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id for wallet in wallets
         }
         labels = list(operation_wallet_map.keys()) or [""]
-        menu = operation_wallet_menu["menu"]
-        menu.delete(0, "end")
-        for label in labels:
-            menu.add_command(
-                label=label, command=lambda value=label: operation_wallet_var.set(value)
-            )
+        # menu = operation_wallet_menu["menu"]
+        # menu.delete(0, "end")
+        # for label in labels:
+        #     menu.add_command(
+        #         label=label, command=lambda value=label: operation_wallet_var.set(value)
+        #     )
+        operation_wallet_menu["values"] = labels
         if operation_wallet_var.get() not in operation_wallet_map:
             operation_wallet_var.set(labels[0])
 
@@ -237,7 +254,7 @@ def build_operations_tab(
             return
 
         try:
-            if type_var.get() == income_label:
+            if type_combo.get() == income_label:
                 context.controller.create_income(
                     date=date_str,
                     wallet_id=wallet_id,
@@ -263,7 +280,8 @@ def build_operations_tab(
             description_entry.delete(0, tk.END)
             _refresh_category_combo()
             refresh_operation_views(context)
-        except Exception as error:
+        except (DomainError, ValueError, TypeError, RuntimeError) as error:
+            log_ui_error(logger, "UI_OPS_CREATE_RECORD_FAILED", error, wallet_id=wallet_id)
             show_error(
                 tr(
                     "operations.error.save_failed",
@@ -303,7 +321,14 @@ def build_operations_tab(
                 show_error(tr("operations.error.delete_failed", "Не удалось удалить запись."))
                 return
             refresh_operation_views(context)
-        except Exception as error:
+        except (DomainError, ValueError, TypeError, RuntimeError) as error:
+            log_ui_error(
+                logger,
+                "UI_OPS_DELETE_RECORD_FAILED",
+                error,
+                record_ui_id=record_id,
+                repository_index=repository_index,
+            )
             show_error(
                 tr(
                     "operations.error.delete_failed_with_error",
@@ -328,7 +353,7 @@ def build_operations_tab(
 
         try:
             record = context.controller.get_record_for_edit(domain_record_id)
-        except Exception:
+        except (ValueError, TypeError, RuntimeError):
             show_error(
                 tr(
                     "operations.error.edit_load_failed",
@@ -357,7 +382,7 @@ def build_operations_tab(
         if edit_panel_state["panel"] is not None:
             try:
                 edit_panel_state["panel"].destroy()
-            except Exception:
+            except (tk.TclError, RuntimeError):
                 pass
             edit_panel_state["panel"] = None
 
@@ -377,7 +402,14 @@ def build_operations_tab(
             row=2, column=0, sticky="w"
         )
         wallet_edit_var = tk.StringVar(value="")
-        wallet_edit_menu = ttk.OptionMenu(edit_panel, wallet_edit_var, "")
+        # wallet_edit_menu = ttk.OptionMenu(edit_panel, wallet_edit_var, "")
+        # wallet_edit_menu.grid(row=2, column=1, sticky="ew")
+        wallet_edit_menu = ttk.Combobox(
+            edit_panel,
+            textvariable=wallet_edit_var,
+            values=[],
+            state="readonly",
+        )
         wallet_edit_menu.grid(row=2, column=1, sticky="ew")
         ttk.Label(edit_panel, text=tr("common.category", "Категория:")).grid(
             row=3, column=0, sticky="w"
@@ -406,7 +438,7 @@ def build_operations_tab(
                 category_edit_combo["values"] = (
                     context.controller.get_mandatory_expense_categories()
                 )
-        except Exception:
+        except (ValueError, RuntimeError):
             pass
         category_edit_combo.insert(0, str(record.category or ""))
         description_edit_entry.insert(0, str(record.description or ""))
@@ -416,13 +448,14 @@ def build_operations_tab(
             for wallet in context.controller.load_wallets()
         }
         wallet_labels = list(wallet_edit_map.keys()) or [""]
-        wallet_menu = wallet_edit_menu["menu"]
-        wallet_menu.delete(0, "end")
-        for label in wallet_labels:
-            wallet_menu.add_command(
-                label=label,
-                command=lambda value=label: wallet_edit_var.set(value),
-            )
+        # wallet_menu = wallet_edit_menu["menu"]
+        # wallet_menu.delete(0, "end")
+        # for label in wallet_labels:
+        #     wallet_menu.add_command(
+        #         label=label,
+        #         command=lambda value=label: wallet_edit_var.set(value),
+        #     )
+        wallet_edit_menu["values"] = wallet_labels
         current_wallet_label = next(
             (label for label, wid in wallet_edit_map.items() if int(wid) == int(record.wallet_id)),
             wallet_labels[0],
@@ -459,7 +492,14 @@ def build_operations_tab(
                 show_info(tr("operations.updated", "Запись обновлена."))
                 refresh_operation_views(context)
                 cancel_edit()
-            except Exception as error:
+            except (DomainError, ValueError, TypeError, RuntimeError) as error:
+                log_ui_error(
+                    logger,
+                    "UI_OPS_EDIT_RECORD_FAILED",
+                    error,
+                    record_id=domain_record_id,
+                    new_wallet_id=new_wallet_id,
+                )
                 show_error(
                     tr(
                         "operations.error.update_failed",
@@ -513,14 +553,28 @@ def build_operations_tab(
         row=0, column=0, sticky="w", padx=4, pady=2
     )
     transfer_from_var = tk.StringVar(value="")
-    transfer_from_menu = ttk.OptionMenu(transfer_frame, transfer_from_var, "")
+    # transfer_from_menu = ttk.OptionMenu(transfer_frame, transfer_from_var, "")
+    # transfer_from_menu.grid(row=0, column=1, sticky="ew", padx=4, pady=2)
+    transfer_from_menu = ttk.Combobox(
+        transfer_frame,
+        textvariable=transfer_from_var,
+        values=[],
+        state="readonly",
+    )
     transfer_from_menu.grid(row=0, column=1, sticky="ew", padx=4, pady=2)
 
     ttk.Label(transfer_frame, text=tr("operations.transfer.to", "В кошелек:")).grid(
         row=1, column=0, sticky="w", padx=4, pady=2
     )
     transfer_to_var = tk.StringVar(value="")
-    transfer_to_menu = ttk.OptionMenu(transfer_frame, transfer_to_var, "")
+    # transfer_to_menu = ttk.OptionMenu(transfer_frame, transfer_to_var, "")
+    # transfer_to_menu.grid(row=1, column=1, sticky="ew", padx=4, pady=2)
+    transfer_to_menu = ttk.Combobox(
+        transfer_frame,
+        textvariable=transfer_to_var,
+        values=[],
+        state="readonly",
+    )
     transfer_to_menu.grid(row=1, column=1, sticky="ew", padx=4, pady=2)
 
     ttk.Label(transfer_frame, text=tr("common.date", "Дата:")).grid(
@@ -571,14 +625,15 @@ def build_operations_tab(
         }
         labels = list(wallet_id_map.keys()) or [""]
 
-        for menu_widget, var in (
+        for combo_widget, var in (
             (transfer_from_menu, transfer_from_var),
             (transfer_to_menu, transfer_to_var),
         ):
-            menu = menu_widget["menu"]
-            menu.delete(0, "end")
-            for label in labels:
-                menu.add_command(label=label, command=lambda value=label, v=var: v.set(value))
+            # menu = combo_widget["menu"]
+            # menu.delete(0, "end")
+            # for label in labels:
+            #     menu.add_command(label=label, command=lambda value=label, v=var: v.set(value))
+            combo_widget["values"] = labels
             if not var.get() or var.get() not in wallet_id_map:
                 var.set(labels[0])
 
@@ -652,7 +707,14 @@ def build_operations_tab(
             transfer_commission_entry.delete(0, tk.END)
             transfer_commission_entry.insert(0, "0")
             refresh_operation_views(context)
-        except Exception as error:
+        except (DomainError, ValueError, TypeError, RuntimeError) as error:
+            log_ui_error(
+                logger,
+                "UI_OPS_CREATE_TRANSFER_FAILED",
+                error,
+                from_wallet_id=from_wallet_id,
+                to_wallet_id=to_wallet_id,
+            )
             show_error(
                 tr(
                     "operations.transfer.error.create_failed",
@@ -874,9 +936,12 @@ def build_operations_tab(
     ).grid(row=0, column=3, sticky="ew", padx=(6, 0))
 
     ttk.Label(import_actions, text=tr("common.format", "Формат:")).grid(row=0, column=0, sticky="w")
-    ttk.OptionMenu(import_actions, import_format_var, "CSV", "CSV", "XLSX").grid(
-        row=0, column=1, sticky="ew", padx=(6, 8)
-    )
+    ttk.Combobox(
+        import_actions,
+        textvariable=import_format_var,
+        values=["CSV", "XLSX"],
+        state="readonly",
+    ).grid(row=0, column=1, sticky="ew", padx=(6, 8))
     ttk.Label(import_actions, text=tr("common.mode", "Режим:")).grid(row=0, column=2, sticky="w")
     import_mode_combo = ttk.Combobox(
         import_actions,
@@ -907,8 +972,8 @@ def build_operations_tab(
 
     context._refresh_list()
 
-    type_var.trace_add("write", _on_type_change)
-    parent.after(150, _refresh_category_combo)
+    type_combo.bind("<<ComboboxSelected>>", _on_type_change)
+    _refresh_category_combo()
 
     return OperationsTabBindings(
         records_tree=records_tree,

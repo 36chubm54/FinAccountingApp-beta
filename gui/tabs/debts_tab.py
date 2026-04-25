@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -10,10 +11,14 @@ from tkinter import ttk
 from typing import Any, Protocol
 
 from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment
+from domain.errors import DomainError
 from gui.i18n import tr
+from gui.logging_utils import log_ui_error
 from gui.ui_dialogs import messagebox_compat as messagebox
 from gui.ui_helpers import attach_treeview_scrollbars
 from gui.ui_theme import get_palette
+
+logger = logging.getLogger(__name__)
 
 
 class DebtsTabContext(Protocol):
@@ -29,10 +34,10 @@ class DebtsTabContext(Protocol):
 
 
 def refresh_debts_views(context: DebtsTabContext) -> None:
-    context._refresh_list()
-    context._refresh_charts()
-    context._refresh_wallets()
-    context._refresh_all()
+    for method_name in ("_refresh_list", "_refresh_charts", "_refresh_wallets", "_refresh_all"):
+        method = getattr(context, method_name, None)
+        if callable(method):
+            method()
 
 
 @dataclass(slots=True)
@@ -191,9 +196,16 @@ def build_debts_tab(
     debt_label = tr("debts.kind.debt", "Долг")
     loan_label = tr("debts.kind.loan", "Заем")
     kind_var = tk.StringVar(value=debt_label)
-    ttk.OptionMenu(create_frame, kind_var, debt_label, debt_label, loan_label).grid(
-        row=0, column=1, sticky="ew", padx=6, pady=4
+    # ttk.OptionMenu(create_frame, kind_var, debt_label, debt_label, loan_label).grid(
+    #     row=0, column=1, sticky="ew", padx=6, pady=4
+    # )
+    kind_combo = ttk.Combobox(
+        create_frame,
+        textvariable=kind_var,
+        values=[debt_label, loan_label],
+        state="readonly",
     )
+    kind_combo.grid(row=0, column=1, sticky="ew", padx=6, pady=4)
 
     ttk.Label(create_frame, text=tr("debts.contact", "Контакт:")).grid(
         row=1, column=0, sticky="w", padx=6, pady=4
@@ -218,7 +230,14 @@ def build_debts_tab(
         row=4, column=0, sticky="w", padx=6, pady=4
     )
     wallet_var = tk.StringVar(value="")
-    wallet_menu = ttk.OptionMenu(create_frame, wallet_var, "")
+    # wallet_menu = ttk.OptionMenu(create_frame, wallet_var, "")
+    # wallet_menu.grid(row=4, column=1, sticky="ew", padx=6, pady=4)
+    wallet_menu = ttk.Combobox(
+        create_frame,
+        textvariable=wallet_var,
+        values=[],
+        state="readonly",
+    )
     wallet_menu.grid(row=4, column=1, sticky="ew", padx=6, pady=4)
     wallet_map: dict[str, int] = {}
 
@@ -251,7 +270,14 @@ def build_debts_tab(
         row=2, column=0, sticky="w", padx=6, pady=4
     )
     action_wallet_var = tk.StringVar(value="")
-    action_wallet_menu = ttk.OptionMenu(actions_frame, action_wallet_var, "")
+    # action_wallet_menu = ttk.OptionMenu(actions_frame, action_wallet_var, "")
+    # action_wallet_menu.grid(row=2, column=1, sticky="ew", padx=6, pady=4)
+    action_wallet_menu = ttk.Combobox(
+        actions_frame,
+        textvariable=action_wallet_var,
+        values=[],
+        state="readonly",
+    )
     action_wallet_menu.grid(row=2, column=1, sticky="ew", padx=6, pady=4)
 
     debt_tree = ttk.Treeview(
@@ -335,16 +361,17 @@ def build_debts_tab(
             f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id for wallet in wallets
         }
         labels = list(wallet_map.keys()) or [""]
-        for menu_widget, var in (
+        for combo_widget, var in (
             (wallet_menu, wallet_var),
             (action_wallet_menu, action_wallet_var),
         ):
-            menu = menu_widget["menu"]
-            menu.delete(0, "end")
-            for label in labels:
-                menu.add_command(
-                    label=label, command=lambda value=label, target=var: target.set(value)
-                )
+            # menu = combo_widget["menu"]
+            # menu.delete(0, "end")
+            # for label in labels:
+            #     menu.add_command(
+            #         label=label, command=lambda value=label, target=var: target.set(value)
+            #     )
+            combo_widget["values"] = labels
             if var.get() not in wallet_map:
                 var.set(labels[0])
 
@@ -452,8 +479,10 @@ def build_debts_tab(
                 tr("debts.error.wallet_required", "Кошелек обязателен."),
             )
             return
+
+        kind = DebtKind.DEBT if kind_var.get() == debt_label else DebtKind.LOAN
         try:
-            if kind_var.get() == debt_label:
+            if kind is DebtKind.DEBT:
                 context.controller.create_debt(
                     contact_name=contact,
                     wallet_id=wallet_id,
@@ -474,7 +503,14 @@ def build_debts_tab(
             description_entry.delete(0, tk.END)
             _refresh()
             refresh_debts_views(context)
-        except Exception as error:
+        except (DomainError, ValueError, TypeError, RuntimeError) as error:
+            log_ui_error(
+                logger,
+                "UI_DEBTS_CREATE_FAILED",
+                error,
+                wallet_id=wallet_id,
+                kind=kind.value,
+            )
             messagebox.showerror(tr("debts.error.create_title", "Ошибка долга"), str(error))
 
     def _run_on_selected(
@@ -512,7 +548,14 @@ def build_debts_tab(
         try:
             action(debt, amount_kzt, date_text, wallet_id_arg)
             _refresh()
-        except Exception as error:
+        except (DomainError, ValueError, TypeError, RuntimeError) as error:
+            log_ui_error(
+                logger,
+                "UI_DEBTS_ACTION_FAILED",
+                error,
+                debt_id=debt.id,
+                wallet_id=wallet_id_arg,
+            )
             messagebox.showerror(self_name, str(error))
 
     def _pay() -> None:
@@ -562,7 +605,8 @@ def build_debts_tab(
             )
             _refresh()
             refresh_debts_views(context)
-        except Exception as error:
+        except (DomainError, ValueError, TypeError, RuntimeError) as error:
+            log_ui_error(logger, "UI_DEBTS_CLOSE_FAILED", error, debt_id=debt.id)
             messagebox.showerror(tr("debts.error.close_title", "Ошибка закрытия"), str(error))
 
     def _delete() -> None:
@@ -587,7 +631,8 @@ def build_debts_tab(
         try:
             context.controller.delete_debt(debt.id)
             _refresh()
-        except Exception as error:
+        except (DomainError, ValueError, TypeError, RuntimeError) as error:
+            log_ui_error(logger, "UI_DEBTS_DELETE_FAILED", error, debt_id=debt.id)
             messagebox.showerror(tr("debts.error.delete_title", "Ошибка удаления"), str(error))
 
     ttk.Button(

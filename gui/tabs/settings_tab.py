@@ -4,18 +4,23 @@ Settings tab — management of wallets and mandatory expenses (CRUD, import/expo
 
 from __future__ import annotations
 
+import logging
 import os
 import tkinter as tk
 from collections.abc import Callable
 from tkinter import filedialog, ttk
 from typing import Any, Protocol
 
+from domain.errors import DomainError
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
 from gui.helpers import open_in_file_manager
 from gui.i18n import tr
+from gui.logging_utils import log_ui_error
 from gui.tabs.settings_support import safe_destroy, show_audit_report_dialog
 from gui.ui_dialogs import messagebox_compat as messagebox
+
+logger = logging.getLogger(__name__)
 
 
 class SettingsTabContext(Protocol):
@@ -260,9 +265,11 @@ def build_settings_tab(
             )
             return
 
+        name = ""
         try:
+            name = wallet_name_entry.get().strip()
             wallet = context.controller.create_wallet(
-                name=wallet_name_entry.get().strip(),
+                name=name,
                 currency=(wallet_currency_entry.get() or "KZT").strip(),
                 initial_balance=initial_balance,
                 allow_negative=wallet_allow_negative_var.get(),
@@ -280,7 +287,8 @@ def build_settings_tab(
             wallet_initial_entry.delete(0, tk.END)
             wallet_initial_entry.insert(0, "0")
             refresh_wallets()
-        except Exception as error:
+        except (DomainError, ValueError, TypeError, RuntimeError) as error:
+            log_ui_error(logger, "UI_SETTINGS_CREATE_WALLET_FAILED", error, name=name)
             messagebox.showerror(
                 tr("common.error", "Ошибка"),
                 tr(
@@ -314,7 +322,7 @@ def build_settings_tab(
         try:
             values = wallet_tree.item(selection[0], "values")
             wallet_id = int(values[0])
-        except Exception:
+        except (TypeError, ValueError, IndexError):
             messagebox.showerror(
                 tr("common.error", "Ошибка"),
                 tr(
@@ -331,7 +339,8 @@ def build_settings_tab(
                 tr("settings.wallets.deleted", "Кошелек деактивирован."),
             )
             refresh_wallets()
-        except Exception as error:
+        except (DomainError, ValueError, TypeError, RuntimeError) as error:
+            log_ui_error(logger, "UI_SETTINGS_DELETE_WALLET_FAILED", error, wallet_id=wallet_id)
             messagebox.showerror(tr("common.error", "Ошибка"), str(error))
 
     wallet_actions = ttk.Frame(wallets_frame)
@@ -505,19 +514,27 @@ def build_settings_tab(
 
         ttk.Label(add_panel, text=tr("common.wallet", "Кошелек:")).grid(row=2, column=0, sticky="w")
         mandatory_wallet_var = tk.StringVar(value="")
-        mandatory_wallet_menu = ttk.OptionMenu(add_panel, mandatory_wallet_var, "")
+        # mandatory_wallet_menu = ttk.OptionMenu(add_panel, mandatory_wallet_var, "")
+        # mandatory_wallet_menu.grid(row=2, column=1, sticky="ew")
+        mandatory_wallet_menu = ttk.Combobox(
+            add_panel,
+            textvariable=mandatory_wallet_var,
+            values=[],
+            state="readonly",
+        )
         mandatory_wallet_menu.grid(row=2, column=1, sticky="ew")
         mandatory_wallet_map: dict[str, int] = {
             f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id
             for wallet in context.controller.load_active_wallets()
         }
         wallet_labels = list(mandatory_wallet_map.keys()) or [""]
-        wallet_menu = mandatory_wallet_menu["menu"]
-        wallet_menu.delete(0, "end")
-        for label in wallet_labels:
-            wallet_menu.add_command(
-                label=label, command=lambda value=label: mandatory_wallet_var.set(value)
-            )
+        # wallet_menu = mandatory_wallet_menu["menu"]
+        # wallet_menu.delete(0, "end")
+        # for label in wallet_labels:
+        #     wallet_menu.add_command(
+        #         label=label, command=lambda value=label: mandatory_wallet_var.set(value)
+        #     )
+        mandatory_wallet_menu["values"] = wallet_labels
         mandatory_wallet_var.set(wallet_labels[0])
 
         ttk.Label(
@@ -538,20 +555,27 @@ def build_settings_tab(
 
         ttk.Label(add_panel, text=tr("common.period", "Период:")).grid(row=5, column=0, sticky="w")
         period_var = tk.StringVar(value="monthly")
-        ttk.OptionMenu(
+        # ttk.OptionMenu(
+        #     add_panel,
+        #     period_var,
+        #     "daily",
+        #     "daily",
+        #     "weekly",
+        #     "monthly",
+        #     "yearly",
+        # ).grid(
+        #     row=5,
+        #     column=1,
+        #     sticky="ew",
+        #     pady=2,
+        # )
+        period_combo = ttk.Combobox(
             add_panel,
-            period_var,
-            "daily",
-            "daily",
-            "weekly",
-            "monthly",
-            "yearly",
-        ).grid(
-            row=5,
-            column=1,
-            sticky="ew",
-            pady=2,
+            textvariable=period_var,
+            values=["daily", "weekly", "monthly", "yearly"],
+            state="readonly",
         )
+        period_combo.grid(row=5, column=1, sticky="ew", pady=2)
 
         ttk.Label(
             add_panel,
@@ -561,6 +585,7 @@ def build_settings_tab(
         date_entry.grid(row=6, column=1, sticky="ew", pady=2)
 
         def save() -> None:
+            wallet_id = None
             try:
                 amount = float(amount_entry.get())
                 description = description_entry.get()
@@ -612,7 +637,13 @@ def build_settings_tab(
                 context._refresh_charts()
                 refresh_mandatory()
                 context._refresh_budgets()
-            except Exception as error:
+            except (DomainError, ValueError, TypeError, RuntimeError) as error:
+                log_ui_error(
+                    logger,
+                    "UI_SETTINGS_MANDATORY_CREATE_FAILED",
+                    error,
+                    wallet_id=wallet_id,
+                )
                 messagebox.showerror(
                     tr("common.error", "Ошибка"),
                     tr(
@@ -652,7 +683,7 @@ def build_settings_tab(
             return
         try:
             index = int(selection[0])
-        except Exception:
+        except (TypeError, ValueError):
             messagebox.showerror(
                 tr("common.error", "Ошибка"), tr("common.invalid_selection", "Некорректный выбор.")
             )
@@ -680,19 +711,27 @@ def build_settings_tab(
             row=1, column=0, sticky="w"
         )
         edit_wallet_var = tk.StringVar(value="")
-        edit_wallet_menu = ttk.OptionMenu(edit_panel, edit_wallet_var, "")
+        # edit_wallet_menu = ttk.OptionMenu(edit_panel, edit_wallet_var, "")
+        # edit_wallet_menu.grid(row=1, column=1, sticky="ew")
+        edit_wallet_menu = ttk.Combobox(
+            edit_panel,
+            textvariable=edit_wallet_var,
+            values=[],
+            state="readonly",
+        )
         edit_wallet_menu.grid(row=1, column=1, sticky="ew")
         edit_wallet_map: dict[str, int] = {
             f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id
             for wallet in context.controller.load_active_wallets()
         }
         edit_wallet_labels = list(edit_wallet_map.keys()) or [""]
-        wallet_menu = edit_wallet_menu["menu"]
-        wallet_menu.delete(0, "end")
-        for label in edit_wallet_labels:
-            wallet_menu.add_command(
-                label=label, command=lambda value=label: edit_wallet_var.set(value)
-            )
+        # wallet_menu = edit_wallet_menu["menu"]
+        # wallet_menu.delete(0, "end")
+        # for label in edit_wallet_labels:
+        #     wallet_menu.add_command(
+        #         label=label, command=lambda value=label: edit_wallet_var.set(value)
+        #     )
+        edit_wallet_menu["values"] = edit_wallet_labels
         current_wallet_label = next(
             (label for label, wid in edit_wallet_map.items() if int(wid) == int(expense.wallet_id)),
             edit_wallet_labels[0],
@@ -701,15 +740,22 @@ def build_settings_tab(
 
         ttk.Label(edit_panel, text=tr("common.period", "Период:")).grid(row=2, column=0, sticky="w")
         edit_period_var = tk.StringVar(value=str(expense.period or "monthly"))
-        ttk.OptionMenu(
+        # ttk.OptionMenu(
+        #     edit_panel,
+        #     edit_period_var,
+        #     str(expense.period or "monthly"),
+        #     "daily",
+        #     "weekly",
+        #     "monthly",
+        #     "yearly",
+        # ).grid(row=2, column=1, sticky="ew")
+        edit_period_combo = ttk.Combobox(
             edit_panel,
-            edit_period_var,
-            str(expense.period or "monthly"),
-            "daily",
-            "weekly",
-            "monthly",
-            "yearly",
-        ).grid(row=2, column=1, sticky="ew")
+            textvariable=edit_period_var,
+            values=["daily", "weekly", "monthly", "yearly"],
+            state="readonly",
+        )
+        edit_period_combo.grid(row=2, column=1, sticky="ew")
 
         ttk.Label(
             edit_panel,
@@ -842,7 +888,14 @@ def build_settings_tab(
             row=1, column=0, sticky="w"
         )
         mandatory_wallet_var = tk.StringVar(value="")
-        mandatory_wallet_menu = ttk.OptionMenu(add_to_report_panel, mandatory_wallet_var, "")
+        # mandatory_wallet_menu = ttk.OptionMenu(add_to_report_panel, mandatory_wallet_var, "")
+        # mandatory_wallet_menu.grid(row=1, column=1, sticky="ew")
+        mandatory_wallet_menu = ttk.Combobox(
+            add_to_report_panel,
+            textvariable=mandatory_wallet_var,
+            values=[],
+            state="readonly",
+        )
         mandatory_wallet_menu.grid(row=1, column=1, sticky="ew")
 
         mandatory_wallet_map: dict[str, int] = {
@@ -850,19 +903,20 @@ def build_settings_tab(
             for wallet in context.controller.load_active_wallets()
         }
         wallet_labels = list(mandatory_wallet_map.keys()) or [""]
-        wallet_menu = mandatory_wallet_menu["menu"]
-        wallet_menu.delete(0, "end")
-        for label in wallet_labels:
-            wallet_menu.add_command(
-                label=label, command=lambda value=label: mandatory_wallet_var.set(value)
-            )
+        # wallet_menu = mandatory_wallet_menu["menu"]
+        # wallet_menu.delete(0, "end")
+        # for label in wallet_labels:
+        #     wallet_menu.add_command(
+        #         label=label, command=lambda value=label: mandatory_wallet_var.set(value)
+        #     )
+        mandatory_wallet_menu["values"] = wallet_labels
         mandatory_wallet_var.set(wallet_labels[0])
 
         selection = mand_tree.selection()
         if selection:
             try:
                 index = int(selection[0])
-            except Exception:
+            except (TypeError, ValueError):
                 index = -1
         else:
             index = -1
@@ -942,7 +996,7 @@ def build_settings_tab(
             return
         try:
             index = int(selection[0])
-        except Exception:
+        except (TypeError, ValueError):
             messagebox.showerror(
                 tr("common.error", "Ошибка"), tr("common.invalid_selection", "Некорректный выбор.")
             )
@@ -1007,9 +1061,15 @@ def build_settings_tab(
     ttk.Button(actions, text=tr("common.refresh", "Обновить"), command=refresh_mandatory).grid(
         row=1, column=0, sticky="ew", padx=(0, 6)
     )
-    ttk.OptionMenu(actions, format_var, "CSV", "CSV", "XLSX").grid(
-        row=1, column=1, sticky="ew", padx=6
-    )
+    # ttk.OptionMenu(actions, format_var, "CSV", "CSV", "XLSX").grid(
+    #     row=1, column=1, sticky="ew", padx=6
+    # )
+    ttk.Combobox(
+        actions,
+        textvariable=format_var,
+        values=["CSV", "XLSX"],
+        state="readonly",
+    ).grid(row=1, column=1, sticky="ew", padx=6)
 
     def import_mand() -> None:
         fmt = format_var.get()
@@ -1340,7 +1400,8 @@ def build_settings_tab(
         try:
             report = context.controller.run_audit()
             show_audit_report_dialog(report, parent)
-        except Exception as error:
+        except (DomainError, ValueError, TypeError, RuntimeError) as error:
+            log_ui_error(logger, "UI_SETTINGS_AUDIT_FAILED", error)
             messagebox.showerror(tr("settings.audit.error_title", "Ошибка аудита"), str(error))
 
     ttk.Button(

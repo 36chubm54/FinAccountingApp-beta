@@ -431,7 +431,7 @@ def build_analytics_tab(
         if redraw_job is not None:
             try:
                 context.after_cancel(redraw_job)
-            except Exception:
+            except (tk.TclError, RuntimeError):
                 pass
         redraw_job = context.after(120, _redraw_canvases)
 
@@ -618,7 +618,7 @@ def build_analytics_tab(
                     ),
                     tags=(tag,),
                 )
-        except Exception as error:
+        except (ValueError, TypeError, RuntimeError, tk.TclError) as error:
             logger.warning("Analytics refresh error: %s", error)
             if isinstance(error, ValueError):
                 show_error(
@@ -642,7 +642,7 @@ def build_analytics_tab(
     timeline_canvas.bind("<Configure>", lambda _event: _schedule_redraw())
     category_canvas.bind("<Configure>", lambda _event: _schedule_redraw())
 
-    parent.after(100, _refresh_analytics)
+    _refresh_analytics()
 
     return AnalyticsTabBindings(
         period_from_entry=period_from_entry,

@@ -60,6 +60,7 @@ def _populate_audit_section(
 def show_audit_report_dialog(report: AuditReport, parent: tk.Misc) -> None:
     palette = get_palette()
     dialog = tk.Toplevel(parent)
+    dialog.withdraw()
     dialog.title(tr("settings.audit.report.title", "Отчет аудита"))
     dialog.minsize(560, 480)
     dialog.transient(parent.winfo_toplevel())
@@ -140,5 +141,6 @@ def show_audit_report_dialog(report: AuditReport, parent: tk.Misc) -> None:
     close_button.grid(row=6, column=0, sticky="e")
 
     center_dialog(dialog, parent, min_width=560, min_height=480)
+    dialog.deiconify()
     dialog.grab_set()
     close_button.focus_set()
