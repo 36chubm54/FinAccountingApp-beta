@@ -32,11 +32,11 @@ Supported business areas include:
 | Layer | Purpose | Main modules |
 | --- | --- | --- |
 | `domain` | Immutable entities, enums, validation rules, report DTOs | `records.py`, `wallets.py`, `budget.py`, `debt.py`, `asset.py`, `goal.py`, `reports.py`, `audit.py`, `validation.py` |
-| `app` | Use cases and application orchestration | `use_cases.py`, `use_case_support.py`, `finance_service.py`, `record_service.py` |
+| `app` | Use cases, application contracts, and orchestration | `use_cases.py`, `use_case_support.py`, `finance_service.py`, `record_service.py`, `services.py` |
 | `services` | Focused business subsystems and read-only engines | `import_service.py`, `audit_service.py`, `balance_service.py`, `metrics_service.py`, `timeline_service.py`, `budget_service.py`, `debt_service.py`, `distribution_service.py`, `asset_service.py`, `goal_service.py`, `dashboard_service.py` |
 | `infrastructure` | Runtime repository implementation | `sqlite_repository.py`, `repositories.py` |
 | `storage` | Low-level persistence adapters and schema bootstrap | `sqlite_storage.py`, `json_storage.py`, `base.py` |
-| `gui` | Tkinter presentation layer | `tkinter_gui.py`, `controllers.py`, `tabs/*`, `exporters.py`, `importers.py`, `tooltip.py` |
+| `gui` | Tkinter presentation layer | `tkinter_gui.py`, `controllers.py`, `tabs/*`, `exporters.py`, `importers.py`, `tooltip.py`, `logging_utils.py` |
 | `utils` | Format-specific helpers and shared technical helpers | `backup_utils.py`, `import_core.py`, `csv_utils.py`, `excel_utils.py`, `pdf_utils.py`, `money.py`, `charting.py`, `debt_report_utils.py`, `tabular_utils.py` |
 | `tests` | Regression, contract, and integration-like coverage | `test_*` modules across all subsystems |
 
@@ -54,8 +54,10 @@ Important startup concerns:
 
 - SQLite integrity and schema readiness
 - JSON export/backup synchronization
+- OneDrive-aware export timing and WAL/SHM coherence
 - optional currency refresh
 - auto-application of mandatory payments
+- deferred GUI work and safe `after(...)` scheduling
 
 ### 3.2 Creating or Editing Financial Data
 
@@ -96,6 +98,7 @@ Main application import entry:
 
 - `FinancialController.import_records(...)`
 - `services.import_service.ImportService.import_file(...)`
+- `FinanceService.get_import_capabilities()`
 
 Low-level backup helpers:
 
@@ -111,7 +114,10 @@ Important details:
 - dry-run and real import share the same validation pipeline
 - readonly snapshots require `force=True`
 - JSON full backups can contain extended runtime entities such as budgets, debts, assets, goals, and distribution payloads
+- partial `JSON` imports are section-aware and should not treat omitted sections as implicit deletion
+- debt-aware imports must preserve `records.related_debt_id` and `debt_payments.record_id` links across normalization and bulk replace paths
 - compatibility logic in `storage/sqlite_storage.py` protects older SQLite databases during schema initialization
+- import rollback logic lives close to GUI transaction orchestration in `gui/controller_import_support.py`
 
 ## 4. Subsystem Map
 
@@ -123,8 +129,15 @@ Core modules:
 - `domain/wallets.py`
 - `domain/transfers.py`
 - `infrastructure/sqlite_repository.py`
+- `storage/sqlite_storage.py`
 
 These form the base event history used by reports and analytics.
+
+As of `v1.12.0`, this area also owns the most sensitive import/relink logic:
+
+- repository-level bulk replacement through `replace_records_and_transfers(...)`
+- preservation of explicit imported IDs where required
+- remapping of debt-linked records during import normalization
 
 ### 4.2 Budgets
 
@@ -180,6 +193,26 @@ Core modules:
 
 Audit is intentionally read-only and validates runtime integrity without mutating data.
 
+### 4.7 Import / Backup Reliability
+
+Core modules:
+
+- `services/import_parser.py`
+- `services/import_service.py`
+- `gui/controller_import_support.py`
+- `utils/backup_utils.py`
+- `backup.py`
+- `bootstrap.py`
+- `infrastructure/repositories.py`
+
+This subsystem is responsible for:
+
+- payload parsing and `json_sections_present` awareness
+- capability negotiation via `ImportCapabilities`
+- rollback-safe import transactions
+- corruption quarantine and save-failure handling for JSON repositories
+- startup export discipline for SQLite, especially on OneDrive-managed paths
+
 ## 5. Data Model Overview
 
 Main SQLite tables:
@@ -204,6 +237,7 @@ Important data-model notes:
 - records may reference `transfer_id` and `related_debt_id`
 - debt, asset, and goal data affect read-only wealth calculations
 - schema/bootstrap compatibility must be preserved for older SQLite databases
+- full-backup payloads may omit sections intentionally, so import code must distinguish "section absent" from "section present but empty"
 
 ## 6. Change Patterns
 
@@ -221,10 +255,21 @@ When changing import/export behavior, review together:
 
 - `services/import_service.py`
 - `services/import_parser.py`
+- `gui/controller_import_support.py`
 - `utils/backup_utils.py`
 - `gui/exporters.py`
 - `migrate_json_to_sqlite.py`
+- `infrastructure/repositories.py`
+- `storage/sqlite_storage.py`
 - the related contract tests
+
+When changing GUI startup/deferred work, review together:
+
+- `gui/tkinter_gui.py`
+- `gui/logging_utils.py`
+- `gui/ui_helpers.py`
+- `bootstrap.py`
+- Tk-related regression tests
 
 ## 7. Packaging Notes
 
@@ -249,9 +294,14 @@ If you are new to the codebase:
 For data-format issues:
 
 - start with `services/import_service.py`
-- then inspect `utils/backup_utils.py` and `migrate_json_to_sqlite.py`
+- then inspect `gui/controller_import_support.py`, `utils/backup_utils.py`, and `migrate_json_to_sqlite.py`
 
 For net-worth/report issues:
 
 - start with `services/balance_service.py`
 - then `services/timeline_service.py`, `services/report_service.py`, and report exporters
+
+For runtime durability issues:
+
+- inspect `infrastructure/repositories.py`
+- then `storage/sqlite_storage.py`, `backup.py`, and `bootstrap.py`
