@@ -2,7 +2,7 @@
 
 Графическое приложение для персонального финансового учёта с мультивалютностью, импортом/экспортом, бюджетами, долгами, активами и целями.
 
-Текущий релиз `v1.11.0` фокусируется на полировке интерфейса и локализации: обновлена единая blue-minimal тема, добавлены внешние языковые пакеты (`ru/en`), расширено покрытие переводов по вкладкам/диалогам (включая enum-статусы в `Budget/Debts`), улучшена адаптивность таблиц/графиков при компактных размерах окна, а запуск на Windows получил HiDPI-aware поведение для Tk и системных file dialogs.
+Текущий релиз `v1.12.0` объединяет две главные темы: runtime-персонализацию интерфейса и надёжность import/export. Приложение теперь поддерживает runtime `theme` / `language` preferences с сохранением в SQLite, live theme-aware shell и диалоги, а также section-aware `JSON` import, более устойчивое сохранение debt-linked связей, синхронизированный SQLite runtime и более явные warning-пути для degraded report export.
 
 ## 🚀 Быстрый старт
 
@@ -60,7 +60,12 @@ python main.py
 - Full backup / import / migration для `JSON` ↔ `SQLite`
 - Read-only Data Audit Engine для проверки консистентности данных
 - Внешние языковые пакеты `locales/*.txt` и единый i18n-loader с fallback-цепочкой
+- Runtime `theme` / `language` preferences с сохранением в SQLite schema metadata
+- Light / dark theme system и live theme-aware shell, status bar, audit views и диалоги
 - Поддержка пользовательской иконки окна (`.ico` + `iconphoto` fallback) и подготовка к иконке будущего `exe`
+- Section-aware `JSON` import: records-only restore не затирает несвязанные `debts/assets/goals/budgets`
+- Более безопасная persistence-слой логика: quarantine для битых JSON-файлов, `.error` copies при save-failure, atomic backup/export paths
+- Экспорт отчётов в `XLSX` / `PDF` теперь явно сигнализирует о деградации grouped-section вместо silent failure
 
 ## 🖥️ Вкладки приложения
 
@@ -106,6 +111,15 @@ python main.py
 | `services.distribution_service.DistributionService` | Monthly distribution и frozen rows |
 | `infrastructure.sqlite_repository.SQLiteRecordRepository` | Основной runtime repository |
 | `storage.sqlite_storage.SQLiteStorage` | Низкоуровневый SQLite adapter / schema bootstrap |
+
+Практические акценты для `v1.12.0`:
+
+- `FinancialController.save_theme_preference(...)` / `save_language_preference(...)` — runtime UI preferences, сохраняемые в SQLite
+- `gui.ui_theme` — централизованная light/dark palette system с runtime switching
+- `FinanceService.get_import_capabilities()` — единая capability-модель для import pipeline вместо ad-hoc проверок по атрибутам
+- `FinancialController.load_debts()` и `related_debt_id` в `create_income(...)` / `create_expense(...)` — важные точки для debt-aware import/restore flows
+- `SQLiteRecordRepository.replace_records_and_transfers(...)` — безопасная bulk-замена операций с ремапом связанных debt-payment ссылок
+- `gui.logging_utils.log_ui_error(...)` — общий structured logging helper для GUI ошибок и деградаций
 
 ### Import / backup entry points
 
@@ -154,6 +168,10 @@ pytest --cov=. --cov-report=term-missing
 - Для `JSON` full backup восстанавливаются runtime-сущности, включая `budgets`, `debts`, `debt_payments`, distribution/wealth payloads, если подсистемы поддерживаются репозиторием
 - Для readonly snapshot требуется `force=True`
 - Для `JSON` под `ImportPolicy.CURRENT_RATE` fast bulk-replace path тоже разрешён, если репозиторий его поддерживает
+- `ImportCapabilities` определяет, какие bulk-replace и load-* операции реально доступны конкретному runtime-service
+- Partial `JSON` import стал section-aware: если payload содержит только `records`, текущие `debts/assets/goals/budgets/distribution` не стираются
+- Если секция `debts` явно отсутствует, pipeline старается сохранить существующие `related_debt_id` связи; если секция есть — ссылки нормализуются только по допустимым debt IDs
+- `CSV` / `XLSX` import по-прежнему идёт через create-path и не использует bulk replace; `related_debt_id` теперь корректно прокидывается и там
 - `v1.10.1` усиливает раннюю валидацию import payload: битые ссылочные связи, дубликаты `wallet.id`, несколько `system` wallets и невалидные/дублированные `distribution_snapshots` теперь отсекаются раньше
 
 ### Backup
@@ -162,6 +180,9 @@ pytest --cov=. --cov-report=term-missing
 - Базовый low-level parser: `import_full_backup_from_json(...)`
 - `import_backup(...)` оставлен только как deprecated compatibility wrapper
 - JSON export и backup-copy paths записываются atomically через temporary file + `fsync` + `os.replace`
+- `backup.export_to_json(...)` теперь поднимает `BackupExportError`, чтобы bootstrap/UI различали export-failure и другие startup-проблемы
+- При ошибке сохранения JSON repository пишет `.error` snapshot с несохранённым payload и поднимает `RepositorySaveError`
+- Битый или пустой JSON runtime-файл карантинится как `.corrupt_*` и поднимает `RepositoryDataCorruptionError`
 - `requirements-pdf.txt` нужен только для PDF-экспорта, не для базового runtime
 
 ### Migration
@@ -174,6 +195,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - Скрипт переносит JSON payload в SQLite в одной явной транзакции
 - Pre-schema compatibility поддерживает старые SQLite БД, где таблица `records` ещё без `related_debt_id`
 - Migration и bootstrap должны идти в паре с актуальным `db/schema.sql`
+- На OneDrive-путях bootstrap дополнительно учитывает sync/coherence риски, выполняет `PRAGMA quick_check` и для больших БД может форсировать synchronous export вместо фонового
 
 ## 🧭 Ссылка на подробную архитектуру
 
