@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+import typing
 from datetime import date as dt_date
 from pathlib import Path
 
@@ -25,19 +26,19 @@ class _LockedCursor:
         self._released = True
         self._lock.release()
 
-    def fetchone(self):
+    def fetchone(self) -> tuple | None:
         try:
             return self._cursor.fetchone()
         finally:
             self._release()
 
-    def fetchall(self):
+    def fetchall(self) -> list:
         try:
             return self._cursor.fetchall()
         finally:
             self._release()
 
-    def fetchmany(self, size: int | None = None):
+    def fetchmany(self, size: int | None = None) -> list:
         rows = self._cursor.fetchmany() if size is None else self._cursor.fetchmany(size)
         if not rows:
             self._release()
@@ -49,20 +50,20 @@ class _LockedCursor:
         finally:
             self._release()
 
-    def __iter__(self):
+    def __iter__(self) -> typing.Iterator:
         try:
             yield from self._cursor
         finally:
             self._release()
 
-    def __next__(self):
+    def __next__(self) -> typing.Any:
         try:
             return next(self._cursor)
         except StopIteration:
             self._release()
             raise
 
-    def __getattr__(self, name: str):
+    def __getattr__(self, name: str) -> typing.Any:
         return getattr(self._cursor, name)
 
     def __del__(self) -> None:
@@ -89,7 +90,7 @@ class _SynchronizedConnection:
         finally:
             self._lock.release()
 
-    def _execute_locked(self, method_name: str, *args):
+    def _execute_locked(self, method_name: str, *args) -> sqlite3.Cursor | _LockedCursor:
         self._lock.acquire()
         try:
             cursor = getattr(self._conn, method_name)(*args)
@@ -263,10 +264,10 @@ class SQLiteStorage(Storage):
                 return to_rate_float(rate_text)
         return to_rate_float(row["rate_at_operation"] or 1.0)
 
-    def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
+    def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor | _LockedCursor:
         return self._conn.execute(sql, params)
 
-    def query_one(self, sql: str, params: tuple = ()):
+    def query_one(self, sql: str, params: tuple = ()) -> tuple | None:
         return self._conn.execute(sql, params).fetchone()
 
     def query_all(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:

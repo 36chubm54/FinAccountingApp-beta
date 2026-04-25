@@ -19,12 +19,12 @@ def run_import_transaction(repository: RecordRepository, operation, logger: logg
     sqlite_conn = getattr(repository, "_conn", None)
     raw_sqlite_conn = getattr(sqlite_conn, "_conn", sqlite_conn)
     sqlite_snapshot: sqlite3.Connection | None = None
-    if isinstance(raw_sqlite_conn, sqlite3.Connection):
+    if isinstance(raw_sqlite_conn, sqlite3.Connection) and sqlite_conn is not None:
         sqlite_snapshot = sqlite3.connect(":memory:")
         sqlite_conn.backup(sqlite_snapshot)
         try:
             return operation()
-        except (RuntimeError, ValueError, TypeError, OSError, sqlite3.Error) as operation_error:
+        except Exception as operation_error:
             # Catch-all is intentional here: any failed import operation must trigger rollback.
             logger.exception("IMPORT_TXN_SQLITE_OP_FAILED error=%s", operation_error)
             try:
@@ -42,7 +42,8 @@ def run_import_transaction(repository: RecordRepository, operation, logger: logg
                 ) from rollback_error
             raise
         finally:
-            sqlite_snapshot.close()
+            if sqlite_snapshot is not None:
+                sqlite_snapshot.close()
 
     wallets_snapshot = repository.load_wallets()
     records_snapshot = repository.load_all()
@@ -64,7 +65,7 @@ def run_import_transaction(repository: RecordRepository, operation, logger: logg
             debt_payments_snapshot = None
     try:
         return operation()
-    except (RuntimeError, ValueError, TypeError, OSError, sqlite3.Error) as operation_error:
+    except Exception as operation_error:
         # Catch-all is intentional here: snapshot rollback is required for any import failure.
         logger.exception("IMPORT_TXN_REPO_OP_FAILED error=%s", operation_error)
         try:
@@ -142,6 +143,8 @@ def normalize_operation_ids_for_import(repository: RecordRepository) -> None:
         generic_payment_candidates: dict[tuple[str, int, str, str], deque[int]] = defaultdict(deque)
         loose_payment_candidates: dict[tuple[str, int, str], deque[int]] = defaultdict(deque)
         for record in records:
+            if isinstance(record, MandatoryExpenseRecord):
+                continue
             related_debt_id = getattr(record, "related_debt_id", None)
             record_type = "expense" if isinstance(record, ExpenseRecord) else "income"
             amount_minor = to_minor_units(float(record.amount_kzt or 0.0))

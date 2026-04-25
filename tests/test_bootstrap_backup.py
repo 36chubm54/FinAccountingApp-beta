@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
 
+import bootstrap
 from backup import create_backup, export_to_json
 from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
 from domain.records import IncomeRecord, MandatoryExpenseRecord
@@ -191,6 +194,34 @@ def test_export_to_json_can_skip_autofreeze_for_background_export(tmp_path) -> N
 
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["distribution_snapshots"] == []
+
+
+def test_export_in_background_logs_unexpected_backup_copy_failure(monkeypatch, caplog) -> None:
+    started: dict[str, Any] = {}
+
+    class InlineThread:
+        def __init__(self, target, daemon):
+            started["target"] = target
+            started["daemon"] = daemon
+
+        def start(self):
+            started["started"] = True
+            started["target"]()
+
+    monkeypatch.setattr(bootstrap, "export_to_json", lambda *args, **kwargs: None)
+
+    def _raise_os_error(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(bootstrap, "create_backup", _raise_os_error)
+    monkeypatch.setattr(threading, "Thread", InlineThread)
+
+    with caplog.at_level("ERROR"):
+        bootstrap._export_in_background()
+
+    assert started["daemon"] is True
+    assert started["started"] is True
+    assert "Background JSON export failed" in caplog.text
 
 
 def test_export_to_json_uses_consistent_sqlite_snapshot(tmp_path, monkeypatch) -> None:

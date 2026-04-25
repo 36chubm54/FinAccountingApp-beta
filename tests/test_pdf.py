@@ -1,6 +1,6 @@
+import logging
 import os
 import tempfile
-import logging
 from datetime import date as dt_date
 
 import domain.reports as reports_module

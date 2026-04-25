@@ -11,7 +11,7 @@ from domain.asset import Asset, AssetCategory, AssetSnapshot
 from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
-from domain.records import ExpenseRecord, IncomeRecord
+from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
 from domain.transfers import Transfer
 from domain.wallets import Wallet
 from gui.controller_import_support import normalize_operation_ids_for_import, run_import_transaction
@@ -2161,6 +2161,61 @@ def test_normalize_operation_ids_for_import_restores_record_id_without_link_and_
     assert kwargs["debt_payments"][0].record_id == 1
 
 
+def test_normalize_operation_ids_for_import_excludes_mandatory_records_from_loan_relinking() -> (
+    None
+):
+    repository = Mock()
+    mandatory_record = MandatoryExpenseRecord(
+        id=10,
+        wallet_id=1,
+        date="2026-03-01",
+        amount_original=5.0,
+        currency="KZT",
+        rate_at_operation=1.0,
+        amount_kzt=5.0,
+        category="Loan payment",
+        description="Monthly charge",
+        period="monthly",
+        auto_pay=True,
+    )
+    repository.load_all.return_value = [mandatory_record]
+    repository.load_transfers.return_value = []
+    repository.load_wallets.return_value = [
+        Wallet(id=1, name="Main", currency="KZT", initial_balance=0.0, system=True)
+    ]
+    repository.load_mandatory_expenses.return_value = [mandatory_record]
+    repository.load_debts.return_value = [
+        Debt(
+            id=1,
+            contact_name="Alex",
+            kind=DebtKind.LOAN,
+            total_amount_minor=1000,
+            remaining_amount_minor=500,
+            currency="KZT",
+            interest_rate=0.0,
+            status=DebtStatus.OPEN,
+            created_at="2026-03-01",
+        )
+    ]
+    repository.load_debt_payments.return_value = [
+        DebtPayment(
+            id=1,
+            debt_id=1,
+            record_id=None,
+            operation_type=DebtOperationType.LOAN_COLLECT,
+            principal_paid_minor=500,
+            is_write_off=False,
+            payment_date="2026-03-01",
+        )
+    ]
+
+    normalize_operation_ids_for_import(repository)
+
+    kwargs = repository.replace_all_data.call_args.kwargs
+    assert kwargs["debt_payments"][0].record_id is None
+    assert kwargs["records"][0].related_debt_id is None
+
+
 def test_run_import_transaction_restores_assets_on_failure(tmp_path: Path) -> None:
     repo, controller = _make_sqlite_controller(tmp_path, "import_rollback_assets.db")
     try:
@@ -2322,6 +2377,72 @@ def test_run_import_transaction_restores_debts_for_json_repository(tmp_path: Pat
     assert [
         (payment.id, payment.debt_id, payment.principal_paid_minor) for payment in debt_payments
     ] == [(1, 1, 300)]
+
+
+def test_run_import_transaction_rolls_back_on_key_error_for_json_repository(tmp_path: Path) -> None:
+    repo = JsonFileRecordRepository(str(tmp_path / "import_rollback_keyerror.json"))
+    repo.replace_all_data(
+        wallets=[
+            Wallet(
+                id=1,
+                name="Main",
+                currency="KZT",
+                initial_balance=0.0,
+                system=True,
+                allow_negative=False,
+                is_active=True,
+            )
+        ],
+        records=[],
+        mandatory_expenses=[],
+        transfers=[],
+        debts=[
+            Debt(
+                id=1,
+                contact_name="Alex",
+                kind=DebtKind.DEBT,
+                total_amount_minor=1000,
+                remaining_amount_minor=700,
+                currency="KZT",
+                interest_rate=0.0,
+                status=DebtStatus.OPEN,
+                created_at="2026-04-01",
+            )
+        ],
+        debt_payments=[],
+    )
+
+    with pytest.raises(KeyError, match="boom"):
+        run_import_transaction(
+            repo,
+            lambda: (
+                repo.replace_all_data(
+                    wallets=[
+                        Wallet(
+                            id=2,
+                            name="Changed",
+                            currency="KZT",
+                            initial_balance=0.0,
+                            system=True,
+                            allow_negative=False,
+                            is_active=True,
+                        )
+                    ],
+                    records=[],
+                    mandatory_expenses=[],
+                    transfers=[],
+                    debts=[],
+                    debt_payments=[],
+                ),
+                (_ for _ in ()).throw(KeyError("boom")),
+            ),
+            logging.getLogger(__name__),
+        )
+
+    debts = repo.load_debts()
+    wallets = repo.load_wallets()
+    assert [(wallet.id, wallet.name) for wallet in wallets] == [(1, "Main")]
+    assert [(debt.id, debt.contact_name) for debt in debts] == [(1, "Alex")]
 
 
 def test_run_import_transaction_raises_when_json_rollback_fails() -> None:

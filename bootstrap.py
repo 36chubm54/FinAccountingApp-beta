@@ -4,7 +4,7 @@ import logging
 import threading
 from pathlib import Path
 
-from backup import BackupExportError, create_backup, export_to_json
+from backup import create_backup, export_to_json
 from config import JSON_BACKUP_KEEP_LAST, JSON_PATH, LAZY_EXPORT_SIZE_THRESHOLD, SQLITE_PATH
 from infrastructure.repositories import RecordRepository
 from infrastructure.sqlite_repository import SQLiteRecordRepository
@@ -199,7 +199,7 @@ def _export_in_background() -> None:
             )
             create_backup(JSON_PATH, keep_last=JSON_BACKUP_KEEP_LAST)
             logging.info("[bootstrap] Background JSON export completed")
-        except BackupExportError:
+        except Exception:
             logging.exception("[bootstrap] Background JSON export failed")
 
     thread = threading.Thread(target=_export, daemon=True)
