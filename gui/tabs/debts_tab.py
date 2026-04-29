@@ -20,6 +20,17 @@ from gui.ui_theme import get_palette
 
 logger = logging.getLogger(__name__)
 
+_CONTROL_MASK = 0x0004
+_SHIFT_MASK = 0x0001
+_LOCAL_CTRL_ALIASES: dict[str, tuple[str, ...]] = {
+    "p": ("p", "z", "cyrillic_ze", "з"),
+    "w": ("w", "ts", "cyrillic_tse", "ц"),
+}
+_LOCAL_CTRL_KEYCODES: dict[str, int] = {
+    "p": 80,
+    "w": 87,
+}
+
 
 class DebtsTabContext(Protocol):
     controller: Any
@@ -45,6 +56,10 @@ class DebtsTabBindings:
     debt_tree: ttk.Treeview
     history_tree: ttk.Treeview
     refresh: Callable[[], None]
+    add_debt: Callable[[], None]
+    pay_debt: Callable[[], None]
+    write_off_debt: Callable[[], None]
+    delete_debt: Callable[[], None]
 
 
 def _segment_widths(*, total: int, bar_w: int, paid: int, forgiven: int) -> tuple[int, int, int]:
@@ -170,6 +185,73 @@ def build_debts_tab(
     *,
     context: DebtsTabContext,
 ) -> DebtsTabBindings:
+    def _bind_control_shortcuts(widget: tk.Misc, handlers: dict[str, Callable[[], None]]) -> None:
+        def _dispatch(event: tk.Event) -> str | None:
+            state = int(getattr(event, "state", 0))
+            if not state & _CONTROL_MASK or state & _SHIFT_MASK:
+                return None
+            keysym = str(getattr(event, "keysym", "") or "").strip().lower()
+            char = str(getattr(event, "char", "") or "").strip().lower()
+            keycode = getattr(event, "keycode", None)
+            for letter, action in handlers.items():
+                aliases = _LOCAL_CTRL_ALIASES.get(letter, (letter,))
+                if (
+                    keysym in aliases
+                    or char in aliases
+                    or keycode == _LOCAL_CTRL_KEYCODES.get(letter)
+                ):
+                    action()
+                    return "break"
+            return None
+
+        widget.bind("<Control-KeyPress>", _dispatch, add="+")
+
+    def _bind_focus_navigation(widgets: list[tk.Misc]) -> None:
+        def _focus_relative(index: int) -> str:
+            widgets[index % len(widgets)].focus_set()
+            return "break"
+
+        for index, widget in enumerate(widgets):
+            widget.bind("<Up>", lambda _event, i=index - 1: _focus_relative(i), add="+")
+            widget.bind("<Down>", lambda _event, i=index + 1: _focus_relative(i), add="+")
+            if isinstance(widget, ttk.Button):
+                widget.bind("<Left>", lambda _event, i=index - 1: _focus_relative(i), add="+")
+                widget.bind("<Right>", lambda _event, i=index + 1: _focus_relative(i), add="+")
+                widget.bind(
+                    "<Return>", lambda _event: (_event.widget.invoke(), "break")[1], add="+"
+                )
+                widget.bind(
+                    "<KP_Enter>",
+                    lambda _event: (_event.widget.invoke(), "break")[1],
+                    add="+",
+                )
+            else:
+                widget.bind("<Return>", lambda _event: "break", add="+")
+                widget.bind("<KP_Enter>", lambda _event: "break", add="+")
+
+    def _bind_submit_navigation(widgets: list[tk.Misc], action: Callable[[], None]) -> None:
+        def _focus_relative(index: int) -> str:
+            widgets[index % len(widgets)].focus_set()
+            return "break"
+
+        for index, widget in enumerate(widgets):
+            widget.bind("<Up>", lambda _event, i=index - 1: _focus_relative(i), add="+")
+            widget.bind("<Down>", lambda _event, i=index + 1: _focus_relative(i), add="+")
+            if isinstance(widget, ttk.Button):
+                widget.bind("<Left>", lambda _event, i=index - 1: _focus_relative(i), add="+")
+                widget.bind("<Right>", lambda _event, i=index + 1: _focus_relative(i), add="+")
+                widget.bind(
+                    "<Return>", lambda _event: (_event.widget.invoke(), "break")[1], add="+"
+                )
+                widget.bind(
+                    "<KP_Enter>",
+                    lambda _event: (_event.widget.invoke(), "break")[1],
+                    add="+",
+                )
+            else:
+                widget.bind("<Return>", lambda _event: (action(), "break")[1], add="+")
+                widget.bind("<KP_Enter>", lambda _event: (action(), "break")[1], add="+")
+
     palette = get_palette()
     parent.grid_columnconfigure(0, weight=2, uniform="debts")
     parent.grid_columnconfigure(1, weight=5, uniform="debts")
@@ -196,9 +278,6 @@ def build_debts_tab(
     debt_label = tr("debts.kind.debt", "Долг")
     loan_label = tr("debts.kind.loan", "Заем")
     kind_var = tk.StringVar(value=debt_label)
-    # ttk.OptionMenu(create_frame, kind_var, debt_label, debt_label, loan_label).grid(
-    #     row=0, column=1, sticky="ew", padx=6, pady=4
-    # )
     kind_combo = ttk.Combobox(
         create_frame,
         textvariable=kind_var,
@@ -230,8 +309,6 @@ def build_debts_tab(
         row=4, column=0, sticky="w", padx=6, pady=4
     )
     wallet_var = tk.StringVar(value="")
-    # wallet_menu = ttk.OptionMenu(create_frame, wallet_var, "")
-    # wallet_menu.grid(row=4, column=1, sticky="ew", padx=6, pady=4)
     wallet_menu = ttk.Combobox(
         create_frame,
         textvariable=wallet_var,
@@ -270,8 +347,6 @@ def build_debts_tab(
         row=2, column=0, sticky="w", padx=6, pady=4
     )
     action_wallet_var = tk.StringVar(value="")
-    # action_wallet_menu = ttk.OptionMenu(actions_frame, action_wallet_var, "")
-    # action_wallet_menu.grid(row=2, column=1, sticky="ew", padx=6, pady=4)
     action_wallet_menu = ttk.Combobox(
         actions_frame,
         textvariable=action_wallet_var,
@@ -365,12 +440,6 @@ def build_debts_tab(
             (wallet_menu, wallet_var),
             (action_wallet_menu, action_wallet_var),
         ):
-            # menu = combo_widget["menu"]
-            # menu.delete(0, "end")
-            # for label in labels:
-            #     menu.add_command(
-            #         label=label, command=lambda value=label, target=var: target.set(value)
-            #     )
             combo_widget["values"] = labels
             if var.get() not in wallet_map:
                 var.set(labels[0])
@@ -479,6 +548,12 @@ def build_debts_tab(
                 tr("debts.error.wallet_required", "Кошелек обязателен."),
             )
             return
+        if not contact:
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr("debts.error.contact_required", "Контакт обязателен."),
+            )
+            return
 
         kind = DebtKind.DEBT if kind_var.get() == debt_label else DebtKind.LOAN
         try:
@@ -512,6 +587,15 @@ def build_debts_tab(
                 kind=kind.value,
             )
             messagebox.showerror(tr("debts.error.create_title", "Ошибка долга"), str(error))
+
+    create_widgets = [
+        kind_combo,
+        contact_entry,
+        amount_entry,
+        date_entry,
+        wallet_menu,
+        description_entry,
+    ]
 
     def _run_on_selected(
         self_name: str,
@@ -589,6 +673,12 @@ def build_debts_tab(
                 tr("debts.error.select_first", "Сначала выберите долг."),
             )
             return
+        if debt.remaining_amount_minor <= 0:
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr("debts.error.already_closed", "Долг уже закрыт."),
+            )
+            return
         wallet_id = wallet_map.get(action_wallet_var.get())
         if wallet_id is None and debt.kind is DebtKind.DEBT:
             messagebox.showerror(
@@ -635,28 +725,52 @@ def build_debts_tab(
             log_ui_error(logger, "UI_DEBTS_DELETE_FAILED", error, debt_id=debt.id)
             messagebox.showerror(tr("debts.error.delete_title", "Ошибка удаления"), str(error))
 
-    ttk.Button(
+    create_button = ttk.Button(
         create_frame,
         text=tr("debts.save", "Сохранить"),
         style="Primary.TButton",
         command=_create,
-    ).grid(row=6, column=0, columnspan=2, sticky="ew", padx=6, pady=8)
-    ttk.Button(actions_frame, text=tr("debts.pay", "Погасить"), command=_pay).grid(
-        row=3, column=0, sticky="ew", padx=6, pady=6
     )
-    ttk.Button(actions_frame, text=tr("debts.write_off", "Списать"), command=_write_off).grid(
-        row=3, column=1, sticky="ew", padx=6, pady=6
+    create_button.grid(row=6, column=0, columnspan=2, sticky="ew", padx=6, pady=8)
+    _bind_submit_navigation([*create_widgets, create_button], _create)
+    pay_button = ttk.Button(actions_frame, text=tr("debts.pay", "Погасить"), command=_pay)
+    pay_button.grid(row=3, column=0, sticky="ew", padx=6, pady=6)
+    write_off_button = ttk.Button(
+        actions_frame, text=tr("debts.write_off", "Списать"), command=_write_off
     )
-    ttk.Button(actions_frame, text=tr("debts.close", "Закрыть"), command=_close).grid(
-        row=4, column=0, sticky="ew", padx=6, pady=(0, 6)
+    write_off_button.grid(row=3, column=1, sticky="ew", padx=6, pady=6)
+    close_button = ttk.Button(actions_frame, text=tr("debts.close", "Закрыть"), command=_close)
+    close_button.grid(row=4, column=0, sticky="ew", padx=6, pady=(0, 6))
+    delete_button = ttk.Button(actions_frame, text=tr("debts.delete", "Удалить"), command=_delete)
+    delete_button.grid(row=4, column=1, sticky="ew", padx=6, pady=(0, 6))
+    refresh_button = ttk.Button(
+        actions_frame, text=tr("common.refresh", "Обновить"), command=_refresh
     )
-    ttk.Button(actions_frame, text=tr("debts.delete", "Удалить"), command=_delete).grid(
-        row=4, column=1, sticky="ew", padx=6, pady=(0, 6)
-    )
-    ttk.Button(actions_frame, text=tr("common.refresh", "Обновить"), command=_refresh).grid(
-        row=5, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 6)
-    )
+    refresh_button.grid(row=5, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 6))
+
+    action_navigation_widgets: list[tk.Misc] = [
+        action_amount_entry,
+        action_date_entry,
+        action_wallet_menu,
+        pay_button,
+        write_off_button,
+        close_button,
+        delete_button,
+        refresh_button,
+    ]
+    _bind_focus_navigation(action_navigation_widgets)
+
+    for widget in action_navigation_widgets:
+        _bind_control_shortcuts(widget, {"p": _pay, "w": _write_off})
 
     debt_tree.bind("<<TreeviewSelect>>", lambda _event: _refresh_history(), add="+")
     _refresh()
-    return DebtsTabBindings(debt_tree=debt_tree, history_tree=history_tree, refresh=_refresh)
+    return DebtsTabBindings(
+        debt_tree=debt_tree,
+        history_tree=history_tree,
+        refresh=_refresh,
+        add_debt=_create,
+        pay_debt=_pay,
+        write_off_debt=_write_off,
+        delete_debt=_delete,
+    )

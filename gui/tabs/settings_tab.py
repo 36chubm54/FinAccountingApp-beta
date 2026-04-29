@@ -514,8 +514,6 @@ def build_settings_tab(
 
         ttk.Label(add_panel, text=tr("common.wallet", "Кошелек:")).grid(row=2, column=0, sticky="w")
         mandatory_wallet_var = tk.StringVar(value="")
-        # mandatory_wallet_menu = ttk.OptionMenu(add_panel, mandatory_wallet_var, "")
-        # mandatory_wallet_menu.grid(row=2, column=1, sticky="ew")
         mandatory_wallet_menu = ttk.Combobox(
             add_panel,
             textvariable=mandatory_wallet_var,
@@ -528,12 +526,6 @@ def build_settings_tab(
             for wallet in context.controller.load_active_wallets()
         }
         wallet_labels = list(mandatory_wallet_map.keys()) or [""]
-        # wallet_menu = mandatory_wallet_menu["menu"]
-        # wallet_menu.delete(0, "end")
-        # for label in wallet_labels:
-        #     wallet_menu.add_command(
-        #         label=label, command=lambda value=label: mandatory_wallet_var.set(value)
-        #     )
         mandatory_wallet_menu["values"] = wallet_labels
         mandatory_wallet_var.set(wallet_labels[0])
 
@@ -555,20 +547,6 @@ def build_settings_tab(
 
         ttk.Label(add_panel, text=tr("common.period", "Период:")).grid(row=5, column=0, sticky="w")
         period_var = tk.StringVar(value="monthly")
-        # ttk.OptionMenu(
-        #     add_panel,
-        #     period_var,
-        #     "daily",
-        #     "daily",
-        #     "weekly",
-        #     "monthly",
-        #     "yearly",
-        # ).grid(
-        #     row=5,
-        #     column=1,
-        #     sticky="ew",
-        #     pady=2,
-        # )
         period_combo = ttk.Combobox(
             add_panel,
             textvariable=period_var,
@@ -711,8 +689,6 @@ def build_settings_tab(
             row=1, column=0, sticky="w"
         )
         edit_wallet_var = tk.StringVar(value="")
-        # edit_wallet_menu = ttk.OptionMenu(edit_panel, edit_wallet_var, "")
-        # edit_wallet_menu.grid(row=1, column=1, sticky="ew")
         edit_wallet_menu = ttk.Combobox(
             edit_panel,
             textvariable=edit_wallet_var,
@@ -725,12 +701,6 @@ def build_settings_tab(
             for wallet in context.controller.load_active_wallets()
         }
         edit_wallet_labels = list(edit_wallet_map.keys()) or [""]
-        # wallet_menu = edit_wallet_menu["menu"]
-        # wallet_menu.delete(0, "end")
-        # for label in edit_wallet_labels:
-        #     wallet_menu.add_command(
-        #         label=label, command=lambda value=label: edit_wallet_var.set(value)
-        #     )
         edit_wallet_menu["values"] = edit_wallet_labels
         current_wallet_label = next(
             (label for label, wid in edit_wallet_map.items() if int(wid) == int(expense.wallet_id)),
@@ -740,15 +710,6 @@ def build_settings_tab(
 
         ttk.Label(edit_panel, text=tr("common.period", "Период:")).grid(row=2, column=0, sticky="w")
         edit_period_var = tk.StringVar(value=str(expense.period or "monthly"))
-        # ttk.OptionMenu(
-        #     edit_panel,
-        #     edit_period_var,
-        #     str(expense.period or "monthly"),
-        #     "daily",
-        #     "weekly",
-        #     "monthly",
-        #     "yearly",
-        # ).grid(row=2, column=1, sticky="ew")
         edit_period_combo = ttk.Combobox(
             edit_panel,
             textvariable=edit_period_var,
@@ -888,8 +849,6 @@ def build_settings_tab(
             row=1, column=0, sticky="w"
         )
         mandatory_wallet_var = tk.StringVar(value="")
-        # mandatory_wallet_menu = ttk.OptionMenu(add_to_report_panel, mandatory_wallet_var, "")
-        # mandatory_wallet_menu.grid(row=1, column=1, sticky="ew")
         mandatory_wallet_menu = ttk.Combobox(
             add_to_report_panel,
             textvariable=mandatory_wallet_var,
@@ -903,12 +862,6 @@ def build_settings_tab(
             for wallet in context.controller.load_active_wallets()
         }
         wallet_labels = list(mandatory_wallet_map.keys()) or [""]
-        # wallet_menu = mandatory_wallet_menu["menu"]
-        # wallet_menu.delete(0, "end")
-        # for label in wallet_labels:
-        #     wallet_menu.add_command(
-        #         label=label, command=lambda value=label: mandatory_wallet_var.set(value)
-        #     )
         mandatory_wallet_menu["values"] = wallet_labels
         mandatory_wallet_var.set(wallet_labels[0])
 
@@ -1061,9 +1014,6 @@ def build_settings_tab(
     ttk.Button(actions, text=tr("common.refresh", "Обновить"), command=refresh_mandatory).grid(
         row=1, column=0, sticky="ew", padx=(0, 6)
     )
-    # ttk.OptionMenu(actions, format_var, "CSV", "CSV", "XLSX").grid(
-    #     row=1, column=1, sticky="ew", padx=6
-    # )
     ttk.Combobox(
         actions,
         textvariable=format_var,

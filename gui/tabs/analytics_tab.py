@@ -38,6 +38,7 @@ class AnalyticsTabBindings:
     category_canvas: tk.Canvas
     monthly_tree: ttk.Treeview
     timeline_canvas: tk.Canvas
+    refresh: Callable[[], None]
 
 
 def _draw_net_worth_line(canvas: tk.Canvas, data: list) -> None:
@@ -655,4 +656,5 @@ def build_analytics_tab(
         category_canvas=category_canvas,
         monthly_tree=monthly_tree,
         timeline_canvas=timeline_canvas,
+        refresh=_refresh_analytics,
     )

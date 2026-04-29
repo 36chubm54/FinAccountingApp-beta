@@ -7,6 +7,40 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [1.13.0] - 2026-04-29
+
+### Added
+
+- Added global hotkey system with comprehensive keyboard shortcuts for all major tabs (`gui/hotkeys.py`)
+- Added hotkey help dialog accessible via `F1` or `?` with detailed table of shortcuts
+- Added support for tab switching via `Alt+1`…`Alt+8`
+- Added shortcut guards that ignore keypresses when focus is inside input fields (`Entry`, `Combobox`, `Text`)
+- Added focus‑aware blocking for destructive shortcuts (`Del`, `Ctrl+Del`, `Ctrl+W`) to prevent accidental data loss
+- Added proper `Enter` key handling that allows normal text input in `Combobox` and `Text` widgets
+- Added hotkey deactivation when the operations inline editor is open
+- Added dedicated tests for hotkey registration and behavior (`tests/test_hotkeys.py`)
+
+### Changed
+
+- Updated `gui/tkinter_gui.py` to register hotkeys at startup and manage tab‑specific bindings
+- Enhanced `gui/tabs/operations_tab.py`, `budget_tab.py`, `debts_tab.py`, `reports_tab.py`, `analytics_tab.py` to expose action methods for hotkey handlers
+- Improved focus detection logic to avoid conflicts with inline editors and modal dialogs
+- Updated Russian and English locale files with new hotkey‑related UI strings
+
+### Tests
+
+- Added regression coverage for hotkey registration, focus guards, tab‑specific shortcuts, and the help dialog
+- Extended GUI tests to verify hotkeys do not interfere with text input
+
+### Docs
+
+- Updated `README.md` and `README_EN.md` with complete hotkey table and detailed behavior description
+- Synchronized version references across `pyproject.toml`, `README.md`, `README_EN.md`, and `version.py`
+
+No breaking changes.
+
+---
+
 ## [1.12.0] - 2026-04-25
 
 ### Added

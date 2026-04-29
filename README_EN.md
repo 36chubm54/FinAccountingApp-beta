@@ -2,7 +2,7 @@
 
 Graphical application for personal financial accounting with multicurrency support, import/export, budgets, debts, assets, and goals.
 
-The current `v1.12.0` release combines two main themes: runtime UI personalization and import/export resilience. The app now supports persisted runtime `theme` / `language` preferences, a live theme-aware shell and dialogs, section-aware `JSON` import, stronger debt-link preservation during restore flows, synchronized SQLite runtime access, and explicit warning paths for degraded report export.
+The current `v1.13.0` release adds a hotkey system that significantly improves the user experience by providing quick access to the application's core features.
 
 ## 🚀 Quick Start
 
@@ -138,6 +138,43 @@ Practical `v1.12.0` highlights:
 - New read-only metrics belong in `services/*_service.py`, not in GUI code
 - New import formats/variants should go through `ImportService` and `utils/import_core.py`
 - Schema changes should be updated together in `db/schema.sql`, bootstrap/migration flow, and regression tests
+
+## ⌨️ Hotkeys
+
+Global shortcuts are registered through `gui.hotkeys.register_hotkeys(app)` once per `FinancialApp` instance. Handlers inspect the active tab and current focus at keypress time, so they remain valid across lazy-built and rebuilt tabs.
+
+| Key | Scope | Action |
+| --- | --- | --- |
+| `Alt+1..8` | Global | Switch tab (1–Infographics, 2–Operations, 3–Reports, 4–Analytics, 5–Dashboard, 6–Budget, 7–Debts, 8–Distribution) |
+| `F5` | Global | Refresh data (calls refresh across all tabs) |
+| `F1` / `?` | Global | Open the hotkey help |
+| `Ctrl+I` | Operations | Set operation type to “Income” |
+| `Ctrl+E` | Operations | Set operation type to “Expense” |
+| `Home` | Operations | Jump to the first record in the list |
+| `End` | Operations | Jump to the last record in the list |
+| `Del` | Operations | Delete the selected record |
+| `Ctrl+Del` | Operations | Delete all records (requires confirmation) |
+| `F2` | Operations | Edit the selected record |
+| `Enter` | Operations | Save the operation (while in edit form) |
+| `Ctrl+G` | Reports | Generate a report |
+| `Ctrl+Shift+C` | Reports | Export report to CSV |
+| `Ctrl+Shift+X` | Reports | Export report to XLSX |
+| `Ctrl+Shift+P` | Reports | Export report to PDF |
+| `Ctrl+R` | Analytics | Refresh analytics (recalculate metrics) |
+| `Enter` | Budget | Add a new budget |
+| `Del` | Budget | Delete the selected budget |
+| `F2` | Budget | Edit the selected budget |
+| `Enter` | Debts | Add a new debt |
+| `Ctrl+P` | Debts | Pay the selected debt |
+| `Ctrl+W` | Debts | Write off the selected debt |
+| `Del` | Debts | Delete the selected debt |
+
+Hotkeys work only when focus is inside the main application window (not in dialogs) and the corresponding tab is active. To prevent conflicts with text input, the following safeguards are implemented:
+
+- Keys `Del`, `F2`, `Home`, `End`, `Ctrl+Del`, `Ctrl+R`, `Ctrl+P`, `Ctrl+W` are ignored if focus is inside any input field (`Entry`, `ttk.Entry`, `ttk.Combobox`, `tk.Text`).
+- The `Enter` key is not processed when focus is in a `ttk.Combobox` or `tk.Text`, or when the operations inline editor is active.
+- All hotkeys are blocked while the operations inline editor is open (record editing mode in the operations list).
+- Shortcuts tied to specific tabs (`Ctrl+I`, `Ctrl+E`, `Ctrl+G`, etc.) fire only when that tab is active.
 
 ## 🧪 Tests
 

@@ -26,10 +26,12 @@ class ReportsTabContext(Protocol):
     currency: Any
 
 
-def build_reports_tab(parent: tk.Frame | ttk.Frame, context: ReportsTabContext) -> None:
-    ReportsFrame(parent, context).grid(row=0, column=0, sticky="nsew")
+def build_reports_tab(parent: tk.Frame | ttk.Frame, context: ReportsTabContext) -> ReportsFrame:
+    frame = ReportsFrame(parent, context)
+    frame.grid(row=0, column=0, sticky="nsew")
     parent.grid_rowconfigure(0, weight=1)
     parent.grid_columnconfigure(0, weight=1)
+    return frame
 
 
 class ReportsFrame(ttk.Frame):
@@ -83,8 +85,6 @@ class ReportsFrame(ttk.Frame):
         self.category_combo.grid(row=0, column=5, sticky="ew", padx=(6, 12))
 
         ttk.Label(controls, text=tr("common.wallet", "Кошелек:")).grid(row=0, column=6, sticky="w")
-        # self.wallet_menu = ttk.OptionMenu(controls, self.wallet_var, self.wallet_var.get())
-        # self.wallet_menu.grid(row=0, column=7, sticky="ew", padx=(6, 0))
         self.wallet_menu = ttk.Combobox(
             controls,
             textvariable=self.wallet_var,
@@ -287,10 +287,6 @@ class ReportsFrame(ttk.Frame):
             self._wallet_label_to_id[f"[{wallet.id}] {wallet.name} ({wallet.currency})"] = wallet.id
         labels = list(self._wallet_label_to_id.keys())
         selected_label = selected if selected in self._wallet_label_to_id else all_wallets
-        # menu = self.wallet_menu["menu"]
-        # menu.delete(0, "end")
-        # for label in labels:
-        #     menu.add_command(label=label, command=tk._setit(self.wallet_var, label))
         self.wallet_menu["values"] = labels
         self.wallet_var.set(selected_label)
 

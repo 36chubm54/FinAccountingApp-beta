@@ -11,6 +11,7 @@ from app.services import CurrencyService
 from bootstrap import bootstrap_repository, run_post_startup_maintenance
 from domain.import_policy import ImportPolicy
 from gui.controllers import FinancialController
+from gui.hotkeys import _show_hotkey_help, register_hotkeys
 from gui.i18n import get_available_languages, get_language, set_language, tr
 from gui.logging_utils import log_ui_error
 from gui.record_colors import KIND_TO_FOREGROUND, foreground_for_kind
@@ -85,6 +86,8 @@ class FinancialApp(tk.Tk):
         self._budget_bindings: Any | None = None
         self._debt_bindings: Any | None = None
         self._distribution_bindings: Any | None = None
+        self._operations_bindings: Any | None = None
+        self._reports_tab: Any | None = None
 
         self.records_tree: ttk.Treeview | None = None
         self.refresh_operation_wallet_menu: Callable[[], None] | None = None
@@ -103,6 +106,8 @@ class FinancialApp(tk.Tk):
         self._theme_label_to_key: dict[str, str] = {}
         self._reload_tabs_pending = False
         self._online_toggle_running = False
+        self._hotkey_help_dialog: tk.Toplevel | None = None
+        self._hotkeys_registered = False
 
         self.pie_month_var: tk.StringVar | None = None
         self.pie_month_menu: ttk.Combobox | None = None
@@ -180,6 +185,7 @@ class FinancialApp(tk.Tk):
 
         self._ensure_tab_built("infographics")
         self._ensure_tab_built("operations")
+        register_hotkeys(self)
 
         self.progress = ttk.Progressbar(self, mode="indeterminate")
         self.progress.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
@@ -247,6 +253,8 @@ class FinancialApp(tk.Tk):
         self.refresh_wallets = None
         self.refresh_budgets = None
         self.refresh_all = None
+        self._operations_bindings = None
+        self._reports_tab = None
         self._analytics_bindings = None
         self._dashboard_bindings = None
         self._budget_bindings = None
@@ -495,6 +503,17 @@ class FinancialApp(tk.Tk):
             text=tr("app.status.version", "v{version}", version=__version__),
             style="StatusBarMuted.TLabel",
         ).grid(row=0, column=12, sticky="e", padx=(0, 10), pady=4)
+        ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
+            row=0, column=13, sticky="ns", pady=5, padx=(0, 4)
+        )
+        ttk.Button(
+            bar,
+            text=tr("app.status.hotkeys_help", "?"),
+            style="StatusBar.TButton",
+            command=lambda: _show_hotkey_help(self),
+            takefocus=False,
+            width=1,
+        ).grid(row=0, column=14, sticky="e", padx=(0, 6), pady=2)
         return bar
 
     def _on_online_toggle(self) -> None:
@@ -637,6 +656,9 @@ class FinancialApp(tk.Tk):
 
         def _display_category_label(raw_category: str, kind: str) -> str:
             category = str(raw_category or "")
+            if category:
+                category = category.replace("\r", " ").replace("\n", " ")
+                category = " ".join(category.split())
             if kind == "transfer" and category.lower().startswith("transfer #"):
                 suffix = category.split("#", 1)[1].strip() if "#" in category else ""
                 return tr("operations.transfer.category", "Перевод #{id}", id=suffix or "?")
@@ -719,13 +741,14 @@ class FinancialApp(tk.Tk):
             from gui.tabs.operations_tab import build_operations_tab
 
             operations = build_operations_tab(self.tab_operations, self, self._import_formats)
+            self._operations_bindings = operations
             self.records_tree = operations.records_tree
             self.refresh_operation_wallet_menu = operations.refresh_operation_wallet_menu
             self.refresh_transfer_wallet_menus = operations.refresh_transfer_wallet_menus
         elif tab_key == "reports":
             from gui.tabs.reports_tab import build_reports_tab
 
-            build_reports_tab(self.tab_reports, self)
+            self._reports_tab = build_reports_tab(self.tab_reports, self)
         elif tab_key == "analytics":
             from gui.tabs.analytics_tab import build_analytics_tab
 
@@ -882,10 +905,6 @@ class FinancialApp(tk.Tk):
             months.append(current_month)
         months = sorted(set(months))
 
-        # menu = self.chart_month_menu["menu"]
-        # menu.delete(0, "end")
-        # for month in months:
-        #     menu.add_command(label=month, command=lambda value=month: chart_month_var.set(value))
         self.chart_month_menu["values"] = months
         if not chart_month_var.get() or chart_month_var.get() not in months:
             chart_month_var.set(months[-1] if months else "")
@@ -900,18 +919,9 @@ class FinancialApp(tk.Tk):
             months.append(current_month)
         months = sorted(set(months))
 
-        # menu = self.pie_month_menu["menu"]
-        # menu.delete(0, "end")
-        # menu.add_command(
-        #     label=tr("infographics.all_time", "Все время"),
-        #     command=lambda value="all": pie_month_var.set(value),
-        # )
-        # for month in months:
-        #     menu.add_command(label=month, command=lambda value=month: pie_month_var.set(value))
         all_time_label = tr("infographics.all_time", "Все время")
         values = [all_time_label] + months
         self.pie_month_menu["values"] = values
-        # Установим значение "Все время" если текущее значение невалидно
 
         current_value = pie_month_var.get()
         if not current_value:
@@ -930,13 +940,6 @@ class FinancialApp(tk.Tk):
             years.append(current_year)
         years = sorted(set(years))
 
-        # menu = self.chart_year_menu["menu"]
-        # menu.delete(0, "end")
-        # for year in years:
-        #     menu.add_command(
-        #         label=str(year),
-        #         command=lambda value=year: chart_year_var.set(str(value)),
-        #     )
         self.chart_year_menu["values"] = [str(year) for year in years]
         if not chart_year_var.get() or int(chart_year_var.get()) not in years:
             chart_year_var.set(str(years[-1]) if years else "")
@@ -1018,6 +1021,7 @@ class FinancialApp(tk.Tk):
             )
             start += extent
 
+            cleaned_category = self._clean_category(category)
             legend_row = tk.Frame(self.expense_legend_frame, bg=palette.surface_elevated)
             legend_row.pack(fill="x", anchor="w", pady=1, padx=6)
             legend_row.grid_columnconfigure(1, weight=1)
@@ -1032,7 +1036,7 @@ class FinancialApp(tk.Tk):
             color_box.grid(row=0, column=0, sticky="nw", padx=(0, 6), pady=2)
             tk.Label(
                 legend_row,
-                text=f"{category}: {value:.2f} KZT",
+                text=f"{cleaned_category}: {value:.2f} KZT",
                 font=("Segoe UI", 8),
                 wraplength=max(96, self.expense_legend_canvas.winfo_width() - 42),
                 justify="left",
@@ -1051,6 +1055,14 @@ class FinancialApp(tk.Tk):
         other_total = sum(value for _, value in data[max_slices - 1 :])
         major.append((tr("common.other", "Other"), other_total))
         return major
+
+    def _clean_category(self, category: str) -> str:
+        """Удаляет переносы строк и лишние пробелы из категории."""
+        if not category:
+            return category
+        cleaned = category.replace("\r", " ").replace("\n", " ")
+        cleaned = " ".join(cleaned.split())
+        return cleaned
 
     def _filter_records_by_month(self, records: Any, month_value: str) -> list[Any]:
         try:

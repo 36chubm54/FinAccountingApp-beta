@@ -58,8 +58,6 @@ def build_infographics_tab(
     )
 
     pie_month_var = tk.StringVar()
-    # pie_month_menu = ttk.OptionMenu(pie_controls, pie_month_var, "")
-    # pie_month_menu.grid(row=0, column=1, sticky="w", padx=(6, 0))
     pie_month_menu = ttk.Combobox(
         pie_controls,
         textvariable=pie_month_var,
@@ -140,8 +138,6 @@ def build_infographics_tab(
     )
 
     chart_month_var = tk.StringVar()
-    # chart_month_menu = ttk.OptionMenu(daily_controls, chart_month_var, "")
-    # chart_month_menu.grid(row=0, column=1, sticky="w", padx=(6, 0))
     chart_month_menu = ttk.Combobox(
         daily_controls,
         textvariable=chart_month_var,
@@ -167,8 +163,6 @@ def build_infographics_tab(
     )
 
     chart_year_var = tk.StringVar()
-    # chart_year_menu = ttk.OptionMenu(monthly_controls, chart_year_var, "")
-    # chart_year_menu.grid(row=0, column=1, sticky="w", padx=(6, 0))
     chart_year_menu = ttk.Combobox(
         monthly_controls,
         textvariable=chart_year_var,

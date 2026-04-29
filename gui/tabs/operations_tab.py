@@ -66,6 +66,15 @@ class OperationsTabBindings:
     records_tree: ttk.Treeview
     refresh_operation_wallet_menu: Callable[[], None]
     refresh_transfer_wallet_menus: Callable[[], None]
+    set_type_income: Callable[[], None]
+    set_type_expense: Callable[[], None]
+    save_record: Callable[[], None]
+    select_first: Callable[[], None]
+    select_last: Callable[[], None]
+    delete_selected: Callable[[], None]
+    delete_all: Callable[[], None]
+    edit_selected: Callable[[], None]
+    inline_editor_active: Callable[[], bool]
 
 
 def build_operations_tab(
@@ -90,10 +99,6 @@ def build_operations_tab(
     ttk.Label(form_frame, text=tr("common.type", "Тип:")).grid(
         row=0, column=0, sticky="w", padx=6, pady=4
     )
-    # type_var = tk.StringVar(value=income_label)
-    # ttk.OptionMenu(form_frame, type_var, income_label, income_label, expense_label).grid(
-    #     row=0, column=1, sticky="ew", padx=6, pady=4
-    # )
     type_options = [income_label, expense_label]
     type_combo = ttk.Combobox(form_frame, values=type_options, state="readonly")
     type_combo.set(income_label)
@@ -136,8 +141,6 @@ def build_operations_tab(
         row=6, column=0, sticky="w", padx=6, pady=4
     )
     operation_wallet_var = tk.StringVar(value="")
-    # ttk.OptionMenu(form_frame, operation_wallet_var, "")
-    # operation_wallet_menu.grid(row=6, column=1, sticky="ew", padx=6, pady=4)
     operation_wallet_menu = ttk.Combobox(
         form_frame,
         textvariable=operation_wallet_var,
@@ -160,6 +163,14 @@ def build_operations_tab(
     def _on_type_change(*_args: object) -> None:
         _refresh_category_combo()
 
+    def _set_type_income() -> None:
+        type_combo.set(income_label)
+        _on_type_change()
+
+    def _set_type_expense() -> None:
+        type_combo.set(expense_label)
+        _on_type_change()
+
     def refresh_operation_wallet_menu() -> None:
         nonlocal operation_wallet_map
         wallets = context.controller.load_active_wallets()
@@ -167,12 +178,6 @@ def build_operations_tab(
             f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id for wallet in wallets
         }
         labels = list(operation_wallet_map.keys()) or [""]
-        # menu = operation_wallet_menu["menu"]
-        # menu.delete(0, "end")
-        # for label in labels:
-        #     menu.add_command(
-        #         label=label, command=lambda value=label: operation_wallet_var.set(value)
-        #     )
         operation_wallet_menu["values"] = labels
         if operation_wallet_var.get() not in operation_wallet_map:
             operation_wallet_var.set(labels[0])
@@ -290,12 +295,65 @@ def build_operations_tab(
                 )
             )
 
-    ttk.Button(
+    def _bind_focus_navigation(
+        widgets: list[tk.Misc],
+        *,
+        submit_action: Callable[[], None] | None = None,
+    ) -> None:
+        def _focus_relative(index: int) -> str:
+            widgets[index % len(widgets)].focus_set()
+            return "break"
+
+        for index, widget in enumerate(widgets):
+            widget.bind("<Up>", lambda _event, i=index - 1: _focus_relative(i), add="+")
+            widget.bind("<Down>", lambda _event, i=index + 1: _focus_relative(i), add="+")
+            if isinstance(widget, ttk.Button):
+                widget.bind("<Left>", lambda _event, i=index - 1: _focus_relative(i), add="+")
+                widget.bind("<Right>", lambda _event, i=index + 1: _focus_relative(i), add="+")
+                widget.bind(
+                    "<Return>", lambda _event: (_event.widget.invoke(), "break")[1], add="+"
+                )
+                widget.bind(
+                    "<KP_Enter>", lambda _event: (_event.widget.invoke(), "break")[1], add="+"
+                )
+            elif callable(submit_action):
+                widget.bind("<Return>", lambda _event: (submit_action(), "break")[1], add="+")
+                widget.bind("<KP_Enter>", lambda _event: (submit_action(), "break")[1], add="+")
+
+    creator_widgets = [
+        date_entry,
+        amount_entry,
+        currency_entry,
+        category_combo,
+        description_entry,
+        operation_wallet_menu,
+    ]
+    save_button = ttk.Button(
         form_frame,
         text=tr("common.save", "Сохранить"),
         style="Primary.TButton",
         command=save_record,
-    ).grid(row=7, column=0, columnspan=2, pady=8)
+    )
+    save_button.grid(row=7, column=0, columnspan=2, pady=8)
+    _bind_focus_navigation([*creator_widgets, save_button], submit_action=save_record)
+
+    def select_first_record() -> None:
+        children = records_tree.get_children()
+        if not children:
+            return
+        first = children[0]
+        records_tree.selection_set(first)
+        records_tree.focus(first)
+        records_tree.see(first)
+
+    def select_last_record() -> None:
+        children = records_tree.get_children()
+        if not children:
+            return
+        last = children[-1]
+        records_tree.selection_set(last)
+        records_tree.focus(last)
+        records_tree.see(last)
 
     def delete_selected() -> None:
         selection = records_tree.selection()
@@ -321,6 +379,7 @@ def build_operations_tab(
                 show_error(tr("operations.error.delete_failed", "Не удалось удалить запись."))
                 return
             refresh_operation_views(context)
+            _refresh_category_combo()
         except (DomainError, ValueError, TypeError, RuntimeError) as error:
             log_ui_error(
                 logger,
@@ -337,7 +396,16 @@ def build_operations_tab(
                 )
             )
 
-    edit_panel_state: dict[str, ttk.Widget | None] = {"panel": None}
+    edit_panel_state: dict[str, Any] = {"panel": None}
+
+    def inline_editor_active() -> bool:
+        panel = edit_panel_state.get("panel")
+        if panel is None:
+            return False
+        try:
+            return bool(panel.winfo_exists())
+        except (tk.TclError, RuntimeError, AttributeError):
+            return False
 
     def edit_selected_record_inline() -> None:
         selection = records_tree.selection()
@@ -402,8 +470,6 @@ def build_operations_tab(
             row=2, column=0, sticky="w"
         )
         wallet_edit_var = tk.StringVar(value="")
-        # wallet_edit_menu = ttk.OptionMenu(edit_panel, wallet_edit_var, "")
-        # wallet_edit_menu.grid(row=2, column=1, sticky="ew")
         wallet_edit_menu = ttk.Combobox(
             edit_panel,
             textvariable=wallet_edit_var,
@@ -448,13 +514,6 @@ def build_operations_tab(
             for wallet in context.controller.load_wallets()
         }
         wallet_labels = list(wallet_edit_map.keys()) or [""]
-        # wallet_menu = wallet_edit_menu["menu"]
-        # wallet_menu.delete(0, "end")
-        # for label in wallet_labels:
-        #     wallet_menu.add_command(
-        #         label=label,
-        #         command=lambda value=label: wallet_edit_var.set(value),
-        #     )
         wallet_edit_menu["values"] = wallet_labels
         current_wallet_label = next(
             (label for label, wid in wallet_edit_map.items() if int(wid) == int(record.wallet_id)),
@@ -491,6 +550,7 @@ def build_operations_tab(
                 )
                 show_info(tr("operations.updated", "Запись обновлена."))
                 refresh_operation_views(context)
+                _refresh_category_combo()
                 cancel_edit()
             except (DomainError, ValueError, TypeError, RuntimeError) as error:
                 log_ui_error(
@@ -517,15 +577,53 @@ def build_operations_tab(
         edit_buttons.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         edit_buttons.grid_columnconfigure(0, weight=1)
         edit_buttons.grid_columnconfigure(1, weight=1)
-        ttk.Button(
+        save_button = ttk.Button(
             edit_buttons,
             text=tr("common.save", "Сохранить"),
             style="Primary.TButton",
             command=save_edit,
-        ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        ttk.Button(edit_buttons, text=tr("common.cancel", "Отмена"), command=cancel_edit).grid(
-            row=0, column=1, sticky="ew", padx=(6, 0)
         )
+        save_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        cancel_button = ttk.Button(
+            edit_buttons, text=tr("common.cancel", "Отмена"), command=cancel_edit
+        )
+        cancel_button.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+
+        navigation_widgets: list[tk.Misc] = [
+            amount_entry,
+            date_edit_entry,
+            wallet_edit_menu,
+            category_edit_combo,
+            description_edit_entry,
+            save_button,
+            cancel_button,
+        ]
+
+        def _focus_relative(index: int) -> str:
+            navigation_widgets[index % len(navigation_widgets)].focus_set()
+            return "break"
+
+        def _bind_editor_navigation(widget: tk.Misc, index: int) -> None:
+            widget.bind("<Up>", lambda _event, i=index - 1: _focus_relative(i), add="+")
+            widget.bind("<Down>", lambda _event, i=index + 1: _focus_relative(i), add="+")
+            if isinstance(widget, ttk.Button):
+                widget.bind("<Left>", lambda _event, i=index - 1: _focus_relative(i), add="+")
+                widget.bind("<Right>", lambda _event, i=index + 1: _focus_relative(i), add="+")
+                widget.bind(
+                    "<Return>", lambda _event: (_event.widget.invoke(), "break")[1], add="+"
+                )
+                widget.bind(
+                    "<KP_Enter>", lambda _event: (_event.widget.invoke(), "break")[1], add="+"
+                )
+            else:
+                widget.bind("<Return>", lambda _event: (save_edit(), "break")[1], add="+")
+                widget.bind("<KP_Enter>", lambda _event: (save_edit(), "break")[1], add="+")
+            widget.bind("<Escape>", lambda _event: (cancel_edit(), "break")[1], add="+")
+
+        for index, widget in enumerate(navigation_widgets):
+            _bind_editor_navigation(widget, index)
+
+        amount_entry.focus_set()
 
     def delete_all() -> None:
         confirm = ask_confirm(
@@ -539,6 +637,7 @@ def build_operations_tab(
             context.controller.delete_all_records()
             show_info(tr("operations.deleted_all_done", "Все записи удалены."))
             refresh_operation_views(context)
+            _refresh_category_combo()
 
     wallet_id_map: dict[str, int] = {}
 
@@ -553,8 +652,6 @@ def build_operations_tab(
         row=0, column=0, sticky="w", padx=4, pady=2
     )
     transfer_from_var = tk.StringVar(value="")
-    # transfer_from_menu = ttk.OptionMenu(transfer_frame, transfer_from_var, "")
-    # transfer_from_menu.grid(row=0, column=1, sticky="ew", padx=4, pady=2)
     transfer_from_menu = ttk.Combobox(
         transfer_frame,
         textvariable=transfer_from_var,
@@ -567,8 +664,6 @@ def build_operations_tab(
         row=1, column=0, sticky="w", padx=4, pady=2
     )
     transfer_to_var = tk.StringVar(value="")
-    # transfer_to_menu = ttk.OptionMenu(transfer_frame, transfer_to_var, "")
-    # transfer_to_menu.grid(row=1, column=1, sticky="ew", padx=4, pady=2)
     transfer_to_menu = ttk.Combobox(
         transfer_frame,
         textvariable=transfer_to_var,
@@ -629,10 +724,6 @@ def build_operations_tab(
             (transfer_from_menu, transfer_from_var),
             (transfer_to_menu, transfer_to_var),
         ):
-            # menu = combo_widget["menu"]
-            # menu.delete(0, "end")
-            # for label in labels:
-            #     menu.add_command(label=label, command=lambda value=label, v=var: v.set(value))
             combo_widget["values"] = labels
             if not var.get() or var.get() not in wallet_id_map:
                 var.set(labels[0])
@@ -707,6 +798,7 @@ def build_operations_tab(
             transfer_commission_entry.delete(0, tk.END)
             transfer_commission_entry.insert(0, "0")
             refresh_operation_views(context)
+            _refresh_category_combo()
         except (DomainError, ValueError, TypeError, RuntimeError) as error:
             log_ui_error(
                 logger,
@@ -723,12 +815,26 @@ def build_operations_tab(
                 )
             )
 
-    ttk.Button(
+    transfer_creator_widgets = [
+        transfer_from_menu,
+        transfer_to_menu,
+        transfer_date_entry,
+        transfer_amount_entry,
+        transfer_currency_entry,
+        transfer_commission_entry,
+        transfer_commission_currency_entry,
+        transfer_description_entry,
+    ]
+    transfer_create_button = ttk.Button(
         transfer_frame,
         text=tr("operations.transfer.create", "Создать перевод"),
         command=create_transfer,
         style="Primary.TButton",
-    ).grid(row=8, column=0, columnspan=2, pady=6)
+    )
+    transfer_create_button.grid(row=8, column=0, columnspan=2, pady=6)
+    _bind_focus_navigation(
+        [*transfer_creator_widgets, transfer_create_button], submit_action=create_transfer
+    )
     refresh_transfer_wallet_menus()
 
     import_mode_keys = [
@@ -803,6 +909,7 @@ def build_operations_tab(
                 title=tr("common.done", "Готово"),
             )
             refresh_operation_views(context)
+            _refresh_category_combo()
 
         def on_error(exc: BaseException) -> None:
             if isinstance(exc, FileNotFoundError):
@@ -979,4 +1086,13 @@ def build_operations_tab(
         records_tree=records_tree,
         refresh_operation_wallet_menu=refresh_operation_wallet_menu,
         refresh_transfer_wallet_menus=refresh_transfer_wallet_menus,
+        set_type_income=_set_type_income,
+        set_type_expense=_set_type_expense,
+        save_record=save_record,
+        select_first=select_first_record,
+        select_last=select_last_record,
+        delete_selected=delete_selected,
+        delete_all=delete_all,
+        edit_selected=edit_selected_record_inline,
+        inline_editor_active=inline_editor_active,
     )

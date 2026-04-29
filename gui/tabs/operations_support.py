@@ -25,6 +25,36 @@ def refresh_operation_views(context) -> None:
     context._refresh_all()
 
 
+def _bind_dialog_button_navigation(buttons: list[ttk.Button]) -> None:
+    if len(buttons) < 2:
+        return
+
+    def _focus_button(index: int) -> str:
+        buttons[index % len(buttons)].focus_set()
+        return "break"
+
+    for index, button in enumerate(buttons):
+        button.bind("<Left>", lambda _event, i=index - 1: _focus_button(i), add="+")
+        button.bind("<Right>", lambda _event, i=index + 1: _focus_button(i), add="+")
+        button.bind("<Up>", lambda _event, i=index - 1: _focus_button(i), add="+")
+        button.bind("<Down>", lambda _event, i=index + 1: _focus_button(i), add="+")
+
+
+def _close_with_break(callback) -> str:
+    callback()
+    return "break"
+
+
+def _invoke_if_focused(widget: tk.Misc | None) -> bool:
+    if widget is None:
+        return False
+    focus_widget = widget.winfo_toplevel().focus_get()
+    if focus_widget is widget and hasattr(widget, "invoke"):
+        widget.invoke()  # type: ignore[attr-defined]
+        return True
+    return False
+
+
 def show_import_preview_dialog(
     parent: tk.Misc,
     *,
@@ -119,20 +149,40 @@ def show_import_preview_dialog(
         result["confirmed"] = True
         dialog.destroy()
 
+    action_buttons: list[ttk.Button] = []
     if preview.imported > 0:
-        ttk.Button(
+        import_button = ttk.Button(
             buttons,
             text=tr("operations.import", "Импорт"),
             style="Primary.TButton",
             command=proceed,
-        ).pack(side=tk.LEFT)
-    ttk.Button(buttons, text=tr("common.cancel", "Отмена"), command=close).pack(
-        side=tk.LEFT, padx=(0, 8)
-    )
+        )
+        import_button.pack(side=tk.LEFT)
+        action_buttons.append(import_button)
+    cancel_button = ttk.Button(buttons, text=tr("common.cancel", "Отмена"), command=close)
+    cancel_button.pack(side=tk.LEFT, padx=(0, 8))
+    action_buttons.append(cancel_button)
+    _bind_dialog_button_navigation(action_buttons)
+
+    def _handle_return() -> None:
+        if _invoke_if_focused(cancel_button):
+            return
+        if preview.imported > 0 and _invoke_if_focused(action_buttons[0]):
+            return
+        if preview.imported > 0:
+            proceed()
+            return
+        close()
 
     dialog.protocol("WM_DELETE_WINDOW", close)
+    dialog.bind("<Escape>", lambda _event: _close_with_break(close), add="+")
+    dialog.bind("<Return>", lambda _event: _close_with_break(_handle_return), add="+")
     center_dialog(dialog, parent)
     dialog.deiconify()
     dialog.grab_set()
+    if preview.imported > 0:
+        action_buttons[0].focus_set()
+    else:
+        cancel_button.focus_set()
     parent.wait_window(dialog)
     return bool(result["confirmed"])

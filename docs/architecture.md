@@ -233,6 +233,27 @@ This subsystem is responsible for:
 - live rebuilding of shell strings and theme-aware widgets/dialogs
 - keeping Tk styling, localized strings, and shell state synchronized during runtime preference changes
 
+### 4.9 Hotkeys
+
+Core modules:
+
+- `gui/hotkeys.py`
+- `gui/tkinter_gui.py`
+- `gui/tabs/operations_tab.py`
+- `gui/tabs/reports_tab.py`
+- `gui/tabs/analytics_tab.py`
+- `gui/tabs/budget_tab.py`
+- `gui/tabs/debts_tab.py`
+
+`gui.hotkeys` is the single registration point for application-wide shortcuts. `register_hotkeys(app)` binds the global sequences once per `FinancialApp` instance, while handlers resolve the active tab and the latest tab binding objects at event time.
+
+Important design rules:
+
+- hotkeys are bound at the shell level, not inside individual tabs
+- actions are executed only when the matching tab is active
+- destructive or input-conflicting shortcuts also check current focus and skip when focus is inside `Entry`, `Combobox`, or `Text`
+- the design is compatible with lazy tab build and `_reset_tab_bindings()` because handlers read current `app._*_bindings` references on each keypress
+
 ## 5. Data Model Overview
 
 Main SQLite tables:

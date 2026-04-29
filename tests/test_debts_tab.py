@@ -72,18 +72,18 @@ def _find_entry_by_order(parent: tk.Misc, index: int) -> tk.Entry | ttk.Entry:
     return entries[index]
 
 
-def test_debts_tab_create_and_pay_flow(tmp_path: Path) -> None:
+def test_debts_tab_local_shortcuts_are_bound_and_flow_works(tmp_path: Path) -> None:
     repo = _build_repo(tmp_path)
     controller = FinancialController(repo, CurrencyService())
     root = tk.Tk()
-    root.withdraw()
+    root.geometry("240x160+0+0")
     try:
         parent = tk.Frame(root)
         parent.pack()
         bindings = build_debts_tab(
             parent, context=cast(DebtsTabContext, type("Ctx", (), {"controller": controller})())
         )
-        root.update_idletasks()
+        root.update()
 
         contact_entry = _find_entry_by_order(parent, 0)
         amount_entry = _find_entry_by_order(parent, 1)
@@ -96,12 +96,23 @@ def test_debts_tab_create_and_pay_flow(tmp_path: Path) -> None:
         date_entry.delete(0, tk.END)
         date_entry.insert(0, "2026-03-01")
 
+        assert contact_entry.bind("<Return>")
+        assert contact_entry.bind("<Down>")
+        assert date_entry.bind("<Up>")
+        assert action_amount_entry.bind("<Return>")
+        assert action_amount_entry.bind("<Control-KeyPress>")
+        assert action_amount_entry.bind("<Down>")
+        assert action_date_entry.bind("<Up>")
+
         with (
             patch("gui.tabs.debts_tab.messagebox.showerror"),
             patch("gui.tabs.debts_tab.messagebox.askyesno", return_value=True),
         ):
             save_button = _find_button(parent, "Сохранить")
             assert save_button is not None
+            assert save_button.bind("<Return>")
+            assert save_button.bind("<Left>")
+            assert save_button.bind("<Right>")
             save_button.invoke()
             root.update_idletasks()
 
@@ -117,6 +128,14 @@ def test_debts_tab_create_and_pay_flow(tmp_path: Path) -> None:
             action_date_entry.insert(0, "2026-03-02")
             pay_button = _find_button(parent, "Погасить")
             assert pay_button is not None
+            assert pay_button.bind("<Return>")
+            assert pay_button.bind("<Left>")
+            assert pay_button.bind("<Right>")
+
+            action_amount_entry.event_generate("<Return>", when="tail")
+            root.update()
+            assert len(bindings.history_tree.get_children()) == 0
+
             pay_button.invoke()
             root.update_idletasks()
 
@@ -125,6 +144,20 @@ def test_debts_tab_create_and_pay_flow(tmp_path: Path) -> None:
             debts = controller.get_debts()
             assert len(debts) == 1
             assert debts[0].remaining_amount_minor == 20000
+
+            action_amount_entry.delete(0, tk.END)
+            action_amount_entry.insert(0, "50")
+            action_date_entry.delete(0, tk.END)
+            action_date_entry.insert(0, "2026-03-03")
+            bindings.write_off_debt()
+            root.update_idletasks()
+
+            history_rows = bindings.history_tree.get_children()
+            assert len(history_rows) == 2
+            latest_values = bindings.history_tree.item(history_rows[-1], "values")
+            assert latest_values[3] == "Да"
+            debts = controller.get_debts()
+            assert debts[0].remaining_amount_minor == 15000
     finally:
         repo.close()
         root.destroy()

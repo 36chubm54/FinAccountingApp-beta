@@ -11,6 +11,36 @@ from gui.i18n import tr
 from gui.ui_theme import bootstrap_ui, get_palette, get_theme
 
 
+def _bind_dialog_button_navigation(buttons: list[ttk.Button]) -> None:
+    if len(buttons) < 2:
+        return
+
+    def _focus_button(index: int) -> str:
+        buttons[index % len(buttons)].focus_set()
+        return "break"
+
+    for index, button in enumerate(buttons):
+        button.bind("<Left>", lambda _event, i=index - 1: _focus_button(i), add="+")
+        button.bind("<Right>", lambda _event, i=index + 1: _focus_button(i), add="+")
+        button.bind("<Up>", lambda _event, i=index - 1: _focus_button(i), add="+")
+        button.bind("<Down>", lambda _event, i=index + 1: _focus_button(i), add="+")
+
+
+def _close_with_break(callback: Callable[[], None]) -> str:
+    callback()
+    return "break"
+
+
+def _invoke_if_focused(widget: tk.Misc | None) -> bool:
+    if widget is None:
+        return False
+    focus_widget = widget.winfo_toplevel().focus_get()
+    if focus_widget is widget and hasattr(widget, "invoke"):
+        widget.invoke()  # type: ignore[attr-defined]
+        return True
+    return False
+
+
 def _play_system_sound(kind: str) -> None:
     """
     Plays a system sound appropriate to the message type.
@@ -228,9 +258,10 @@ def _message_dialog(
         command=_close,
     )
     ok_button.grid(row=0, column=0, sticky="s")
+    _bind_dialog_button_navigation([ok_button])
     dialog.protocol("WM_DELETE_WINDOW", _close)
-    dialog.bind("<Escape>", lambda _event: _close(), add="+")
-    dialog.bind("<Return>", lambda _event: _close(), add="+")
+    dialog.bind("<Escape>", lambda _event: _close_with_break(_close), add="+")
+    dialog.bind("<Return>", lambda _event: _close_with_break(ok_button.invoke), add="+")
 
     dialog.after_idle(_adjust_height)
     _run_modal(dialog, owner, focus_widget=ok_button, temp_root=temp_root)
@@ -328,10 +359,18 @@ def ask_confirm(
         command=lambda: _close(False),
     )
     no_button.grid(row=0, column=1)
+    _bind_dialog_button_navigation([yes_button, no_button])
+
+    def _handle_return() -> None:
+        if _invoke_if_focused(no_button):
+            return
+        if _invoke_if_focused(yes_button):
+            return
+        _close(True)
 
     dialog.protocol("WM_DELETE_WINDOW", lambda: _close(False))
-    dialog.bind("<Escape>", lambda _event: _close(False), add="+")
-    dialog.bind("<Return>", lambda _event: _close(True), add="+")
+    dialog.bind("<Escape>", lambda _event: _close_with_break(lambda: _close(False)), add="+")
+    dialog.bind("<Return>", lambda _event: _close_with_break(_handle_return), add="+")
 
     dialog.after_idle(_adjust_height)
     _run_modal(dialog, owner, focus_widget=yes_button, temp_root=temp_root)
@@ -427,10 +466,18 @@ def ask_text(
         command=_cancel,
     )
     cancel_button.grid(row=0, column=1)
+    _bind_dialog_button_navigation([ok_button, cancel_button])
+
+    def _handle_return() -> None:
+        if _invoke_if_focused(cancel_button):
+            return
+        if _invoke_if_focused(ok_button):
+            return
+        _submit()
 
     dialog.protocol("WM_DELETE_WINDOW", _cancel)
-    dialog.bind("<Escape>", lambda _event: _cancel(), add="+")
-    dialog.bind("<Return>", lambda _event: _submit(), add="+")
+    dialog.bind("<Escape>", lambda _event: _close_with_break(_cancel), add="+")
+    dialog.bind("<Return>", lambda _event: _close_with_break(_handle_return), add="+")
 
     dialog.after_idle(_adjust_height)
     _run_modal(dialog, owner, focus_widget=entry, temp_root=temp_root)

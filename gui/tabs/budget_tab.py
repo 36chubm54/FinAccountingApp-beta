@@ -42,6 +42,9 @@ class BudgetTabBindings:
     progress_canvas: tk.Canvas
     status_label: ttk.Label
     refresh: Callable[[], None]
+    add_budget: Callable[[], None]
+    edit_budget: Callable[[], None]
+    delete_budget: Callable[[], None]
 
 
 def _draw_progress_bars(canvas: tk.Canvas, results: list[BudgetResult]) -> None:
@@ -445,4 +448,7 @@ def build_budget_tab(
         progress_canvas=progress_canvas,
         status_label=status_label,
         refresh=_refresh,
+        add_budget=_add_budget,
+        edit_budget=_edit_limit,
+        delete_budget=_delete_budget,
     )

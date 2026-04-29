@@ -525,6 +525,20 @@ def bootstrap_ui(root: tk.Misc, theme_name: str | None = None) -> ttk.Style:
         indicatorforeground=[("selected", palette.surface_elevated)],
     )
     style.configure(
+        "StatusBar.TButton",
+        background=palette.surface_elevated,
+        foreground=palette.text_muted,
+        relief="flat",
+        padding=(4, 1),
+        font=("", 9),
+        borderwidth=0,
+    )
+    style.map(
+        "StatusBar.TButton",
+        background=[("active", palette.surface_alt)],
+        foreground=[("active", palette.text_primary)],
+    )
+    style.configure(
         "InlinePanel.TFrame",
         background=palette.background,
         borderwidth=1,
