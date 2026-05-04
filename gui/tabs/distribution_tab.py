@@ -101,7 +101,7 @@ def build_distribution_tab(
     structure_scroll.grid(row=0, column=1, sticky="ns")
     structure_tree.configure(yscrollcommand=structure_scroll.set)
 
-    validation_label = ttk.Label(left_frame, text="", justify=tk.LEFT, wraplength=320)
+    validation_label = ttk.Label(left_frame, text="", justify=tk.LEFT)
     validation_label.grid(row=2, column=0, sticky="w", padx=8, pady=(6, 2))
 
     buttons = ttk.Frame(left_frame)

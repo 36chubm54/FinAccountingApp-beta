@@ -19,6 +19,15 @@ from gui.i18n import tr
 from gui.logging_utils import log_ui_error
 from gui.tabs.settings_support import safe_destroy, show_audit_report_dialog
 from gui.ui_dialogs import messagebox_compat as messagebox
+from gui.ui_helpers import attach_treeview_scrollbars
+from gui.ui_theme import (
+    PAD_LG,
+    PAD_SM,
+    PAD_XL,
+    PAD_XS,
+    create_card_section,
+    enable_treeview_zebra,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,24 +62,25 @@ def build_settings_tab(
     context: SettingsTabContext,
     import_formats: dict[str, dict[str, str]],
 ) -> None:
-    pad_x = 8
-    pad_y = 6
+    pad_x = PAD_SM
+    pad_y = PAD_XS
 
     parent.grid_columnconfigure(0, weight=3, uniform="settings")
     parent.grid_columnconfigure(1, weight=5, uniform="settings")
     parent.grid_rowconfigure(0, weight=1)
 
     left_panel = ttk.Frame(parent)
-    left_panel.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+    left_panel.grid(row=0, column=0, sticky="nsew", padx=(PAD_XL, PAD_SM), pady=PAD_LG)
     left_panel.grid_columnconfigure(0, weight=1)
 
     right_panel = ttk.Frame(parent)
-    right_panel.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+    right_panel.grid(row=0, column=1, sticky="nsew", padx=(PAD_SM, PAD_XL), pady=PAD_LG)
     right_panel.grid_rowconfigure(0, weight=1)
     right_panel.grid_columnconfigure(0, weight=1)
 
-    wallets_frame = ttk.LabelFrame(left_panel, text=tr("settings.wallets", "Кошельки"))
-    wallets_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
+    wallets_card = create_card_section(left_panel, tr("settings.wallets", "Кошельки"))
+    wallets_card.grid(row=0, column=0, sticky="nsew", pady=(0, PAD_LG))
+    wallets_frame = wallets_card.winfo_children()[-1]
     wallets_frame.grid_columnconfigure(0, weight=1)
     wallets_frame.grid_rowconfigure(1, weight=1)
 
@@ -130,6 +140,7 @@ def build_settings_tab(
         selectmode="browse",
         height=8,
     )
+    enable_treeview_zebra(wallet_tree)
     for col, text, width, minwidth, stretch, anchor in (
         ("id", "ID", 40, 40, False, "e"),
         ("name", tr("settings.wallets.name_short", "Название"), 100, 100, True, "w"),
@@ -157,13 +168,8 @@ def build_settings_tab(
         wallet_tree.column(col, width=width, minwidth=minwidth, stretch=stretch, anchor=anchor)  # type: ignore
     wallet_tree.grid(row=0, column=0, sticky="nsew")
 
-    wallet_scroll = ttk.Scrollbar(list_frame, orient="vertical", command=wallet_tree.yview)
-    wallet_scroll.grid(row=0, column=1, sticky="ns")
-    wallet_xscroll = ttk.Scrollbar(list_frame, orient="horizontal", command=wallet_tree.xview)
-    wallet_xscroll.grid(row=1, column=0, sticky="ew")
-    wallet_tree.config(
-        yscrollcommand=wallet_scroll.set,
-        xscrollcommand=wallet_xscroll.set,
+    wallet_scroll, wallet_xscroll = attach_treeview_scrollbars(
+        list_frame, wallet_tree, row=0, column=0, horizontal=True
     )
 
     def _wallet_scroll_units(delta: int, *, multiplier: int = 12) -> int:
@@ -209,12 +215,13 @@ def build_settings_tab(
         return _scroll_wallet_horizontally(1, 3)
 
     for widget in (wallet_tree, wallet_scroll, wallet_xscroll):
-        widget.bind("<MouseWheel>", _on_wallet_mousewheel, add="+")
-        widget.bind("<Shift-MouseWheel>", _on_wallet_shift_mousewheel, add="+")
-        widget.bind("<Button-4>", _on_wallet_button4, add="+")
-        widget.bind("<Button-5>", _on_wallet_button5, add="+")
-        widget.bind("<Shift-Button-4>", _on_wallet_shift_button4, add="+")
-        widget.bind("<Shift-Button-5>", _on_wallet_shift_button5, add="+")
+        if widget is not None:
+            widget.bind("<MouseWheel>", _on_wallet_mousewheel, add="+")
+            widget.bind("<Shift-MouseWheel>", _on_wallet_shift_mousewheel, add="+")
+            widget.bind("<Button-4>", _on_wallet_button4, add="+")
+            widget.bind("<Button-5>", _on_wallet_button5, add="+")
+            widget.bind("<Shift-Button-4>", _on_wallet_shift_button4, add="+")
+            widget.bind("<Shift-Button-5>", _on_wallet_shift_button5, add="+")
 
     def refresh_wallets() -> None:
         for iid in wallet_tree.get_children():
@@ -371,8 +378,9 @@ def build_settings_tab(
 
     refresh_wallets()
 
-    mand_frame = ttk.LabelFrame(right_panel, text=tr("settings.mandatory", "Обязательные расходы"))
-    mand_frame.grid(row=0, column=0, sticky="nsew")
+    mand_card = create_card_section(right_panel, tr("settings.mandatory", "Обязательные расходы"))
+    mand_card.grid(row=0, column=0, sticky="nsew")
+    mand_frame = mand_card.winfo_children()[-1]
     mand_frame.grid_rowconfigure(0, weight=1)
     mand_frame.grid_columnconfigure(0, weight=1)
 
@@ -398,6 +406,7 @@ def build_settings_tab(
         ),
         height=10,
     )
+    enable_treeview_zebra(mand_tree)
     for col, text, width, minwidth, stretch, anchor in (
         ("index", "#", 40, 40, False, "e"),
         ("amount", tr("settings.mandatory.amount", "Сумма"), 90, 90, False, "e"),
@@ -413,13 +422,9 @@ def build_settings_tab(
         mand_tree.column(col, width=width, minwidth=minwidth, stretch=stretch, anchor=anchor)  # type: ignore[arg-type]
     mand_tree.grid(row=0, column=0, sticky="nsew")
 
-    mand_scroll = ttk.Scrollbar(mand_list_frame, orient="vertical", command=mand_tree.yview)
-    mand_scroll.grid(row=0, column=1, sticky="ns")
-    mand_tree.config(yscrollcommand=mand_scroll.set)
-
-    mand_xscroll = ttk.Scrollbar(mand_list_frame, orient="horizontal", command=mand_tree.xview)
-    mand_xscroll.grid(row=1, column=0, sticky="ew")
-    mand_tree.config(xscrollcommand=mand_xscroll.set)
+    mand_scroll, mand_xscroll = attach_treeview_scrollbars(
+        mand_list_frame, mand_tree, row=0, column=0, horizontal=True
+    )
 
     def _mandatory_scroll_units(delta: int, *, multiplier: int = 12) -> int:
         if delta == 0:
@@ -446,9 +451,10 @@ def build_settings_tab(
         return _scroll_mandatory_horizontally(1, 3)
 
     for widget in (mand_tree, mand_xscroll):
-        widget.bind("<Shift-MouseWheel>", _on_mandatory_shift_mousewheel, add="+")
-        widget.bind("<Shift-Button-4>", _on_mandatory_shift_button4, add="+")
-        widget.bind("<Shift-Button-5>", _on_mandatory_shift_button5, add="+")
+        if widget is not None:
+            widget.bind("<Shift-MouseWheel>", _on_mandatory_shift_mousewheel, add="+")
+            widget.bind("<Shift-Button-4>", _on_mandatory_shift_button4, add="+")
+            widget.bind("<Shift-Button-5>", _on_mandatory_shift_button5, add="+")
 
     def refresh_mandatory() -> None:
         for iid in mand_tree.get_children():
@@ -493,8 +499,8 @@ def build_settings_tab(
     def add_mandatory_inline() -> None:
         close_inline_panels()
 
-        add_panel = ttk.Frame(mand_frame, style="InlinePanel.TFrame", padding=(8, 6))
-        add_panel.grid(row=2, column=0, columnspan=2, pady=6, sticky="ew")
+        add_panel = ttk.Frame(mand_frame, style="InlinePanel.TFrame", padding=(PAD_SM, PAD_XS))
+        add_panel.grid(row=2, column=0, columnspan=2, pady=PAD_SM, sticky="ew")
         _configure_inline_panel_grid(add_panel)
         current_panel["add"] = add_panel
 
@@ -1155,8 +1161,9 @@ def build_settings_tab(
         row=1, column=3, sticky="ew", padx=6
     )
 
-    backup_frame = ttk.LabelFrame(left_panel, text=tr("settings.backup", "Резервная копия (JSON)"))
-    backup_frame.grid(row=2, column=0, sticky="ew")
+    backup_card = create_card_section(left_panel, tr("settings.backup", "Резервная копия (JSON)"))
+    backup_card.grid(row=2, column=0, sticky="ew")
+    backup_frame = backup_card.winfo_children()[-1]
     backup_frame.grid_columnconfigure(0, weight=1)
     backup_frame.grid_columnconfigure(1, weight=1)
 
@@ -1342,8 +1349,9 @@ def build_settings_tab(
         pady=pad_y,
     )
 
-    audit_frame = ttk.LabelFrame(left_panel, text=tr("settings.audit", "Финансовый аудит"))
-    audit_frame.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+    audit_card = create_card_section(left_panel, tr("settings.audit", "Финансовый аудит"))
+    audit_card.grid(row=3, column=0, sticky="ew", pady=(PAD_LG, 0))
+    audit_frame = audit_card.winfo_children()[-1]
     audit_frame.grid_columnconfigure(0, weight=1)
 
     def _on_run_audit() -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import tkinter as tk
-from tkinter import VERTICAL, filedialog, ttk
+from tkinter import filedialog, ttk
 from typing import Any, Protocol
 
 from gui.helpers import open_in_file_manager
@@ -14,7 +14,8 @@ from gui.logging_utils import log_ui_error
 from gui.record_colors import KIND_TO_FOREGROUND, foreground_for_kind
 from gui.tabs.reports_controller import ReportsController
 from gui.tooltip import Tooltip
-from gui.ui_helpers import show_error, show_info
+from gui.ui_helpers import attach_treeview_scrollbars, show_error, show_info
+from gui.ui_theme import PAD_LG, create_card_section, enable_treeview_zebra
 from services.report_service import ReportFilters, build_category_group_rows
 from utils.csv_utils import report_to_csv
 
@@ -175,8 +176,9 @@ class ReportsFrame(ttk.Frame):
         body.add(right, weight=2)
 
         # (B) Summary block
-        self.summary_frame = ttk.Labelframe(left, text=tr("common.summary", "Сводка"), padding=10)
-        self.summary_frame.grid(row=0, column=0, sticky="ew")
+        summary_card = create_card_section(left, tr("common.summary", "Сводка"))
+        summary_card.grid(row=0, column=0, sticky="ew")
+        self.summary_frame = summary_card.winfo_children()[-1]
         self.summary_frame.grid_columnconfigure(1, weight=1)
         self._summary_labels: dict[str, ttk.Label] = {}
         self._summary_values: dict[str, ttk.Label] = {}
@@ -204,10 +206,9 @@ class ReportsFrame(ttk.Frame):
             self._summary_values[label_key] = value_label
 
         # (C) Operations table
-        self.operations_container = ttk.Labelframe(
-            left, text=tr("tab.operations", "Операции"), padding=6
-        )
-        self.operations_container.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+        operations_card = create_card_section(left, tr("tab.operations", "Операции"))
+        operations_card.grid(row=1, column=0, sticky="nsew", pady=(PAD_LG, 0))
+        self.operations_container = operations_card.winfo_children()[-1]
         self.operations_container.grid_rowconfigure(0, weight=1)
         self.operations_container.grid_columnconfigure(0, weight=1)
 
@@ -217,6 +218,7 @@ class ReportsFrame(ttk.Frame):
             show="headings",
             selectmode="browse",
         )
+        enable_treeview_zebra(self.operations_tree)
         self.operations_tree.heading("date", text=tr("common.date", "Дата"))
         self.operations_tree.heading("type", text=tr("common.type_short", "Тип"))
         self.operations_tree.heading("category", text=tr("common.category", "Категория"))
@@ -226,11 +228,13 @@ class ReportsFrame(ttk.Frame):
         self.operations_tree.column("category", width=400, minwidth=400, stretch=False, anchor="w")
         self.operations_tree.column("amount", width=100, minwidth=100, anchor="e")
         self.operations_tree.grid(row=0, column=0, sticky="nsew")
-        op_scroll = ttk.Scrollbar(
-            self.operations_container, orient=VERTICAL, command=self.operations_tree.yview
+        attach_treeview_scrollbars(
+            self.operations_container,
+            self.operations_tree,
+            row=0,
+            column=0,
+            horizontal=False,
         )
-        op_scroll.grid(row=0, column=1, sticky="ns")
-        self.operations_tree.config(yscrollcommand=op_scroll.set)
         for kind, color in KIND_TO_FOREGROUND.items():
             try:
                 self.operations_tree.tag_configure(kind, foreground=color)
@@ -238,12 +242,11 @@ class ReportsFrame(ttk.Frame):
                 pass
 
         # (D) Monthly summary
-        monthly_frame = ttk.Labelframe(
-            right,
-            text=tr("reports.monthly_summary", "Помесячная сводка"),
-            padding=6,
+        monthly_card = create_card_section(
+            right, tr("reports.monthly_summary", "Помесячная сводка")
         )
-        monthly_frame.grid(row=0, column=0, sticky="nsew")
+        monthly_card.grid(row=0, column=0, sticky="nsew")
+        monthly_frame = monthly_card.winfo_children()[-1]
         monthly_frame.grid_rowconfigure(0, weight=1)
         monthly_frame.grid_columnconfigure(0, weight=1)
 
@@ -253,6 +256,7 @@ class ReportsFrame(ttk.Frame):
             show="headings",
             selectmode="none",
         )
+        enable_treeview_zebra(self.monthly_tree)
         self.monthly_tree.heading("month", text=tr("common.month", "Месяц"))
         self.monthly_tree.heading("income", text=tr("analytics.income", "Доходы"))
         self.monthly_tree.heading("expense", text=tr("analytics.expenses", "Расходы"))
@@ -260,11 +264,13 @@ class ReportsFrame(ttk.Frame):
         self.monthly_tree.column("income", width=90, minwidth=90, anchor="e")
         self.monthly_tree.column("expense", width=90, minwidth=90, anchor="e")
         self.monthly_tree.grid(row=0, column=0, sticky="nsew")
-        monthly_scroll = ttk.Scrollbar(
-            monthly_frame, orient=VERTICAL, command=self.monthly_tree.yview
+        attach_treeview_scrollbars(
+            monthly_frame,
+            self.monthly_tree,
+            row=0,
+            column=0,
+            horizontal=False,
         )
-        monthly_scroll.grid(row=0, column=1, sticky="ns")
-        self.monthly_tree.config(yscrollcommand=monthly_scroll.set)
 
         def _block_separator_resize(event: tk.Event) -> str | None:
             if isinstance(event.widget, ttk.Treeview):

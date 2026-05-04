@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from tkinter import ttk
 
 from gui.i18n import tr
-from gui.ui_theme import get_palette
+from gui.ui_theme import PAD_LG, PAD_SM, PAD_XL, create_card_section, get_palette
 
 
 @dataclass(slots=True)
@@ -42,10 +42,11 @@ def build_infographics_tab(
     parent.grid_rowconfigure(1, weight=1)
     parent.grid_rowconfigure(2, weight=1)
 
-    pie_frame = ttk.LabelFrame(
-        parent, text=tr("infographics.expenses_by_category", "Расходы по категориям")
+    pie_card = create_card_section(
+        parent, tr("infographics.expenses_by_category", "Расходы по категориям")
     )
-    pie_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+    pie_card.grid(row=1, column=0, sticky="nsew", padx=(PAD_XL, PAD_SM), pady=PAD_LG)
+    pie_frame = pie_card.winfo_children()[-1]
     pie_frame.grid_columnconfigure(0, weight=2)
     pie_frame.grid_columnconfigure(1, weight=1)
     pie_frame.grid_rowconfigure(1, weight=1)
@@ -67,17 +68,19 @@ def build_infographics_tab(
     pie_month_menu.grid(row=0, column=1, sticky="w", padx=(6, 0))
     pie_month_var.trace_add("write", on_chart_filter_change)
 
-    daily_frame = ttk.LabelFrame(
-        parent, text=tr("infographics.daily_cashflow", "Доходы и расходы по дням месяца")
+    daily_card = create_card_section(
+        parent, tr("infographics.daily_cashflow", "Доходы и расходы по дням месяца")
     )
-    daily_frame.grid(row=1, column=1, sticky="nsew", padx=10, pady=10)
+    daily_card.grid(row=1, column=1, sticky="nsew", padx=(PAD_SM, PAD_XL), pady=PAD_LG)
+    daily_frame = daily_card.winfo_children()[-1]
     daily_frame.grid_columnconfigure(0, weight=1)
     daily_frame.grid_rowconfigure(1, weight=1)
 
-    monthly_frame = ttk.LabelFrame(
-        parent, text=tr("infographics.monthly_cashflow", "Доходы и расходы по месяцам года")
+    monthly_card = create_card_section(
+        parent, tr("infographics.monthly_cashflow", "Доходы и расходы по месяцам года")
     )
-    monthly_frame.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
+    monthly_card.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=PAD_XL, pady=(0, PAD_LG))
+    monthly_frame = monthly_card.winfo_children()[-1]
     monthly_frame.grid_columnconfigure(0, weight=1)
     monthly_frame.grid_rowconfigure(1, weight=1)
 

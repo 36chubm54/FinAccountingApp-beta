@@ -16,7 +16,15 @@ from gui.i18n import tr
 from gui.logging_utils import log_ui_error
 from gui.ui_dialogs import messagebox_compat as messagebox
 from gui.ui_helpers import attach_treeview_scrollbars
-from gui.ui_theme import get_palette
+from gui.ui_theme import (
+    PAD_LG,
+    PAD_SM,
+    PAD_XL,
+    PAD_XS,
+    create_card_section,
+    enable_treeview_zebra,
+    get_palette,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -258,22 +266,23 @@ def build_debts_tab(
     parent.grid_rowconfigure(0, weight=1)
 
     left = ttk.Frame(parent)
-    left.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+    left.grid(row=0, column=0, sticky="nsew", padx=(PAD_XL, PAD_SM), pady=PAD_LG)
     left.grid_columnconfigure(0, weight=1)
     right = ttk.Frame(parent)
-    right.grid(row=0, column=1, sticky="nsew", padx=(0, 10), pady=10)
+    right.grid(row=0, column=1, sticky="nsew", padx=(PAD_SM, PAD_XL), pady=PAD_LG)
     right.grid_columnconfigure(0, weight=1)
     right.grid_rowconfigure(0, weight=1)
     right.grid_rowconfigure(1, weight=0)
     right.grid_rowconfigure(2, weight=0)
     right.grid_rowconfigure(3, weight=1)
 
-    create_frame = ttk.LabelFrame(left, text=tr("debts.create.title", "Новый долг / заем"))
-    create_frame.grid(row=0, column=0, sticky="ew")
+    create_card = create_card_section(left, tr("debts.create.title", "Новый долг / заем"))
+    create_card.grid(row=0, column=0, sticky="ew")
+    create_frame = create_card.winfo_children()[-1]
     create_frame.grid_columnconfigure(1, weight=1)
 
     ttk.Label(create_frame, text=tr("common.type", "Тип:")).grid(
-        row=0, column=0, sticky="w", padx=6, pady=4
+        row=0, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     debt_label = tr("debts.kind.debt", "Долг")
     loan_label = tr("debts.kind.loan", "Заем")
@@ -284,29 +293,29 @@ def build_debts_tab(
         values=[debt_label, loan_label],
         state="readonly",
     )
-    kind_combo.grid(row=0, column=1, sticky="ew", padx=6, pady=4)
+    kind_combo.grid(row=0, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     ttk.Label(create_frame, text=tr("debts.contact", "Контакт:")).grid(
-        row=1, column=0, sticky="w", padx=6, pady=4
+        row=1, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     contact_entry = ttk.Entry(create_frame)
-    contact_entry.grid(row=1, column=1, sticky="ew", padx=6, pady=4)
+    contact_entry.grid(row=1, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     ttk.Label(create_frame, text=tr("debts.amount", "Сумма (KZT):")).grid(
-        row=2, column=0, sticky="w", padx=6, pady=4
+        row=2, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     amount_entry = ttk.Entry(create_frame)
-    amount_entry.grid(row=2, column=1, sticky="ew", padx=6, pady=4)
+    amount_entry.grid(row=2, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     ttk.Label(create_frame, text=tr("common.date", "Дата:")).grid(
-        row=3, column=0, sticky="w", padx=6, pady=4
+        row=3, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     date_entry = ttk.Entry(create_frame)
-    date_entry.grid(row=3, column=1, sticky="ew", padx=6, pady=4)
+    date_entry.grid(row=3, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
     date_entry.insert(0, date.today().isoformat())
 
     ttk.Label(create_frame, text=tr("common.wallet", "Кошелек:")).grid(
-        row=4, column=0, sticky="w", padx=6, pady=4
+        row=4, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     wallet_var = tk.StringVar(value="")
     wallet_menu = ttk.Combobox(
@@ -315,36 +324,37 @@ def build_debts_tab(
         values=[],
         state="readonly",
     )
-    wallet_menu.grid(row=4, column=1, sticky="ew", padx=6, pady=4)
+    wallet_menu.grid(row=4, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
     wallet_map: dict[str, int] = {}
 
     ttk.Label(create_frame, text=tr("common.description", "Описание:")).grid(
-        row=5, column=0, sticky="w", padx=6, pady=4
+        row=5, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     description_entry = ttk.Entry(create_frame)
-    description_entry.grid(row=5, column=1, sticky="ew", padx=6, pady=4)
+    description_entry.grid(row=5, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
-    actions_frame = ttk.LabelFrame(
-        left, text=tr("debts.actions.title", "Действия по выбранному долгу")
+    actions_card = create_card_section(
+        left, tr("debts.actions.title", "Действия по выбранному долгу")
     )
-    actions_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+    actions_card.grid(row=1, column=0, sticky="ew", pady=(PAD_LG, 0))
+    actions_frame = actions_card.winfo_children()[-1]
     actions_frame.grid_columnconfigure(1, weight=1)
 
     ttk.Label(actions_frame, text=tr("debts.amount", "Сумма (KZT):")).grid(
-        row=0, column=0, sticky="w", padx=6, pady=4
+        row=0, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     action_amount_entry = ttk.Entry(actions_frame)
-    action_amount_entry.grid(row=0, column=1, sticky="ew", padx=6, pady=4)
+    action_amount_entry.grid(row=0, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     ttk.Label(actions_frame, text=tr("common.date", "Дата:")).grid(
-        row=1, column=0, sticky="w", padx=6, pady=4
+        row=1, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     action_date_entry = ttk.Entry(actions_frame)
-    action_date_entry.grid(row=1, column=1, sticky="ew", padx=6, pady=4)
+    action_date_entry.grid(row=1, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
     action_date_entry.insert(0, date.today().isoformat())
 
     ttk.Label(actions_frame, text=tr("common.wallet", "Кошелек:")).grid(
-        row=2, column=0, sticky="w", padx=6, pady=4
+        row=2, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     action_wallet_var = tk.StringVar(value="")
     action_wallet_menu = ttk.Combobox(
@@ -353,7 +363,7 @@ def build_debts_tab(
         values=[],
         state="readonly",
     )
-    action_wallet_menu.grid(row=2, column=1, sticky="ew", padx=6, pady=4)
+    action_wallet_menu.grid(row=2, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     debt_tree = ttk.Treeview(
         right,
@@ -361,6 +371,7 @@ def build_debts_tab(
         columns=("id", "contact", "kind", "total", "remaining", "status", "created"),
         height=10,
     )
+    enable_treeview_zebra(debt_tree)
     for col, label, width, anchor in (
         ("id", "#", 45, "e"),
         ("contact", tr("debts.contact_short", "Контакт"), 140, "w"),
@@ -382,7 +393,7 @@ def build_debts_tab(
         highlightthickness=0,
         highlightbackground=palette.border_soft,
     )
-    progress_canvas.grid(row=2, column=0, sticky="ew", pady=(8, 8))
+    progress_canvas.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 8))
 
     current_debt: Debt | None = None
     current_payments: list[DebtPayment] = []
@@ -396,8 +407,9 @@ def build_debts_tab(
 
     progress_canvas.bind("<Configure>", _redraw_progress_on_resize)
 
-    history_frame = ttk.LabelFrame(right, text=tr("common.history", "История"))
-    history_frame.grid(row=3, column=0, columnspan=2, sticky="nsew")
+    history_card = create_card_section(right, tr("common.history", "История"))
+    history_card.grid(row=3, column=0, columnspan=2, sticky="nsew")
+    history_frame = history_card.winfo_children()[-1]
     history_frame.grid_columnconfigure(0, weight=1)
     history_frame.grid_rowconfigure(0, weight=1)
 
@@ -407,6 +419,7 @@ def build_debts_tab(
         columns=("date", "operation", "amount", "write_off", "record"),
         height=8,
     )
+    enable_treeview_zebra(history_tree)
     for col, label, width, anchor in (
         ("date", tr("common.date", "Дата"), 95, "center"),
         ("operation", tr("common.operation", "Операция"), 100, "w"),
