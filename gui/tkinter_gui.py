@@ -1,4 +1,6 @@
+import ctypes
 import logging
+import os
 import tkinter as tk
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -17,7 +19,15 @@ from gui.logging_utils import log_ui_error
 from gui.record_colors import KIND_TO_FOREGROUND, foreground_for_kind
 from gui.ui_helpers import show_error, show_info
 from gui.ui_text import app_title, get_import_formats, get_tab_titles
-from gui.ui_theme import DEFAULT_THEME, bootstrap_ui, get_palette, get_theme, set_theme
+from gui.ui_theme import (
+    DEFAULT_THEME,
+    PAD_SM,
+    PAD_XL,
+    bootstrap_ui,
+    get_palette,
+    get_theme,
+    refresh_treeview_zebra,
+)
 from utils.charting import (
     aggregate_daily_cashflow,
     aggregate_expenses_by_category,
@@ -30,10 +40,58 @@ from version import __version__
 logger = logging.getLogger(__name__)
 
 
+def _enable_windows_dpi_awareness() -> None:
+    """Enable high-DPI awareness early so Tk and native file dialogs stay sharp."""
+    if os.name != "nt":
+        return
+    errors: list[str] = []
+
+    try:
+        user32 = ctypes.windll.user32
+    except Exception as exc:
+        logger.debug("DPI awareness skipped: user32 is unavailable: %s", exc)
+        return
+
+    try:
+        # Best quality on modern Windows: Per-Monitor v2.
+        if hasattr(user32, "SetProcessDpiAwarenessContext"):
+            per_monitor_v2 = ctypes.c_void_p(-4)
+            if user32.SetProcessDpiAwarenessContext(per_monitor_v2):
+                logger.debug("DPI awareness enabled via SetProcessDpiAwarenessContext(PMv2).")
+                return
+            errors.append("SetProcessDpiAwarenessContext returned 0")
+    except Exception as exc:
+        errors.append(f"SetProcessDpiAwarenessContext failed: {exc}")
+
+    try:
+        # Fallback for Windows 8.1+.
+        shcore = ctypes.windll.shcore
+        if hasattr(shcore, "SetProcessDpiAwareness"):
+            # 2 == PROCESS_PER_MONITOR_DPI_AWARE
+            shcore.SetProcessDpiAwareness(2)
+            logger.debug("DPI awareness enabled via SetProcessDpiAwareness(2).")
+            return
+        errors.append("SetProcessDpiAwareness is unavailable")
+    except Exception as exc:
+        errors.append(f"SetProcessDpiAwareness failed: {exc}")
+
+    try:
+        # Legacy fallback for older Windows versions.
+        if hasattr(user32, "SetProcessDPIAware"):
+            user32.SetProcessDPIAware()
+            logger.debug("DPI awareness enabled via SetProcessDPIAware().")
+            return
+        errors.append("SetProcessDPIAware is unavailable")
+    except Exception as exc:
+        errors.append(f"SetProcessDPIAware failed: {exc}")
+
+    if errors:
+        logger.warning("DPI awareness was not enabled. Details: %s", " | ".join(errors))
+
+
 class FinancialApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        bootstrap_ui(self)
 
         icons_dir = Path(__file__).resolve().parent / "assets" / "icons"
         ico_path = icons_dir / "app.ico"
@@ -127,6 +185,13 @@ class FinancialApp(tk.Tk):
         notebook = ttk.Notebook(self)
         notebook.grid(row=0, column=0, sticky="nsew")
         self._notebook = notebook
+        self._notebook_underline = tk.Canvas(
+            self,
+            height=3,
+            highlightthickness=0,
+            bd=0,
+            bg=get_palette().background,
+        )
 
         self.tab_infographics = ttk.Frame(notebook)
         self.tab_operations = ttk.Frame(notebook)
@@ -182,14 +247,17 @@ class FinancialApp(tk.Tk):
             str(self.tab_settings): "settings",
         }
         notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed, add="+")
+        notebook.bind("<Configure>", lambda _event: self._schedule_notebook_underline(), add="+")
+        self.bind("<Configure>", lambda _event: self._schedule_notebook_underline(), add="+")
 
         self._ensure_tab_built("infographics")
         self._ensure_tab_built("operations")
         register_hotkeys(self)
 
         self.progress = ttk.Progressbar(self, mode="indeterminate")
-        self.progress.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
+        self.progress.grid(row=1, column=0, sticky="ew", padx=PAD_XL, pady=(0, PAD_SM))
         self.progress.grid_remove()
+        self._schedule_notebook_underline()
 
         self._schedule_after_idle("deferred_startup", self._start_deferred_startup)
 
@@ -351,10 +419,68 @@ class FinancialApp(tk.Tk):
         selected_theme = self._theme_label_to_key.get(selected_label, DEFAULT_THEME)
         if selected_theme == get_theme():
             return
-        set_theme(selected_theme)
         bootstrap_ui(self, selected_theme)
+        self._schedule_notebook_underline()
         self.controller.save_theme_preference(selected_theme)
-        self._schedule_reload_strings(rebuild_tabs=True)
+        self._refresh_theme_surfaces()
+
+    def _schedule_notebook_underline(self) -> None:
+        self._schedule_after_idle("notebook_underline", self._render_notebook_underline)
+
+    def _render_notebook_underline(self) -> None:
+        if not hasattr(self, "_notebook") or not hasattr(self, "_notebook_underline"):
+            return
+        palette = get_palette()
+        self._notebook_underline.configure(bg=palette.background)
+        try:
+            current_index = self._notebook.index("current")
+            bbox_result = self._notebook.bbox(current_index)
+            if bbox_result is None:
+                self._notebook_underline.place_forget()
+                return
+            x, y, width, height = bbox_result
+        except (TclError, tk.TclError):
+            self._notebook_underline.place_forget()
+            return
+        if width <= 0 or height <= 0:
+            self._notebook_underline.place_forget()
+            return
+        line_y = max(height - 2, 1)
+        self._notebook_underline.place(in_=self._notebook, x=0, y=y + line_y, relwidth=1, height=3)
+        self._notebook_underline.delete("all")
+        start_x = x + PAD_SM
+        end_x = x + max(width - PAD_SM, PAD_SM)
+        self._notebook_underline.create_line(
+            start_x,
+            1,
+            end_x,
+            1,
+            fill=palette.tab_underline,
+            width=2,
+            capstyle=tk.ROUND,
+        )
+        self._notebook_underline.lift(self._notebook)  # type: ignore[arg-type]
+
+    def _refresh_theme_surfaces(self) -> None:
+        self._refresh_status_bar()
+        if self.records_tree is not None:
+            self._refresh_list()
+            refresh_treeview_zebra(self.records_tree)
+        if "infographics" in self._built_tabs:
+            self._refresh_charts()
+        analytics_refresh = getattr(self._analytics_bindings, "refresh", None)
+        if callable(analytics_refresh):
+            analytics_refresh()
+        dashboard_refresh = getattr(self._dashboard_bindings, "refresh", None)
+        if callable(dashboard_refresh):
+            dashboard_refresh()
+        if callable(self.refresh_budgets):
+            self.refresh_budgets()
+        debt_refresh = getattr(self._debt_bindings, "refresh", None)
+        if callable(debt_refresh):
+            debt_refresh()
+        if callable(self.refresh_all):
+            self.refresh_all()
 
     def _set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = busy
@@ -413,7 +539,7 @@ class FinancialApp(tk.Tk):
         self._schedule_after(poll_job_key, 100, _poll)
 
     def _build_status_bar(self) -> ttk.Frame:
-        bar = ttk.Frame(self, style="StatusBar.TFrame", padding=(0, 1))
+        bar = ttk.Frame(self, style="StatusBar.TFrame", padding=(PAD_SM, 3))
         bar.grid_columnconfigure(5, weight=1)
         self._online_var = tk.BooleanVar(value=False)
         online_check = ttk.Checkbutton(
@@ -423,9 +549,9 @@ class FinancialApp(tk.Tk):
             command=self._on_online_toggle,
             style="StatusBar.TCheckbutton",
         )
-        online_check.grid(row=0, column=0, sticky="w", padx=(8, 6), pady=4)
+        online_check.grid(row=0, column=0, sticky="w", padx=(PAD_SM, PAD_SM), pady=4)
         ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
-            row=0, column=1, sticky="ns", pady=5, padx=(0, 8)
+            row=0, column=1, sticky="ns", pady=5, padx=(0, PAD_SM)
         )
         self._currency_status_label = ttk.Label(
             bar,
@@ -433,9 +559,9 @@ class FinancialApp(tk.Tk):
             anchor="w",
             style="StatusBar.TLabel",
         )
-        self._currency_status_label.grid(row=0, column=2, sticky="w", padx=(0, 8), pady=4)
+        self._currency_status_label.grid(row=0, column=2, sticky="w", padx=(0, PAD_SM), pady=4)
         ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
-            row=0, column=3, sticky="ns", pady=5, padx=(0, 8)
+            row=0, column=3, sticky="ns", pady=5, padx=(0, PAD_SM)
         )
         self._price_status_label = ttk.Label(
             bar,
@@ -443,9 +569,9 @@ class FinancialApp(tk.Tk):
             anchor="w",
             style="StatusBar.TLabel",
         )
-        self._price_status_label.grid(row=0, column=4, sticky="w", padx=(0, 8), pady=4)
+        self._price_status_label.grid(row=0, column=4, sticky="w", padx=(0, PAD_SM), pady=4)
         ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
-            row=0, column=5, sticky="ns", pady=5, padx=(0, 8)
+            row=0, column=5, sticky="ns", pady=5, padx=(0, PAD_SM)
         )
         ttk.Label(
             bar,
@@ -465,10 +591,10 @@ class FinancialApp(tk.Tk):
             state="readonly",
             style="StatusBar.TCombobox",
         )
-        self._language_combo.grid(row=0, column=7, sticky="w", padx=(0, 8), pady=2)
+        self._language_combo.grid(row=0, column=7, sticky="w", padx=(0, PAD_SM), pady=2)
         self._language_combo.bind("<<ComboboxSelected>>", self._on_language_changed, add="+")
         ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
-            row=0, column=8, sticky="ns", pady=5, padx=(0, 8)
+            row=0, column=8, sticky="ns", pady=5, padx=(0, PAD_SM)
         )
         ttk.Label(
             bar,
@@ -493,16 +619,16 @@ class FinancialApp(tk.Tk):
             state="readonly",
             style="StatusBar.TCombobox",
         )
-        self._theme_combo.grid(row=0, column=10, sticky="w", padx=(0, 8), pady=2)
+        self._theme_combo.grid(row=0, column=10, sticky="w", padx=(0, PAD_SM), pady=2)
         self._theme_combo.bind("<<ComboboxSelected>>", self._on_theme_changed, add="+")
         ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
-            row=0, column=11, sticky="ns", pady=5, padx=(0, 8)
+            row=0, column=11, sticky="ns", pady=5, padx=(0, PAD_SM)
         )
         ttk.Label(
             bar,
             text=tr("app.status.version", "v{version}", version=__version__),
             style="StatusBarMuted.TLabel",
-        ).grid(row=0, column=12, sticky="e", padx=(0, 10), pady=4)
+        ).grid(row=0, column=12, sticky="e", padx=(0, PAD_SM), pady=4)
         ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
             row=0, column=13, sticky="ns", pady=5, padx=(0, 4)
         )
@@ -789,6 +915,7 @@ class FinancialApp(tk.Tk):
         tab_key = self._tab_keys_by_widget.get(str(selected))
         if tab_key is not None:
             self._ensure_tab_built(tab_key)
+        self._schedule_notebook_underline()
 
     def _start_deferred_startup(self) -> None:
         if self._startup_sync_running:
@@ -1225,8 +1352,6 @@ class FinancialApp(tk.Tk):
         )
 
         group_width = chart_w / max(1, len(labels))
-        # Income and expense should share one x-position per label:
-        # income grows upward from the axis, expense downward.
         bar_width = max(4, min(18, group_width * 0.28))
 
         for idx, label in enumerate(labels):

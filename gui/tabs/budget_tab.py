@@ -20,7 +20,15 @@ from gui.ui_helpers import (
     set_status,
     show_error,
 )
-from gui.ui_theme import get_palette
+from gui.ui_theme import (
+    PAD_LG,
+    PAD_SM,
+    PAD_XL,
+    PAD_XS,
+    create_card_section,
+    enable_treeview_zebra,
+    get_palette,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -127,34 +135,35 @@ def build_budget_tab(
     parent.grid_columnconfigure(0, weight=1)
     parent.grid_rowconfigure(1, weight=1)
 
-    form_frame = ttk.LabelFrame(parent, text=tr("budget.new", "Новый бюджет"))
-    form_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=8)
+    form_card = create_card_section(parent, tr("budget.new", "Новый бюджет"))
+    form_card.grid(row=0, column=0, sticky="ew", padx=PAD_XL, pady=(PAD_LG, PAD_SM))
+    form_frame = form_card.winfo_children()[-1]
     for col in (1, 3, 5):
         form_frame.grid_columnconfigure(col, weight=1)
 
     ttk.Label(form_frame, text=tr("common.category", "Категория:")).grid(
-        row=0, column=0, sticky="w", padx=6, pady=4
+        row=0, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     category_combo = ttk.Combobox(form_frame, state="normal", width=20)
-    category_combo.grid(row=0, column=1, sticky="ew", padx=6, pady=4)
+    category_combo.grid(row=0, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     ttk.Label(form_frame, text=tr("common.from", "С даты:")).grid(
-        row=0, column=2, sticky="w", padx=6, pady=4
+        row=0, column=2, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     start_date_entry = ttk.Entry(form_frame, width=12)
-    start_date_entry.grid(row=0, column=3, sticky="ew", padx=6, pady=4)
+    start_date_entry.grid(row=0, column=3, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     ttk.Label(form_frame, text=tr("common.to", "По дату:")).grid(
-        row=0, column=4, sticky="w", padx=6, pady=4
+        row=0, column=4, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     end_date_entry = ttk.Entry(form_frame, width=12)
-    end_date_entry.grid(row=0, column=5, sticky="ew", padx=6, pady=4)
+    end_date_entry.grid(row=0, column=5, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     ttk.Label(form_frame, text=tr("budget.limit_kzt", "Лимит (KZT):")).grid(
-        row=1, column=0, sticky="w", padx=6, pady=4
+        row=1, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     limit_entry = ttk.Entry(form_frame, width=16)
-    limit_entry.grid(row=1, column=1, sticky="ew", padx=6, pady=4)
+    limit_entry.grid(row=1, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     include_mandatory_var = tk.BooleanVar(value=False)
     include_mandatory_check = ttk.Checkbutton(
@@ -162,7 +171,9 @@ def build_budget_tab(
         text=tr("budget.include_mandatory", "Учитывать обязательные расходы"),
         variable=include_mandatory_var,
     )
-    include_mandatory_check.grid(row=1, column=2, columnspan=2, sticky="w", padx=6, pady=4)
+    include_mandatory_check.grid(
+        row=1, column=2, columnspan=2, sticky="w", padx=PAD_SM, pady=PAD_XS
+    )
     Tooltip(
         include_mandatory_check,
         tr(
@@ -173,7 +184,7 @@ def build_budget_tab(
     )
 
     list_frame = ttk.Frame(parent)
-    list_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 8))
+    list_frame.grid(row=1, column=0, sticky="nsew", padx=PAD_XL, pady=(0, PAD_SM))
     list_frame.grid_columnconfigure(0, weight=1)
     list_frame.grid_rowconfigure(0, weight=1)
 
@@ -189,6 +200,7 @@ def build_budget_tab(
         "status",
     )
     budget_tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=10)
+    enable_treeview_zebra(budget_tree)
 
     for col, text, width, anchor in (
         ("category", tr("common.category_short", "Категория"), 170, "w"),
@@ -221,6 +233,13 @@ def build_budget_tab(
         highlightbackground=palette.border_soft,
     )
     progress_canvas.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(2, 0))
+    last_results: list[BudgetResult] = []
+
+    def _redraw_progress_on_resize(_event: tk.Event | None = None) -> None:
+        _draw_progress_bars(progress_canvas, last_results)
+
+    progress_canvas.bind("<Configure>", _redraw_progress_on_resize)
+
     legend_label = ttk.Label(
         list_frame,
         text=tr(
@@ -230,7 +249,7 @@ def build_budget_tab(
         style="Subtle.TLabel",
     )
     legend_label.grid(row=3, column=0, columnspan=2, sticky="ew", padx=4)
-    bind_label_wrap(legend_label, list_frame, max_width=720)
+    bind_label_wrap(legend_label, list_frame, max_width=840)
 
     btn_frame = ttk.Frame(list_frame)
     btn_frame.grid(row=4, column=0, columnspan=2, sticky="w", pady=4)
@@ -266,6 +285,7 @@ def build_budget_tab(
         }.get(status, str(status.value))
 
     def _refresh() -> None:
+        nonlocal last_results
         try:
             categories = set(context.controller.get_expense_categories())
             categories.update(context.controller.get_mandatory_expense_categories())
@@ -279,6 +299,7 @@ def build_budget_tab(
             logger.warning("Budget refresh error: %s", err)
             return
 
+        last_results = list(results)
         budget_tree.delete(*budget_tree.get_children())
         for result in results:
             budget = result.budget
@@ -300,7 +321,7 @@ def build_budget_tab(
                 tags=(_row_tag(result),),
             )
 
-        progress_canvas.after(50, lambda: _draw_progress_bars(progress_canvas, results))
+        progress_canvas.after(50, lambda: _draw_progress_bars(progress_canvas, last_results))
         active_count = sum(1 for item in results if item.status == BudgetStatus.ACTIVE)
         set_status(
             status_label,

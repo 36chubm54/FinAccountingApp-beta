@@ -13,7 +13,14 @@ from typing import Any, Protocol
 from gui.i18n import tr
 from gui.tooltip import Tooltip
 from gui.ui_helpers import attach_treeview_scrollbars, show_error
-from gui.ui_theme import get_palette
+from gui.ui_theme import (
+    PAD_LG,
+    PAD_SM,
+    PAD_XL,
+    create_card_section,
+    enable_treeview_zebra,
+    get_palette,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +181,7 @@ def build_analytics_tab(
     parent.grid_rowconfigure(2, weight=2)
 
     top = ttk.Frame(parent)
-    top.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 6))
+    top.grid(row=0, column=0, columnspan=2, sticky="ew", padx=PAD_XL, pady=(PAD_LG, PAD_SM))
     top.grid_columnconfigure(5, weight=1)
 
     ttk.Label(top, text=tr("analytics.from", "С даты:")).grid(row=0, column=0, sticky="w")
@@ -193,8 +200,11 @@ def build_analytics_tab(
     period_from_entry.insert(0, default_start)
     period_to_entry.insert(0, default_end)
 
-    dashboard_frame = ttk.LabelFrame(parent, text=tr("analytics.summary", "Сводка"))
-    dashboard_frame.grid(row=1, column=0, sticky="nsew", padx=(10, 6), pady=(6, 10))
+    dashboard_card = create_card_section(parent, tr("analytics.summary", "Сводка"))
+    dashboard_card.grid(
+        row=1, column=0, sticky="nsew", padx=(PAD_XL, PAD_SM), pady=(PAD_SM, PAD_LG)
+    )
+    dashboard_frame = dashboard_card.winfo_children()[-1]
     dashboard_frame.grid_columnconfigure(0, weight=1)
 
     dashboard_row = ttk.Frame(dashboard_frame, padding=(10, 10))
@@ -309,8 +319,9 @@ def build_analytics_tab(
     )
     minute_cost_label.grid(row=7, column=0, sticky="w")
 
-    timeline_frame = ttk.LabelFrame(parent, text=tr("analytics.timeline", "Динамика капитала"))
-    timeline_frame.grid(row=1, column=1, sticky="nsew", padx=(6, 10), pady=(6, 10))
+    timeline_card = create_card_section(parent, tr("analytics.timeline", "Динамика капитала"))
+    timeline_card.grid(row=1, column=1, sticky="nsew", padx=(PAD_SM, PAD_XL), pady=(PAD_SM, PAD_LG))
+    timeline_frame = timeline_card.winfo_children()[-1]
     timeline_frame.grid_columnconfigure(0, weight=1)
     timeline_frame.grid_rowconfigure(0, weight=1)
     timeline_canvas = tk.Canvas(
@@ -321,10 +332,11 @@ def build_analytics_tab(
     )
     timeline_canvas.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
-    breakdown_frame = ttk.LabelFrame(
-        parent, text=tr("analytics.breakdown", "Разбивка по категориям")
+    breakdown_card = create_card_section(
+        parent, tr("analytics.breakdown", "Разбивка по категориям")
     )
-    breakdown_frame.grid(row=2, column=0, sticky="nsew", padx=(10, 6), pady=(0, 10))
+    breakdown_card.grid(row=2, column=0, sticky="nsew", padx=(PAD_XL, PAD_SM), pady=(0, PAD_LG))
+    breakdown_frame = breakdown_card.winfo_children()[-1]
     breakdown_frame.grid_columnconfigure(0, weight=3)
     breakdown_frame.grid_columnconfigure(1, weight=2)
     breakdown_frame.grid_rowconfigure(0, weight=1)
@@ -344,6 +356,7 @@ def build_analytics_tab(
         show="headings",
         height=4,
     )
+    enable_treeview_zebra(spending_tree)
     spending_tree.grid(row=1, column=0, sticky="nsew", pady=(6, 14))
     spending_tree.heading("category", text=tr("analytics.category", "Категория"))
     spending_tree.heading("total", text=tr("analytics.total_kzt", "Сумма KZT"))
@@ -366,6 +379,7 @@ def build_analytics_tab(
         show="headings",
         height=4,
     )
+    enable_treeview_zebra(income_tree)
     income_tree.grid(row=3, column=0, sticky="nsew", pady=(6, 0))
     income_tree.heading("category", text=tr("analytics.category", "Категория"))
     income_tree.heading("total", text=tr("analytics.total_kzt", "Сумма KZT"))
@@ -390,8 +404,9 @@ def build_analytics_tab(
     )
     category_canvas.grid(row=0, column=0, sticky="nsew")
 
-    monthly_frame = ttk.LabelFrame(parent, text=tr("analytics.monthly_report", "Помесячный отчет"))
-    monthly_frame.grid(row=2, column=1, sticky="nsew", padx=(6, 10), pady=(0, 10))
+    monthly_card = create_card_section(parent, tr("analytics.monthly_report", "Помесячный отчет"))
+    monthly_card.grid(row=2, column=1, sticky="nsew", padx=(PAD_SM, PAD_XL), pady=(0, PAD_LG))
+    monthly_frame = monthly_card.winfo_children()[-1]
     monthly_frame.grid_columnconfigure(0, weight=1)
     monthly_frame.grid_rowconfigure(0, weight=1)
 
@@ -406,6 +421,7 @@ def build_analytics_tab(
         show="headings",
         height=10,
     )
+    enable_treeview_zebra(monthly_tree)
     monthly_tree.grid(row=0, column=0, sticky="nsew")
     monthly_tree.heading("month", text=tr("common.month", "Месяц"))
     monthly_tree.heading("income", text=tr("analytics.income", "Доходы"))

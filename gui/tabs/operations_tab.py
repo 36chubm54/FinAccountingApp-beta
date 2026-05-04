@@ -29,6 +29,14 @@ from gui.ui_helpers import (
     show_info,
     show_warning,
 )
+from gui.ui_theme import (
+    PAD_LG,
+    PAD_SM,
+    PAD_XL,
+    PAD_XS,
+    create_card_section,
+    enable_treeview_zebra,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,58 +95,63 @@ def build_operations_tab(
     parent.grid_rowconfigure(0, weight=1)
 
     left_frame = ttk.Frame(parent)
-    left_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+    left_frame.grid(row=0, column=0, sticky="nsew", padx=(PAD_XL, PAD_SM), pady=PAD_LG)
     left_frame.grid_columnconfigure(0, weight=1)
+    left_frame.grid_rowconfigure(0, weight=1)
 
-    form_frame = ttk.LabelFrame(left_frame, text=tr("operations.new", "Новая операция"))
-    form_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+    paned = ttk.PanedWindow(left_frame, orient=tk.VERTICAL)
+    paned.grid(row=0, column=0, sticky="nsew")
+
+    form_card = create_card_section(paned, tr("operations.new", "Новая операция"))
+    paned.add(form_card, weight=1)
+    form_frame = form_card.winfo_children()[-1]
     form_frame.grid_columnconfigure(1, weight=1)
 
     income_label = tr("operations.type.income", "Доход")
     expense_label = tr("operations.type.expense", "Расход")
     ttk.Label(form_frame, text=tr("common.type", "Тип:")).grid(
-        row=0, column=0, sticky="w", padx=6, pady=4
+        row=0, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     type_options = [income_label, expense_label]
     type_combo = ttk.Combobox(form_frame, values=type_options, state="readonly")
     type_combo.set(income_label)
-    type_combo.grid(row=0, column=1, sticky="ew", padx=6, pady=4)
+    type_combo.grid(row=0, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     ttk.Label(form_frame, text=tr("common.date", "Дата:")).grid(
-        row=1, column=0, sticky="w", padx=6, pady=4
+        row=1, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     date_entry = ttk.Entry(form_frame)
-    date_entry.grid(row=1, column=1, sticky="ew", padx=6, pady=4)
+    date_entry.grid(row=1, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
     date_entry.insert(0, date.today().isoformat())
 
     ttk.Label(form_frame, text=tr("common.amount", "Сумма:")).grid(
-        row=2, column=0, sticky="w", padx=6, pady=4
+        row=2, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     amount_entry = ttk.Entry(form_frame)
-    amount_entry.grid(row=2, column=1, sticky="ew", padx=6, pady=4)
+    amount_entry.grid(row=2, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     ttk.Label(form_frame, text=tr("common.currency", "Валюта:")).grid(
-        row=3, column=0, sticky="w", padx=6, pady=4
+        row=3, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     currency_entry = ttk.Entry(form_frame)
     currency_entry.insert(0, "KZT")
-    currency_entry.grid(row=3, column=1, sticky="ew", padx=6, pady=4)
+    currency_entry.grid(row=3, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     ttk.Label(form_frame, text=tr("common.category", "Категория:")).grid(
-        row=4, column=0, sticky="w", padx=6, pady=4
+        row=4, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     category_combo = ttk.Combobox(form_frame, state="normal")
     category_combo.insert(0, "General")
-    category_combo.grid(row=4, column=1, sticky="ew", padx=6, pady=4)
+    category_combo.grid(row=4, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     ttk.Label(form_frame, text=tr("common.description", "Описание:")).grid(
-        row=5, column=0, sticky="w", padx=6, pady=4
+        row=5, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     description_entry = ttk.Entry(form_frame)
-    description_entry.grid(row=5, column=1, sticky="ew", padx=6, pady=4)
+    description_entry.grid(row=5, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     ttk.Label(form_frame, text=tr("common.wallet", "Кошелек:")).grid(
-        row=6, column=0, sticky="w", padx=6, pady=4
+        row=6, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     operation_wallet_var = tk.StringVar(value="")
     operation_wallet_menu = ttk.Combobox(
@@ -147,7 +160,7 @@ def build_operations_tab(
         values=[],
         state="readonly",
     )
-    operation_wallet_menu.grid(row=6, column=1, sticky="ew", padx=6, pady=4)
+    operation_wallet_menu.grid(row=6, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
     operation_wallet_map: dict[str, int] = {}
 
     def _refresh_category_combo() -> None:
@@ -184,8 +197,9 @@ def build_operations_tab(
 
     refresh_operation_wallet_menu()
 
-    list_frame = ttk.LabelFrame(parent, text=tr("operations.journal", "Журнал операций"))
-    list_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+    list_card = create_card_section(parent, tr("operations.journal", "Журнал операций"))
+    list_card.grid(row=0, column=1, sticky="nsew", padx=(PAD_SM, PAD_XL), pady=PAD_LG)
+    list_frame = list_card.winfo_children()[-1]
     list_frame.grid_rowconfigure(0, weight=1)
     list_frame.grid_columnconfigure(0, weight=1)
 
@@ -204,6 +218,7 @@ def build_operations_tab(
             "wallets",
         ),
     )
+    enable_treeview_zebra(records_tree)
     for col, text, width, minwidth, stretch, anchor in (
         ("index", "#", 50, 50, False, "e"),
         ("date", tr("common.date", "Дата"), 100, 100, False, "w"),
@@ -216,9 +231,11 @@ def build_operations_tab(
     ):
         records_tree.heading(col, text=text)
         records_tree.column(col, width=width, minwidth=minwidth, stretch=stretch, anchor=anchor)  # type: ignore[arg-type]
-    records_tree.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
+    records_tree.grid(row=0, column=0, sticky="nsew", padx=PAD_SM, pady=PAD_SM)
 
-    attach_treeview_scrollbars(list_frame, records_tree, row=0, column=0, horizontal=True, pady=6)
+    attach_treeview_scrollbars(
+        list_frame, records_tree, row=0, column=0, horizontal=True, pady=PAD_SM
+    )
 
     def save_record() -> None:
         date_str = date_entry.get().strip()
@@ -641,15 +658,16 @@ def build_operations_tab(
 
     wallet_id_map: dict[str, int] = {}
 
-    transfer_frame = ttk.LabelFrame(
-        left_frame,
-        text=tr("operations.transfer", "Перевод между кошельками"),
+    transfer_card = create_card_section(
+        paned,
+        tr("operations.transfer", "Перевод между кошельками"),
     )
-    transfer_frame.grid(row=1, column=0, sticky="ew")
+    paned.add(transfer_card, weight=1)
+    transfer_frame = transfer_card.winfo_children()[-1]
     transfer_frame.grid_columnconfigure(1, weight=1)
 
     ttk.Label(transfer_frame, text=tr("operations.transfer.from", "Из кошелька:")).grid(
-        row=0, column=0, sticky="w", padx=4, pady=2
+        row=0, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     transfer_from_var = tk.StringVar(value="")
     transfer_from_menu = ttk.Combobox(
@@ -658,10 +676,10 @@ def build_operations_tab(
         values=[],
         state="readonly",
     )
-    transfer_from_menu.grid(row=0, column=1, sticky="ew", padx=4, pady=2)
+    transfer_from_menu.grid(row=0, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     ttk.Label(transfer_frame, text=tr("operations.transfer.to", "В кошелек:")).grid(
-        row=1, column=0, sticky="w", padx=4, pady=2
+        row=1, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     transfer_to_var = tk.StringVar(value="")
     transfer_to_menu = ttk.Combobox(
@@ -670,47 +688,47 @@ def build_operations_tab(
         values=[],
         state="readonly",
     )
-    transfer_to_menu.grid(row=1, column=1, sticky="ew", padx=4, pady=2)
+    transfer_to_menu.grid(row=1, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     ttk.Label(transfer_frame, text=tr("common.date", "Дата:")).grid(
-        row=2, column=0, sticky="w", padx=4, pady=2
+        row=2, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     transfer_date_entry = ttk.Entry(transfer_frame)
-    transfer_date_entry.grid(row=2, column=1, sticky="ew", padx=4, pady=2)
+    transfer_date_entry.grid(row=2, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
     transfer_date_entry.insert(0, date.today().isoformat())
 
     ttk.Label(transfer_frame, text=tr("common.amount", "Сумма:")).grid(
-        row=3, column=0, sticky="w", padx=4, pady=2
+        row=3, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     transfer_amount_entry = ttk.Entry(transfer_frame)
-    transfer_amount_entry.grid(row=3, column=1, sticky="ew", padx=4, pady=2)
+    transfer_amount_entry.grid(row=3, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     ttk.Label(transfer_frame, text=tr("common.currency", "Валюта:")).grid(
-        row=4, column=0, sticky="w", padx=4, pady=2
+        row=4, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     transfer_currency_entry = ttk.Entry(transfer_frame)
     transfer_currency_entry.insert(0, "KZT")
-    transfer_currency_entry.grid(row=4, column=1, sticky="ew", padx=4, pady=2)
+    transfer_currency_entry.grid(row=4, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     ttk.Label(transfer_frame, text=tr("operations.transfer.commission", "Комиссия:")).grid(
-        row=5, column=0, sticky="w", padx=4, pady=2
+        row=5, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     transfer_commission_entry = ttk.Entry(transfer_frame)
     transfer_commission_entry.insert(0, "0")
-    transfer_commission_entry.grid(row=5, column=1, sticky="ew", padx=4, pady=2)
+    transfer_commission_entry.grid(row=5, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     ttk.Label(
         transfer_frame, text=tr("operations.transfer.commission_currency", "Валюта комиссии:")
-    ).grid(row=6, column=0, sticky="w", padx=4, pady=2)
+    ).grid(row=6, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS)
     transfer_commission_currency_entry = ttk.Entry(transfer_frame)
     transfer_commission_currency_entry.insert(0, "KZT")
-    transfer_commission_currency_entry.grid(row=6, column=1, sticky="ew", padx=4, pady=2)
+    transfer_commission_currency_entry.grid(row=6, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     ttk.Label(transfer_frame, text=tr("common.description", "Описание:")).grid(
-        row=7, column=0, sticky="w", padx=4, pady=2
+        row=7, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
     )
     transfer_description_entry = ttk.Entry(transfer_frame)
-    transfer_description_entry.grid(row=7, column=1, sticky="ew", padx=4, pady=2)
+    transfer_description_entry.grid(row=7, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
 
     def refresh_transfer_wallet_menus() -> None:
         nonlocal wallet_id_map
@@ -826,7 +844,7 @@ def build_operations_tab(
         transfer_description_entry,
     ]
     transfer_create_button = ttk.Button(
-        transfer_frame,
+        transfer_card,
         text=tr("operations.transfer.create", "Создать перевод"),
         command=create_transfer,
         style="Primary.TButton",
@@ -1013,9 +1031,9 @@ def build_operations_tab(
     actions_frame.grid_columnconfigure(1, weight=1)
 
     primary_actions = ttk.Frame(actions_frame)
-    primary_actions.grid(row=0, column=0, sticky="ew", pady=(0, 6), padx=(0, 6))
+    primary_actions.grid(row=0, column=0, sticky="ew", pady=0, padx=(0, 6))
     import_actions = ttk.Frame(actions_frame)
-    import_actions.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+    import_actions.grid(row=0, column=1, sticky="ew", pady=0, padx=(6, 0))
     for idx in range(4):
         primary_actions.grid_columnconfigure(idx, weight=1)
     for idx in range(6):

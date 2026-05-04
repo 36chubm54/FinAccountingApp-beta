@@ -18,7 +18,7 @@ from domain.validation import ensure_not_future, parse_ymd
 from gui.i18n import tr
 from gui.logging_utils import log_ui_error
 from gui.ui_helpers import ask_confirm, bind_label_wrap, center_dialog, show_error, show_info
-from gui.ui_theme import get_palette
+from gui.ui_theme import PAD_SM, PAD_XL, create_card_section, get_palette
 
 logger = logging.getLogger(__name__)
 
@@ -1350,8 +1350,7 @@ def build_dashboard_tab(
 ) -> DashboardTabBindings:
     palette = get_palette()
     parent.grid_columnconfigure(0, weight=1)
-    parent.grid_rowconfigure(1, weight=5, minsize=390)
-    parent.grid_rowconfigure(2, weight=1, minsize=170)
+    parent.grid_rowconfigure(1, weight=1)
 
     toolbar = ttk.Frame(parent)
     toolbar.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 6))
@@ -1390,8 +1389,12 @@ def build_dashboard_tab(
     refresh_button = ttk.Button(action_row, text=tr("common.refresh", "Обновить"))
     refresh_button.pack(side=tk.LEFT)
 
-    summary_frame = ttk.LabelFrame(parent, text=tr("dashboard.overview", "Обзор"))
-    summary_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 8))
+    paned = ttk.PanedWindow(parent, orient=tk.VERTICAL)
+    paned.grid(row=1, column=0, sticky="nsew", padx=PAD_XL, pady=(0, PAD_SM))
+
+    summary_card = create_card_section(paned, tr("dashboard.overview", "Обзор"))
+    paned.add(summary_card, weight=1)
+    summary_frame = summary_card.winfo_children()[-1]
     for column in range(3):
         summary_frame.grid_columnconfigure(column, weight=1)
     summary_frame.grid_rowconfigure(4, weight=1)
@@ -1463,7 +1466,6 @@ def build_dashboard_tab(
 
     trend_canvas = tk.Canvas(
         summary_frame,
-        height=260,
         bg=palette.surface_elevated,
         highlightthickness=0,
     )
@@ -1471,14 +1473,14 @@ def build_dashboard_tab(
 
     allocation_canvas = tk.Canvas(
         summary_frame,
-        height=260,
         bg=palette.surface_elevated,
         highlightthickness=0,
     )
     allocation_canvas.grid(row=4, column=2, sticky="nsew", padx=(6, 12), pady=(6, 12))
 
-    goals_frame = ttk.LabelFrame(parent, text=tr("dashboard.goals.title", "Цели"))
-    goals_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
+    goals_card = create_card_section(paned, tr("dashboard.goals.title", "Цели"))
+    paned.add(goals_card, weight=1)
+    goals_frame = goals_card.winfo_children()[-1]
     goals_frame.grid_columnconfigure(0, weight=1)
     goals_frame.grid_rowconfigure(1, weight=1)
 
