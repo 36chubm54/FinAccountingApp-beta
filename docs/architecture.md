@@ -12,9 +12,9 @@ At a high level:
 
 1. `main.py` starts the GUI
 2. `bootstrap.py` validates and prepares runtime storage
-3. `gui/tkinter_gui.py` builds the application shell and tabs
+3. `gui/tkinter_gui.py` builds the application shell and delegates runtime/startup/status/tab lifecycle work
 4. `gui/controllers.py` exposes app-level operations to the UI
-5. `app/use_cases.py` and `services/*` implement business flows
+5. `app/use_cases.py`, `app/use_cases_*`, and `services/*` implement business flows
 6. `infrastructure/sqlite_repository.py` and `storage/sqlite_storage.py` persist runtime data
 
 Supported business areas include:
@@ -35,11 +35,11 @@ Supported business areas include:
 | Layer | Purpose | Main modules |
 | --- | --- | --- |
 | `domain` | Immutable entities, enums, validation rules, report DTOs | `records.py`, `tags.py`, `wallets.py`, `budget.py`, `debt.py`, `asset.py`, `goal.py`, `reports.py`, `audit.py`, `validation.py` |
-| `app` | Use cases, application contracts, and orchestration | `use_cases.py`, `use_case_support.py`, `finance_service.py`, `record_service.py`, `services.py` |
-| `services` | Focused business subsystems and read-only engines | `import_service.py`, `audit_service.py`, `balance_service.py`, `metrics_service.py`, `timeline_service.py`, `budget_service.py`, `debt_service.py`, `distribution_service.py`, `asset_service.py`, `goal_service.py`, `dashboard_service.py` |
+| `app` | Use cases, application contracts, and orchestration | `use_cases.py`, `use_cases_records.py`, `use_cases_assets.py`, `use_cases_mandatory.py`, `use_cases_analytics.py`, `use_cases_planning.py`, `repository.py`, `import_support.py`, `preferences_service.py`, `audit_runner.py`, `use_case_support.py`, `finance_service.py`, `record_service.py`, `services.py` |
+| `services` | Focused business subsystems and read-only engines | `import_service.py`, `import_models.py`, `import_payload_support.py`, `import_replace_support.py`, `import_execution_support.py`, `import_mandatory_support.py`, `audit_service.py`, `balance_service.py`, `metrics_service.py`, `timeline_service.py`, `budget_service.py`, `debt_service.py`, `distribution_service.py`, `asset_service.py`, `goal_service.py`, `dashboard_service.py`, `report_service.py` |
 | `infrastructure` | Runtime repository implementation | `sqlite_repository.py`, `repositories.py` |
 | `storage` | Low-level persistence adapters and schema bootstrap | `sqlite_storage.py`, `json_storage.py`, `base.py` |
-| `gui` | Tkinter presentation layer | `tkinter_gui.py`, `controllers.py`, `tabs/*`, `exporters.py`, `importers.py`, `tooltip.py`, `logging_utils.py`, `ui_theme.py`, `i18n.py`, `ui_dialogs.py` |
+| `gui` | Tkinter presentation layer | `tkinter_gui.py`, `controllers.py`, `runtime_coordinator.py`, `startup_coordinator.py`, `status_bar_coordinator.py`, `tab_lifecycle.py`, `tabs/*`, `exporters.py`, `importers.py`, `tooltip.py`, `logging_utils.py`, `ui_theme.py`, `i18n.py`, `ui_dialogs.py` |
 | `utils` | Format-specific helpers and shared technical helpers | `backup_utils.py`, `import_core.py`, `csv_utils.py`, `excel_utils.py`, `pdf_utils.py`, `money.py`, `charting.py`, `debt_report_utils.py`, `tabular_utils.py` |
 | `tests` | Regression, contract, and integration-like coverage | `test_*` modules across all subsystems |
 
@@ -50,8 +50,8 @@ Supported business areas include:
 - `main.py` launches the app
 - `bootstrap.py` prepares runtime SQLite state
 - `storage/sqlite_storage.py` initializes schema and compatibility migrations
-- `gui/tkinter_gui.py` creates the main window and tabs
-- post-startup maintenance may run after the first window paint
+- `gui/tkinter_gui.py` creates the main window shell
+- `gui.startup_coordinator.DeferredStartupCoordinator` may run post-startup maintenance after the first window paint
 
 Important startup concerns:
 
@@ -62,7 +62,9 @@ Important startup concerns:
 - applying shell-wide theme styling to cards, tables, canvases, and popdown controls
 - optional currency refresh
 - auto-application of mandatory payments
-- deferred GUI work and safe `after(...)` scheduling
+- deferred GUI work and safe `after(...)` scheduling through `gui.runtime_coordinator.UiRuntimeCoordinator`
+- online-mode status refresh through `gui.status_bar_coordinator.StatusBarCoordinator`
+- lazy tab build and rebuild routing through `gui.tab_lifecycle`
 
 ### 3.2 Creating or Editing Financial Data
 
@@ -75,7 +77,7 @@ Examples:
 - operations and transfers are initiated from `gui/tabs/operations_tab.py`
 - debts/loans are initiated from `gui/tabs/debts_tab.py`
 - assets/goals are initiated from `gui/tabs/dashboard_tab.py`
-- theme/language preference changes are initiated from the app shell and persisted via `gui/controllers.py`
+- theme/language preference changes are initiated from the app shell and persisted via `app.preferences_service`
 
 ### 3.3 Reports and Analytics
 
@@ -98,10 +100,10 @@ Export uses:
 - `utils/excel_utils.py`
 - `utils/pdf_utils.py`
 
-Recent tag-specific additions:
+Current tag-specific behavior:
 
-- `services/report_service.py` now builds tag-aware grouped export payloads
-- `services/metrics_service.py` now provides tag coverage aggregates for analytics
+- `services/report_service.py` builds tag-aware grouped export payloads
+- `services/metrics_service.py` provides tag coverage aggregates for analytics
 - export helpers treat tag grouping as overlapping coverage, not as an additive partition of expenses
 
 ### 3.4 Import / Backup / Migration
@@ -109,6 +111,7 @@ Recent tag-specific additions:
 Main application import entry:
 
 - `FinancialController.import_records(...)`
+- `app.import_support.run_import_transaction(...)`
 - `services.import_service.ImportService.import_file(...)`
 - `FinanceService.get_import_capabilities()`
 
@@ -129,7 +132,8 @@ Important details:
 - partial `JSON` imports are section-aware and should not treat omitted sections as implicit deletion
 - debt-aware imports must preserve `records.related_debt_id` and `debt_payments.record_id` links across normalization and bulk replace paths
 - compatibility logic in `storage/sqlite_storage.py` protects older SQLite databases during schema initialization
-- import rollback logic lives close to GUI transaction orchestration in `gui/controller_import_support.py`
+- rollback-safe import orchestration lives in `app.import_support.py`
+- payload parsing, replacement, execution, and mandatory-template paths are split across `services/import_*_support.py`
 
 ## 4. Subsystem Map
 
@@ -167,7 +171,7 @@ Current scope:
 - transfers, budgets, assets, goals, and debts are not tagged as standalone entities
 - tag analytics and tag budgets build on top of record-tag assignments
 
-As of `v1.12.0`, this area also owns the most sensitive import/relink logic:
+This area also owns the most sensitive import/relink logic:
 
 - repository-level bulk replacement through `replace_records_and_transfers(...)`
 - preservation of explicit imported IDs where required
@@ -231,6 +235,7 @@ Core modules:
 
 - `domain/audit.py`
 - `services/audit_service.py`
+- `app/audit_runner.py`
 
 Audit is intentionally read-only and validates runtime integrity without mutating data.
 
@@ -238,9 +243,13 @@ Audit is intentionally read-only and validates runtime integrity without mutatin
 
 Core modules:
 
-- `services/import_parser.py`
+- `app/import_support.py`
 - `services/import_service.py`
-- `gui/controller_import_support.py`
+- `services/import_models.py`
+- `services/import_payload_support.py`
+- `services/import_replace_support.py`
+- `services/import_execution_support.py`
+- `services/import_mandatory_support.py`
 - `utils/backup_utils.py`
 - `backup.py`
 - `bootstrap.py`
@@ -252,6 +261,7 @@ This subsystem is responsible for:
 - tag-aware import/export of `tags` and `record_tags`
 - capability negotiation via `ImportCapabilities`
 - rollback-safe import transactions
+- strict separation between app-level transaction orchestration and service-level import handlers
 - corruption quarantine and save-failure handling for JSON repositories
 - startup export discipline for SQLite, especially on OneDrive-managed paths
 
@@ -264,6 +274,7 @@ Core modules:
 - `gui/tkinter_gui.py`
 - `gui/ui_dialogs.py`
 - `gui/controllers.py`
+- `app/preferences_service.py`
 
 This subsystem is responsible for:
 
@@ -272,7 +283,7 @@ This subsystem is responsible for:
 - live rebuilding of shell strings and theme-aware widgets/dialogs
 - keeping Tk styling, localized strings, and shell state synchronized during runtime preference changes
 
-As of `v1.14.0`, it also owns the shared desktop-shell design primitives:
+It also owns the shared desktop-shell design primitives:
 
 - spacing tokens and card-style section composition
 - Treeview zebra-striping and palette-aware list/table styling
@@ -290,6 +301,10 @@ Core modules:
 
 - `gui/tkinter_gui.py`
 - `gui/ui_theme.py`
+- `gui/runtime_coordinator.py`
+- `gui/startup_coordinator.py`
+- `gui/status_bar_coordinator.py`
+- `gui/tab_lifecycle.py`
 - `gui/tabs/operations_tab.py`
 - `gui/tabs/debts_tab.py`
 - `gui/tabs/settings_tab.py`
@@ -300,6 +315,7 @@ This subsystem is responsible for:
 - keeping tab layouts visually consistent through shared card helpers and spacing tokens
 - coordinating shell rebuilds when runtime theme/language state changes
 - applying redesign conventions across form-heavy and table-heavy tabs
+- isolating background polling, deferred startup, status refresh, and lazy tab lifecycle outside the main shell class
 
 ### 4.10 Hotkeys
 
@@ -357,7 +373,7 @@ When adding a new domain concept, the usual sequence is:
 
 1. Add immutable domain models and validation
 2. Extend SQLite schema and storage/repository mapping
-3. Add service and/or use case logic
+3. Add service and/or `app/use_cases_*` logic
 4. Expose it through `FinancialController`
 5. Wire it into a tab or export flow
 6. Add tests across domain, service, controller, and integration paths
@@ -365,9 +381,13 @@ When adding a new domain concept, the usual sequence is:
 
 When changing import/export behavior, review together:
 
+- `app/import_support.py`
 - `services/import_service.py`
-- `services/import_parser.py`
-- `gui/controller_import_support.py`
+- `services/import_models.py`
+- `services/import_payload_support.py`
+- `services/import_replace_support.py`
+- `services/import_execution_support.py`
+- `services/import_mandatory_support.py`
 - `utils/backup_utils.py`
 - `gui/exporters.py`
 - `migrate_json_to_sqlite.py`
@@ -378,6 +398,10 @@ When changing import/export behavior, review together:
 When changing GUI startup/deferred work, review together:
 
 - `gui/tkinter_gui.py`
+- `gui/runtime_coordinator.py`
+- `gui/startup_coordinator.py`
+- `gui/status_bar_coordinator.py`
+- `gui/tab_lifecycle.py`
 - `gui/ui_theme.py`
 - `gui/i18n.py`
 - `gui/logging_utils.py`
@@ -402,13 +426,13 @@ If you are new to the codebase:
 
 - start with `README.md`
 - open `gui/controllers.py`
-- inspect `app/use_cases.py`
+- inspect `app/use_cases.py` and then the concrete `app/use_cases_*` modules behind it
 - then move into the service or tab that matches your feature area
 
 For data-format issues:
 
-- start with `services/import_service.py`
-- then inspect `gui/controller_import_support.py`, `utils/backup_utils.py`, and `migrate_json_to_sqlite.py`
+- start with `app/import_support.py`
+- then inspect `services/import_service.py`, `services/import_*_support.py`, `utils/backup_utils.py`, and `migrate_json_to_sqlite.py`
 
 For net-worth/report issues:
 

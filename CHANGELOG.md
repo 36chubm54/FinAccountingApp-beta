@@ -7,6 +7,41 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [v1.15.1] - 2026-05-09
+
+### Added
+
+- Added shell-level runtime helpers for background work, deferred startup, status refresh, and lazy tab lifecycle (`gui/runtime_coordinator.py`, `gui/startup_coordinator.py`, `gui/status_bar_coordinator.py`, `gui/tab_lifecycle.py`)
+- Added application-level import/runtime helpers (`app/import_support.py`, `app/preferences_service.py`, `app/audit_runner.py`, `app/repository.py`) to formalize boundaries that were previously implicit
+- Added small UX polish on top of `v1.15.0`, including `Ctrl+T` tag-mode switching in analytics, inline transfer editing, and reusable popup tooltip support
+
+### Changed
+
+- Split former orchestration hotspots into narrower modules: `app/use_cases_*`, `services/import_*_support.py`, and dedicated GUI coordinators/helpers
+- Moved import transaction ownership out of the GUI layer into app/service support modules and decomposed `ImportService` into payload/replacement/execution/mandatory helpers
+- Introduced the application-level `RecordRepository` contract and aligned use cases with it instead of depending on infrastructure-owned ports
+- Tightened GUI/runtime typing boundaries so shell helpers now use protocol-shaped contracts and the codebase passes `pyright`
+- Refined analytics/infographics presentation for large category sets and chart redraw behavior
+
+### Fixed
+
+- Fixed background GUI callbacks so `on_success(...)` failures no longer surface as raw Tk tracebacks
+- Fixed chart refresh suspension so failed redraw/update steps do not leave chart updates permanently blocked
+- Fixed legacy JSON auto-migration so failed persistence is surfaced explicitly instead of silently continuing with unsaved state
+- Fixed import/create and backup/migration edge cases around runtime durability, rollback, and repository save behavior
+
+### Tests
+
+- Added regression coverage for architecture boundaries, GUI runtime coordinators, startup/status shell helpers, repository durability, and typed test helpers around the new app-level contracts
+
+### Docs
+
+- Reframed `README.md`, `README_EN.md`, and `docs/architecture.md` around the `v1.15.1` stabilization pass and the post-`v1.15.0` architectural cleanup
+
+No breaking changes.
+
+---
+
 ## [v1.15.0] - 2026-05-09
 
 ### Added
