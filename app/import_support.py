@@ -10,6 +10,7 @@ from typing import cast
 from app.repository import RecordRepository
 from domain.debt import Debt, DebtPayment
 from domain.records import ExpenseRecord, MandatoryExpenseRecord, Record
+from domain.tags import Tag
 from domain.transfers import Transfer
 from domain.wallets import Wallet
 from utils.money import to_minor_units
@@ -48,13 +49,20 @@ def run_import_transaction(repository: RecordRepository, operation, logger: logg
     records_snapshot = repository.load_all()
     mandatory_snapshot = repository.load_mandatory_expenses()
     transfers_snapshot = repository.load_transfers()
+    tags_snapshot: list[Tag] | None = None
     debts_snapshot = None
     debt_payments_snapshot = None
+    list_tags = cast(Callable[[], list[Tag]] | None, getattr(repository, "list_tags", None))
     load_debts = cast(Callable[[], list[Debt]] | None, getattr(repository, "load_debts", None))
     load_debt_payments = cast(
         Callable[[], list[DebtPayment]] | None,
         getattr(repository, "load_debt_payments", None),
     )
+    if callable(list_tags):
+        try:
+            tags_snapshot = list(list_tags())
+        except TypeError:
+            tags_snapshot = None
     if callable(load_debts) and callable(load_debt_payments):
         try:
             debts_snapshot = list(load_debts())
@@ -72,6 +80,7 @@ def run_import_transaction(repository: RecordRepository, operation, logger: logg
                     wallets=wallets_snapshot,
                     records=records_snapshot,
                     mandatory_expenses=mandatory_snapshot,
+                    tags=tags_snapshot,
                     transfers=transfers_snapshot,
                     debts=debts_snapshot,
                     debt_payments=debt_payments_snapshot,
@@ -81,6 +90,7 @@ def run_import_transaction(repository: RecordRepository, operation, logger: logg
                     wallets=wallets_snapshot,
                     records=records_snapshot,
                     mandatory_expenses=mandatory_snapshot,
+                    tags=tags_snapshot,
                     transfers=transfers_snapshot,
                 )
         except (RuntimeError, ValueError, TypeError, OSError, sqlite3.Error) as rollback_error:

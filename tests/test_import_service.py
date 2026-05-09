@@ -2568,3 +2568,53 @@ def test_run_import_transaction_raises_when_json_rollback_fails() -> None:
             lambda: (_ for _ in ()).throw(RuntimeError("boom")),
             logging.getLogger(__name__),
         )
+
+
+def test_run_import_transaction_restores_tags_snapshot_for_repo_rollback() -> None:
+    class TagRollbackRepo:
+        def __init__(self) -> None:
+            self.rollback_kwargs = None
+
+        def load_wallets(self):
+            return [Wallet(id=1, name="Main", currency="KZT", initial_balance=0.0, system=True)]
+
+        def load_all(self):
+            return []
+
+        def load_mandatory_expenses(self):
+            return []
+
+        def load_transfers(self):
+            return []
+
+        def list_tags(self):
+            return [Tag(id=7, name="food", color="#123ABC", usage_count=9, last_used_at="2026-05-01")]
+
+        def load_debts(self):
+            return []
+
+        def load_debt_payments(self):
+            return []
+
+        def replace_all_data(self, **kwargs):
+            self.rollback_kwargs = kwargs
+
+    repo = TagRollbackRepo()
+
+    with pytest.raises(RuntimeError, match="boom"):
+        run_import_transaction(
+            typed_repo(repo),
+            lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+            logging.getLogger(__name__),
+        )
+
+    assert repo.rollback_kwargs is not None
+    assert repo.rollback_kwargs["tags"] == [
+        Tag(
+            id=7,
+            name="food",
+            color="#123ABC",
+            usage_count=9,
+            last_used_at="2026-05-01",
+        )
+    ]
