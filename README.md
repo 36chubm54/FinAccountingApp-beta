@@ -2,7 +2,7 @@
 
 Графическое приложение для персонального финансового учёта с мультивалютностью, импортом/экспортом, тегами, бюджетами, долгами, активами и целями.
 
-Текущий релиз `v1.14.0` посвящён редизайну desktop shell: обновлены визуальная система темы, layout основных вкладок и shell-level поведение Tkinter-приложения. Интерфейс стал более карточным и консистентным, Treeview-таблицы получили zebra/highlight styling, а light/dark palette system теперь глубже применяется к shell, canvas-виджетам, combobox popdown и рабочим вкладкам.
+Текущий патч `v1.15.1` stabilizes и доводит до production состояние `v1.15.0`: усиливает import/backup/runtime safety, разгружает несколько orchestration hotspots, улучшает shell-level GUI reliability и доводит typed/architectural cleanup без изменения основной продуктовой модели релиза с тегами и tag-аналитикой.
 
 ## 🚀 Быстрый старт
 
@@ -65,10 +65,9 @@ python main.py
 - Light / dark theme system и live theme-aware shell, status bar, audit views и диалоги
 - Redesign desktop shell: card-based sections, обновлённые spacing tokens, более чистые notebook/treeview/status patterns
 - Улучшенное theme application для Treeview, Canvas и Combobox popdown widgets
-- Поддержка пользовательской иконки окна (`.ico` + `iconphoto` fallback) и подготовка к иконке будущего `exe`
 - Section-aware `JSON` import: records-only restore не затирает несвязанные `debts/assets/goals/budgets`
 - Более безопасная persistence-слой логика: quarantine для битых JSON-файлов, `.error` copies при save-failure, atomic backup/export paths
-- Экспорт отчётов в `XLSX` / `PDF` теперь явно сигнализирует о деградации grouped-section вместо silent failure
+- Patch-level stabilization поверх `v1.15.0`: safer import/runtime flows, GUI coordinator split, tighter rollback/durability guarantees
 
 ## 🖥️ Вкладки приложения
 
@@ -82,15 +81,15 @@ python main.py
 - `Distribution` — monthly net-income distribution и frozen snapshots
 - `Settings` — кошельки, mandatory expenses, backup/import, audit
 
-## 🏗️ Архитектура в 5 слоях
+## 🏗️ Архитектурный обзор
 
 | Слой | Ответственность |
 | --- | --- |
 | `domain` | Immutable-модели и бизнес-правила: records, tags, wallets, budgets, debts, assets, goals, reports |
-| `app` | Use cases и orchestration между GUI, сервисами и репозиторием |
+| `app` | Use case-ы, application contracts и orchestration между GUI, сервисами и репозиторием |
 | `services` | Специализированные сценарии: import, audit, analytics, budget/debt/distribution/wealth logic |
 | `infrastructure` + `storage` | SQLite/JSON persistence, schema bootstrap, repository/storage adapters |
-| `gui` | Tkinter UI, controller layer, exporters/import preview dialogs, tab composition |
+| `gui` | Tkinter UI, controller layer, shell coordinators, exporters/import preview dialogs, tab composition |
 
 Что ещё важно:
 
@@ -105,7 +104,11 @@ python main.py
 | Точка | Когда использовать |
 | --- | --- |
 | `gui.controllers.FinancialController` | Главная точка входа для GUI и интеграций верхнего уровня |
-| `services.import_service.ImportService` | Реальный import pipeline: dry-run, validation, commit |
+| `app.repository.RecordRepository` | Application-level repository contract для use case-ов |
+| `app.import_support.run_import_transaction(...)` | Rollback-safe orchestration между controller/import service и runtime repository |
+| `app.preferences_service` | Сохранение runtime UI preferences: `theme`, `language`, online-mode |
+| `app.audit_runner` | App-level запуск audit-flow из GUI/controller |
+| `services.import_service.ImportService` | Основной import coordinator, который делегирует payload/replacement/execution/mandatory flows support-модулям |
 | `services.audit_service.AuditService` | Read-only проверка целостности SQLite-данных |
 | `services.balance_service.BalanceService` | Балансы кошельков, total balance, cashflow |
 | `services.metrics_service.MetricsService` | Savings rate, burn rate, monthly/category/tag analytics |
@@ -115,13 +118,16 @@ python main.py
 | `infrastructure.sqlite_repository.SQLiteRecordRepository` | Основной runtime repository |
 | `storage.sqlite_storage.SQLiteStorage` | Низкоуровневый SQLite adapter / schema bootstrap |
 
-Практические акценты для `v1.14.0`:
+Практические акценты текущего рабочего дерева:
 
 - `FinancialController.save_theme_preference(...)` / `save_language_preference(...)` — runtime UI preferences, сохраняемые в SQLite
 - `gui.ui_theme` — централизованная light/dark palette system, card helpers, spacing tokens и Treeview theming helpers
-- `gui.tkinter_gui` — главный shell orchestration layer, применяющий theme, status bar и tab rebuild/runtime hooks
+- `gui.runtime_coordinator.UiRuntimeCoordinator` — безопасное `after(...)`, polling background tasks и shutdown-aware scheduling
+- `gui.startup_coordinator.DeferredStartupCoordinator` — deferred startup, auto-application mandatory payments и post-startup maintenance
+- `gui.status_bar_coordinator.StatusBarCoordinator` — online-mode toggle и периодический status refresh
+- `gui.tab_lifecycle` — lazy tab build и lifecycle dispatch вне основного shell-класса
 - `FinanceService.get_import_capabilities()` — единая capability-модель для import pipeline вместо ad-hoc проверок по атрибутам
-- `FinancialController.load_debts()` и `related_debt_id` в `create_income(...)` / `create_expense(...)` — важные точки для debt-aware import/restore flows
+- `services.import_payload_support`, `services.import_replace_support`, `services.import_execution_support`, `services.import_mandatory_support` — разрезанный import stack вместо одного разросшегося service body
 - `FinancialController.list_tags()` / `search_tags()` / `set_tag_color()` — app-level entry points для tag-aware UI и аналитики
 - `SQLiteRecordRepository.replace_records_and_transfers(...)` — безопасная bulk-замена операций с ремапом связанных debt-payment ссылок
 - `gui.logging_utils.log_ui_error(...)` — общий structured logging helper для GUI ошибок и деградаций
@@ -131,6 +137,7 @@ python main.py
 | Точка | Назначение |
 | --- | --- |
 | `FinancialController.import_records(...)` | Основной app-level импорт из GUI/controller |
+| `app.import_support.run_import_transaction(...)` | Transaction/snapshot orchestration с rollback semantics |
 | `ImportService.import_file(...)` | Основной pipeline импорта операций |
 | `utils.backup_utils.export_full_backup_to_json(...)` | Low-level full backup export |
 | `utils.backup_utils.import_full_backup_from_json(...)` | Low-level backup parser, возвращает `ImportedBackupData` |
@@ -139,9 +146,9 @@ python main.py
 
 ### Важные developer-сценарии
 
-- Добавление новой сущности обычно затрагивает `domain` → `repository/storage` → `app/use_cases` → `gui/controllers` → нужную вкладку
+- Добавление новой сущности обычно затрагивает `domain` → `repository/storage` → `app/use_cases_*` → `gui/controllers` → нужную вкладку
 - Новые read-only метрики лучше добавлять в `services/*_service.py`, а не в GUI
-- Новые форматы/варианты импорта лучше подключать через `ImportService` и `utils/import_core.py`
+- Новые форматы/варианты импорта лучше подключать через `ImportService`, `app.import_support` и `utils/import_core.py`
 - Если меняется schema, нужно синхронно обновлять `db/schema.sql`, bootstrap/migration flow и regression tests
 
 ## ⌨️ Горячие клавиши
@@ -177,8 +184,8 @@ python main.py
 Горячие клавиши работают только когда фокус находится в основном окне приложения (не в диалогах) и активна соответствующая вкладка. Для предотвращения конфликтов с вводом текста реализованы следующие защиты:
 
 - Клавиши `Del`, `F2`, `Home`, `End`, `Ctrl+Del`, `Ctrl+R`, `Ctrl+P`, `Ctrl+W` игнорируются, если фокус находится в любом поле ввода (`Entry`, `ttk.Entry`, `ttk.Combobox`, `tk.Text`).
-- Клавиша `Enter` не обрабатывается, когда фокус в `ttk.Combobox` или `tk.Text`, а также если активен inline‑редактор операции.
-- Все горячие клавиши блокируются, когда открыт inline‑редактор операции (режим редактирования записи в списке операций).
+- Клавиша `Enter` не обрабатывается, когда фокус в `ttk.Combobox` или `tk.Text`, а также если активен inline-редактор операции.
+- Все горячие клавиши блокируются, когда открыт inline-редактор операции (режим редактирования записи в списке операций).
 - Сочетания, привязанные к конкретным вкладкам (`Ctrl+I`, `Ctrl+E`, `Ctrl+G` и др.), срабатывают только когда эта вкладка активна.
 
 ## 🧪 Тесты
@@ -196,16 +203,17 @@ pytest --cov=. --cov-report=term-missing
 ### Что покрыто
 
 - domain-модели и validation rules
-- use cases и controller flows
+- use case-ы и controller flows
 - import/export contracts (`CSV`, `XLSX`, `JSON`, backup)
 - SQLite runtime storage, bootstrap и migration
-- GUI-level regression tests для критичных вкладок и exporters
+- GUI-level regression tests для критичных вкладок, coordinators и exporters
+- architecture boundary и typing-regression checks для ключевых shell/runtime слоёв
 
 ## 💾 Импорт / backup / migration
 
 ### Import
 
-- Pipeline: `parse -> dry-run validation -> user confirmation -> SQLite transaction`
+- Pipeline: `parse -> dry-run validation -> user confirmation -> rollback-safe runtime transaction`
 - Поддерживаются `CSV`, `XLSX`, `JSON`
 - Для `JSON` full backup восстанавливаются runtime-сущности, включая `budgets`, `debts`, `debt_payments`, distribution/wealth payloads, если подсистемы поддерживаются репозиторием
 - `JSON` backup/import теперь включает `tags` и `record_tags`
@@ -214,8 +222,9 @@ pytest --cov=. --cov-report=term-missing
 - `ImportCapabilities` определяет, какие bulk-replace и load-* операции реально доступны конкретному runtime-service
 - Partial `JSON` import стал section-aware: если payload содержит только `records`, текущие `debts/assets/goals/budgets/distribution` не стираются
 - Legacy `JSON` без `tags` / `record_tags` по-прежнему поддерживается и трактуется как payload без тегов
-- Если секция `debts` явно отсутствует, pipeline старается сохранить существующие `related_debt_id` связи; если секция есть — ссылки нормализуются только по допустимым debt IDs
+- Если секция `debts` явно отсутствует, pipeline старается сохранить существующие `related_debt_id` связи; если секция есть, ссылки нормализуются только по допустимым debt IDs
 - `CSV` / `XLSX` import по-прежнему идёт через create-path и не использует bulk replace; `related_debt_id` и `tags` теперь корректно прокидываются и там
+- Import orchestration вынесен в `app.import_support`, а service-слой разделён на focused `services/import_*_support.py` helpers
 - `v1.10.1` усиливает раннюю валидацию import payload: битые ссылочные связи, дубликаты `wallet.id`, несколько `system` wallets и невалидные/дублированные `distribution_snapshots` теперь отсекаются раньше
 
 ### Backup
@@ -228,6 +237,7 @@ pytest --cov=. --cov-report=term-missing
 - `backup.export_to_json(...)` теперь поднимает `BackupExportError`, чтобы bootstrap/UI различали export-failure и другие startup-проблемы
 - При ошибке сохранения JSON repository пишет `.error` snapshot с несохранённым payload и поднимает `RepositorySaveError`
 - Битый или пустой JSON runtime-файл карантинится как `.corrupt_*` и поднимает `RepositoryDataCorruptionError`
+- Legacy JSON auto-migration больше не продолжает работу молча после провала persist-шагa: ошибка сохранения поднимается явно
 - `requirements-pdf.txt` нужен только для PDF-экспорта, не для базового runtime
 
 ### Migration

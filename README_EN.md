@@ -2,7 +2,7 @@
 
 Graphical application for personal financial accounting with multicurrency support, import/export, tags, budgets, debts, assets, and goals.
 
-The current `v1.14.0` release focuses on a redesigned desktop shell: the visual theme system, major tab layouts, and shell-level Tkinter behavior were refreshed together. The UI is now more card-based and consistent, Treeview tables use stronger zebra/highlight styling, and the light/dark palette system is applied more deeply across the shell, canvas widgets, combobox popdowns, and working tabs.
+The current `v1.15.1` patch stabilizes and hardens `v1.15.0`: it improves import/backup/runtime safety, breaks up several orchestration hotspots, improves shell-level GUI reliability, and completes typed/architectural cleanup without changing the core product model introduced by the tags and tag-analytics release.
 
 ## 🚀 Quick Start
 
@@ -65,10 +65,9 @@ The app starts a Tkinter GUI on top of SQLite runtime storage. Core tabs can be 
 - Light / dark theme system with live theme-aware shell, status bar, audit views, and dialogs
 - Redesigned desktop shell with card-based sections, updated spacing tokens, and cleaner notebook/treeview/status patterns
 - Improved theme application for Treeview, Canvas, and Combobox popdown widgets
-- Custom window icon support (`.ico` + `iconphoto` fallback) with forward compatibility for packaged `exe` icon usage
 - Section-aware `JSON` import so records-only restore does not wipe unrelated `debts/assets/goals/budgets`
 - Safer persistence behavior: corrupt JSON quarantine, `.error` copies on save failure, atomic backup/export paths
-- `XLSX` / `PDF` report export now shows explicit degradation warnings instead of silently dropping grouped sections
+- Patch-level stabilization on top of `v1.15.0`: safer import/runtime flows, GUI coordinator split, and tighter rollback/durability guarantees
 
 ## 🖥️ Application Tabs
 
@@ -82,15 +81,15 @@ The app starts a Tkinter GUI on top of SQLite runtime storage. Core tabs can be 
 - `Distribution` — monthly net-income distribution and frozen snapshots
 - `Settings` — wallets, mandatory expenses, backup/import, audit
 
-## 🏗️ Architecture in 5 Layers
+## 🏗️ Architecture Overview
 
 | Layer | Responsibility |
 | --- | --- |
 | `domain` | Immutable models and business rules: records, tags, wallets, budgets, debts, assets, goals, reports |
-| `app` | Use cases and orchestration between GUI, services, and repository |
+| `app` | Use cases, application contracts, and orchestration between GUI, services, and repository |
 | `services` | Specialized flows: import, audit, analytics, budget/debt/distribution/wealth logic |
 | `infrastructure` + `storage` | SQLite/JSON persistence, schema bootstrap, repository/storage adapters |
-| `gui` | Tkinter UI, controller layer, exporters/import preview dialogs, tab composition |
+| `gui` | Tkinter UI, controller layer, shell coordinators, exporters/import preview dialogs, tab composition |
 
 Also important:
 
@@ -105,7 +104,11 @@ Also important:
 | Entry point | Use it for |
 | --- | --- |
 | `gui.controllers.FinancialController` | Main integration surface for GUI and high-level app flows |
-| `services.import_service.ImportService` | Real import pipeline: dry-run, validation, commit |
+| `app.repository.RecordRepository` | Application-level repository contract consumed by use cases |
+| `app.import_support.run_import_transaction(...)` | Rollback-safe orchestration between controller/import service and the runtime repository |
+| `app.preferences_service` | Runtime persistence helpers for `theme`, `language`, and online-mode UI preferences |
+| `app.audit_runner` | App-level audit launch helper for GUI/controller flows |
+| `services.import_service.ImportService` | Main import coordinator delegating payload/replacement/execution/mandatory flows to support modules |
 | `services.audit_service.AuditService` | Read-only SQLite integrity checks |
 | `services.balance_service.BalanceService` | Wallet balances, total balance, cashflow |
 | `services.metrics_service.MetricsService` | Savings rate, burn rate, monthly/category/tag analytics |
@@ -115,13 +118,16 @@ Also important:
 | `infrastructure.sqlite_repository.SQLiteRecordRepository` | Primary runtime repository |
 | `storage.sqlite_storage.SQLiteStorage` | Low-level SQLite adapter / schema bootstrap |
 
-Practical `v1.14.0` highlights:
+Practical highlights in the current working tree:
 
 - `FinancialController.save_theme_preference(...)` / `save_language_preference(...)` — runtime UI preferences persisted in SQLite
 - `gui.ui_theme` — centralized light/dark palette system, card helpers, spacing tokens, and Treeview theming helpers
-- `gui.tkinter_gui` — the main shell orchestration layer applying theme, status bar, and tab rebuild/runtime hooks
+- `gui.runtime_coordinator.UiRuntimeCoordinator` — safe `after(...)`, background task polling, and shutdown-aware scheduling
+- `gui.startup_coordinator.DeferredStartupCoordinator` — deferred startup flow, mandatory auto-payments, and post-startup maintenance
+- `gui.status_bar_coordinator.StatusBarCoordinator` — online-mode toggles and recurring status refresh logic
+- `gui.tab_lifecycle` — lazy tab build and lifecycle dispatch outside the main shell class
 - `FinanceService.get_import_capabilities()` — a single capability model for the import pipeline instead of ad-hoc attribute probing
-- `FinancialController.load_debts()` and `related_debt_id` in `create_income(...)` / `create_expense(...)` — important hooks for debt-aware import/restore flows
+- `services.import_payload_support`, `services.import_replace_support`, `services.import_execution_support`, `services.import_mandatory_support` — a split import stack instead of one oversized service body
 - `FinancialController.list_tags()` / `search_tags()` / `set_tag_color()` — app-level entry points for tag-aware UI and analytics
 - `SQLiteRecordRepository.replace_records_and_transfers(...)` — safe bulk operation replacement with debt-payment link remapping
 - `gui.logging_utils.log_ui_error(...)` — shared structured logging helper for GUI errors and degraded flows
@@ -131,6 +137,7 @@ Practical `v1.14.0` highlights:
 | Entry point | Purpose |
 | --- | --- |
 | `FinancialController.import_records(...)` | Primary app-level import entry from GUI/controller flows |
+| `app.import_support.run_import_transaction(...)` | Transaction/snapshot orchestration with rollback semantics |
 | `ImportService.import_file(...)` | Main operation import pipeline |
 | `utils.backup_utils.export_full_backup_to_json(...)` | Low-level full-backup export |
 | `utils.backup_utils.import_full_backup_from_json(...)` | Low-level backup parser, returns `ImportedBackupData` |
@@ -139,9 +146,9 @@ Practical `v1.14.0` highlights:
 
 ### Important developer scenarios
 
-- Adding a new entity usually touches `domain` → `repository/storage` → `app/use_cases` → `gui/controllers` → target tab
+- Adding a new entity usually touches `domain` → `repository/storage` → `app/use_cases_*` → `gui/controllers` → target tab
 - New read-only metrics belong in `services/*_service.py`, not in GUI code
-- New import formats/variants should go through `ImportService` and `utils/import_core.py`
+- New import formats/variants should go through `ImportService`, `app.import_support`, and `utils/import_core.py`
 - Schema changes should be updated together in `db/schema.sql`, bootstrap/migration flow, and regression tests
 
 ## ⌨️ Hotkeys
@@ -199,13 +206,14 @@ pytest --cov=. --cov-report=term-missing
 - use cases and controller flows
 - import/export contracts (`CSV`, `XLSX`, `JSON`, backup)
 - SQLite runtime storage, bootstrap, and migration
-- GUI-level regression tests for critical tabs and exporters
+- GUI-level regression tests for critical tabs, coordinators, and exporters
+- architecture-boundary and typing-regression checks for key shell/runtime layers
 
 ## 💾 Import / Backup / Migration
 
 ### Import
 
-- Pipeline: `parse -> dry-run validation -> user confirmation -> SQLite transaction`
+- Pipeline: `parse -> dry-run validation -> user confirmation -> rollback-safe runtime transaction`
 - Supports `CSV`, `XLSX`, `JSON`
 - `JSON` full backup restores runtime entities including `budgets`, `debts`, `debt_payments`, and distribution/wealth payloads when supported by the repository
 - `JSON` backup/import now also includes `tags` and `record_tags`
@@ -216,6 +224,7 @@ pytest --cov=. --cov-report=term-missing
 - Legacy `JSON` payloads without `tags` / `record_tags` are still accepted and treated as tag-less data
 - If the `debts` section is explicitly absent, the pipeline tries to preserve existing `related_debt_id` links; if the section is present, links are normalized only against allowed debt IDs
 - `CSV` / `XLSX` imports still use the create-path instead of bulk replace, and both `related_debt_id` and `tags` are now propagated there
+- Import orchestration now lives in `app.import_support`, while the service layer is split into focused `services/import_*_support.py` helpers
 - `v1.10.1` adds stricter early payload validation: broken references, duplicate `wallet.id`, multiple `system` wallets, and invalid/duplicate `distribution_snapshots` are rejected earlier in the import pipeline
 
 ### Backup
@@ -228,6 +237,7 @@ pytest --cov=. --cov-report=term-missing
 - `backup.export_to_json(...)` now raises `BackupExportError` so bootstrap and the GUI can distinguish export failures from other startup issues
 - On JSON repository save failure, an `.error` snapshot of the unsaved payload is written and `RepositorySaveError` is raised
 - Corrupt or empty JSON runtime files are quarantined as `.corrupt_*` and raise `RepositoryDataCorruptionError`
+- Legacy JSON auto-migration no longer continues silently after persist failure: a failed migration save is surfaced explicitly
 - `requirements-pdf.txt` is only needed for PDF export, not for the default runtime install
 
 ### Migration
