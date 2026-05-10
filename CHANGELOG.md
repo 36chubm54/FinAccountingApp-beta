@@ -7,6 +7,26 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [2.0.0-alpha.1] - 2026-05-10
+
+### Added
+
+- `infrastructure/currency_providers.py` with `BaseRateProvider`, `NBKProvider`, `CBRProvider`, `OpenExchangeProvider`, and `StaticProvider`
+- `infrastructure/currency_aggregator.py` with `CurrencyAggregator` for ordered provider fallback
+- `currency_config.json` for runtime currency-provider selection and OpenExchange configuration
+- `CurrencyService.__init__(..., aggregator=...)` dependency injection support for online-rate tests
+
+### Changed
+
+- Replaced the monolithic online rate fetch path in `app/services.py` with provider-backed aggregation while preserving the public `CurrencyService` API
+- Switched `CBRProvider` to parse the publicly reachable Rambler mirror of the Central Bank of Russia rates table instead of calling `cbr.ru` directly in blocked regions
+
+### Internal
+
+- Kept `CurrencyService` behavior backward compatible with `v1.15.2`, including cache fallback and default offline rates
+
+---
+
 ## [v1.15.2] - 2026-05-10
 
 ### Changed

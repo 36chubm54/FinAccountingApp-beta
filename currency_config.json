@@ -1,0 +1,9 @@
+{
+  "base_currency": "KZT",
+  "primary_provider": "nbk",
+  "fallback_provider": "open_exchange",
+  "open_exchange_api_key": "",
+  "enable_cbr": false,
+  "auto_update": true,
+  "update_interval_minutes": 60
+}

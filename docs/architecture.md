@@ -338,6 +338,37 @@ Important design rules:
 - destructive or input-conflicting shortcuts also check current focus and skip when focus is inside `Entry`, `Combobox`, or `Text`
 - the design is compatible with lazy tab build and `_reset_tab_bindings()` because handlers read current `app._*_bindings` references on each keypress
 
+### 4.11 Currency Provider System
+
+Core modules:
+
+- `app/services.py`
+- `domain/currency.py`
+- `infrastructure/currency_providers.py`
+- `infrastructure/currency_aggregator.py`
+- `currency_config.json`
+
+This subsystem is responsible for:
+
+- preserving the public `CurrencyService` adapter interface used by application services and UI
+- fetching exchange rates through ordered providers instead of a single hardcoded RSS implementation
+- routing `KZT`-base online refresh through `NBKProvider`, then `OpenExchangeProvider`, then `StaticProvider`
+- optionally enabling `CBRProvider` for `RUB`-base configurations
+- keeping offline defaults and cached rates available when online providers fail
+
+Provider hierarchy:
+
+- `NBKProvider` parses the National Bank of Kazakhstan RSS feed and remains the primary source for `KZT`
+- `CBRProvider` parses the Rambler mirror of the Central Bank of Russia rates table and exposes `RUB`-base rates for environments where direct `cbr.ru` access is blocked
+- `OpenExchangeProvider` normalizes `USD`-base JSON quotes into the app's base currency
+- `StaticProvider` returns hardcoded defaults and never performs network I/O
+
+Aggregation rules:
+
+- `CurrencyAggregator` tries providers in configured order and logs fallback when a provider raises `ProviderFetchError`
+- successful non-static provider results are cached to `currency_rates.json`
+- static fallback still yields a safe result, but cached rates take precedence when available
+
 ## 5. Data Model Overview
 
 Main SQLite tables:
