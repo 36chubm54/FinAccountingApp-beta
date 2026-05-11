@@ -2,7 +2,7 @@
 
 Graphical application for personal financial accounting with multicurrency support, import/export, tags, budgets, debts, assets, and goals.
 
-The current `v2.0.0-alpha.2` build completes the breaking-change move to a two-layer currency model and finishes the upper-layer architecture cleanup: SQLite now stores normalized values as `amount_base` / `limit_base` in `base_currency`, `display_currency` controls presentation only, and shell/runtime orchestration has been pushed out of the main entry-point modules into narrower helpers.
+The current `v2.0.0-beta.1` build closes the alpha migration cycle and moves the project into stabilization: SQLite stores normalized values as `amount_base` / `limit_base` in `base_currency`, `display_currency` controls presentation only, and shell/runtime orchestration has already been pushed out of the main entry-point modules into narrower helpers.
 
 ## 🚀 Quick Start
 
@@ -275,7 +275,7 @@ The detailed layer map, runtime flows, and module guide now live in `docs/archit
 ## 💱 Supported Currencies
 
 - By default, the UI display selector uses `KZT`, `USD`, `EUR`, and `RUB`
-- In the current alpha config, the default base currency is `KZT`
+- In the current beta config, the default base currency is `KZT`
 - The provider chain can load a wider set of rates when allowed by config and the active online provider
 
 Rates are provided through `CurrencyService` and an ordered provider chain:

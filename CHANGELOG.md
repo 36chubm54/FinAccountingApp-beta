@@ -7,6 +7,27 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [2.0.0-beta.1] - 2026-05-11
+
+### Changed
+
+- Promoted the completed `amount_base` / `limit_base` storage contract from alpha migration work into the first beta release line
+- Locked the two-layer currency model into stabilization mode: `base_currency` remains the persisted accounting layer while `display_currency` stays UI-only
+- Carried forward the repository capability protocol cleanup and shell/runtime extraction as the baseline architecture for beta
+
+### Fixed
+
+- Preserved compatibility with pre-precision SQLite schemas by backfilling missing legacy `*_minor` columns before startup rename migration
+- Preserved imports from pre-rename CSV/XLSX full-backup files by falling back from `amount_base` to legacy `amount_kzt`
+- Preserved legacy JSON repository records and transfers that still store normalized amounts under `amount_kzt`
+- Restored transfer reconstruction during CSV full import so valid linked transfer pairs no longer fail integrity checks
+
+### Testing
+
+- Full release gate is green: `pyright` passes and the full `pytest` suite passes before beta cut
+
+---
+
 ## [2.0.0-alpha.2] - 2026-05-10
 
 ### Breaking Changes
