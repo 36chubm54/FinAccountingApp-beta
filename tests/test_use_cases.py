@@ -61,7 +61,7 @@ class TestCreateIncome:
             amount_original=100.0,
             currency="USD",
             rate_at_operation=470.0,
-            amount_kzt=47000.0,
+            amount_base=47000.0,
             category="Salary",
         )
         mock_repo.save.assert_called_once_with(expected_record)
@@ -87,7 +87,7 @@ class TestCreateIncome:
             amount_original=100.0,
             currency="USD",
             rate_at_operation=470.0,
-            amount_kzt=47000.0,
+            amount_base=47000.0,
             category="General",
         )
         mock_repo.save.assert_called_once_with(expected_record)
@@ -150,7 +150,7 @@ class TestCreateExpense:
             amount_original=50.0,
             currency="USD",
             rate_at_operation=470.0,
-            amount_kzt=23500.0,
+            amount_base=23500.0,
             category="Food",
         )
         mock_repo.save.assert_called_once_with(expected_record)
@@ -183,7 +183,7 @@ class TestCreateExpense:
             amount_original=50.0,
             currency="USD",
             rate_at_operation=470.0,
-            amount_kzt=23500.0,
+            amount_base=23500.0,
             category="General",
         )
         mock_repo.save.assert_called_once_with(expected_record)
@@ -329,14 +329,14 @@ class TestDebtUseCases:
         result = CreateDebt(service).execute(
             contact_name="Alice",
             wallet_id=2,
-            amount_kzt=500.0,
+            amount_base=500.0,
             created_at="2026-03-01",
         )
 
         service.create_debt.assert_called_once_with(
             contact_name="Alice",
             wallet_id=2,
-            amount_kzt=500.0,
+            amount_base=500.0,
             created_at="2026-03-01",
             currency="KZT",
             interest_rate=0.0,
@@ -352,7 +352,7 @@ class TestDebtUseCases:
         result = RegisterDebtPayment(service).execute(
             debt_id=1,
             wallet_id=2,
-            amount_kzt=100.0,
+            amount_base=100.0,
             payment_date="2026-03-05",
             description="Partially paid",
         )
@@ -360,7 +360,7 @@ class TestDebtUseCases:
         service.register_payment.assert_called_once_with(
             debt_id=1,
             wallet_id=2,
-            amount_kzt=100.0,
+            amount_base=100.0,
             payment_date="2026-03-05",
             description="Partially paid",
         )
@@ -386,12 +386,12 @@ class TestDebtUseCases:
         CreateLoan(service).execute(
             contact_name="Bob",
             wallet_id=2,
-            amount_kzt=250.0,
+            amount_base=250.0,
             created_at="2026-03-01",
         )
         RegisterDebtWriteOff(service).execute(
             debt_id=8,
-            amount_kzt=50.0,
+            amount_base=50.0,
             payment_date="2026-03-11",
         )
 
@@ -412,7 +412,7 @@ class TestDebtUseCases:
         service.create_loan.assert_called_once_with(
             contact_name="Bob",
             wallet_id=2,
-            amount_kzt=250.0,
+            amount_base=250.0,
             created_at="2026-03-01",
             currency="KZT",
             interest_rate=0.0,
@@ -420,7 +420,7 @@ class TestDebtUseCases:
         )
         service.register_write_off.assert_called_once_with(
             debt_id=8,
-            amount_kzt=50.0,
+            amount_base=50.0,
             payment_date="2026-03-11",
         )
 
@@ -458,7 +458,9 @@ class TestDebtUseCases:
         repo_file = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json")
         repo_file.close()
         csv_file = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv")
-        csv_file.write("date,type,category,amount_original,currency,rate_at_operation,amount_kzt\n")
+        csv_file.write(
+            "date,type,category,amount_original,currency,rate_at_operation,amount_base\n"
+        )
         csv_file.write("bad-date,income,Salary,10,USD,500,5000\n")
         csv_file.close()
         try:

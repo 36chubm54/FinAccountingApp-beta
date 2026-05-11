@@ -129,7 +129,7 @@ class TestJsonFileRecordRepository:
         assert data["records"][0]["type"] == "income"
         assert data["records"][0]["date"] == "2025-01-01"
         assert data["records"][0]["amount_original"] == 100.0
-        assert data["records"][0]["amount_kzt"] == 100.0
+        assert data["records"][0]["amount_base"] == 100.0
         assert data["records"][0]["currency"] == "KZT"
         assert data["records"][0]["rate_at_operation"] == 1.0
         assert data["records"][0]["category"] == "Salary"
@@ -154,9 +154,7 @@ class TestJsonFileRecordRepository:
             patch.object(repositories_module.time, "sleep"),
         ):
             with pytest.raises(RepositorySaveError, match="Temporary file saved to"):
-                self.repo.save(
-                    IncomeRecord(date="2025-01-02", _amount_init=50.0, category="Bonus")
-                )
+                self.repo.save(IncomeRecord(date="2025-01-02", _amount_init=50.0, category="Bonus"))
 
         current_payload = json.loads(Path(self.temp_file.name).read_text(encoding="utf-8"))
         assert current_payload == original_payload
@@ -236,7 +234,7 @@ class TestJsonFileRecordRepository:
                     "amount_original": 10.0,
                     "currency": "KZT",
                     "rate_at_operation": 1.0,
-                    "amount_kzt": 10.0,
+                    "amount_base": 10.0,
                     "category": "Mandatory",
                     "period": "monthly",
                 },
@@ -249,6 +247,38 @@ class TestJsonFileRecordRepository:
 
         expenses = self.repo.load_mandatory_expenses()
         assert len(expenses) == 1
+
+    def test_load_wallets_uses_system_wallet_currency_as_fallback(self):
+        json_data = {
+            "wallets": [
+                {
+                    "id": 1,
+                    "name": "Main wallet",
+                    "currency": "USD",
+                    "initial_balance": 0.0,
+                    "system": True,
+                    "allow_negative": False,
+                    "is_active": True,
+                },
+                {
+                    "id": 2,
+                    "name": "Cash",
+                    "initial_balance": 0.0,
+                    "system": False,
+                    "allow_negative": False,
+                    "is_active": True,
+                },
+            ],
+            "records": [],
+            "mandatory_expenses": [],
+            "transfers": [],
+        }
+        with open(self.temp_file.name, "w", encoding="utf-8") as f:
+            json.dump(json_data, f)
+
+        wallets = self.repo.load_wallets()
+
+        assert [wallet.currency for wallet in wallets] == ["USD", "USD"]
 
     def test_save_mandatory_expenses_ids_start_from_one(self):
         self.repo.save(IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"))
@@ -295,7 +325,7 @@ class TestJsonFileRecordRepository:
                     "amount_original": 10.0,
                     "currency": "KZT",
                     "rate_at_operation": 1.0,
-                    "amount_kzt": 10.0,
+                    "amount_base": 10.0,
                     "category": "Mandatory",
                     "description": "A",
                     "period": "monthly",
@@ -307,7 +337,7 @@ class TestJsonFileRecordRepository:
                     "amount_original": 20.0,
                     "currency": "KZT",
                     "rate_at_operation": 1.0,
-                    "amount_kzt": 20.0,
+                    "amount_base": 20.0,
                     "category": "Mandatory",
                     "description": "B",
                     "period": "monthly",
@@ -329,7 +359,7 @@ class TestJsonFileRecordRepository:
                 amount_original=10.0,
                 currency="KZT",
                 rate_at_operation=1.0,
-                amount_kzt=10.0,
+                amount_base=10.0,
                 category="Mandatory",
                 description="A",
                 period="monthly",
@@ -510,7 +540,7 @@ class TestJsonFileRecordRepository:
                     "amount_original": 10.0,
                     "currency": "KZT",
                     "rate_at_operation": 1.0,
-                    "amount_kzt": 10.0,
+                    "amount_base": 10.0,
                     "category": "Salary",
                 },
                 {
@@ -521,7 +551,7 @@ class TestJsonFileRecordRepository:
                     "amount_original": 20.0,
                     "currency": "KZT",
                     "rate_at_operation": 1.0,
-                    "amount_kzt": 20.0,
+                    "amount_base": 20.0,
                     "category": "Bonus",
                 },
             ],
