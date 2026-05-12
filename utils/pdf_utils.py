@@ -12,6 +12,35 @@ from domain.records import IncomeRecord, MandatoryExpenseRecord
 from domain.reports import Report
 from services.report_service import build_tag_group_rows
 from utils.debt_report_utils import debt_progress_percent, debts_for_report_period
+from utils.report_export_i18n import (
+    balance_label as localized_balance_label,
+)
+from utils.report_export_i18n import (
+    category_breakdown_headers,
+    category_title,
+    debt_headers,
+    debt_kind_label,
+    debt_status_label,
+    debt_summary_title,
+    final_balance_label,
+    fixed_amounts_note,
+    group_report_on_category_title,
+    group_report_on_tag_title,
+    grouped_category_totals_note,
+    grouped_report_csv_headers,
+    grouped_tag_headers,
+    grouped_tag_totals_note,
+    monthly_report_title,
+    monthly_summary_headers,
+    record_type_label_key,
+    report_xlsx_headers,
+    subtotal_label,
+    total_label,
+    warnings_grouping_unavailable,
+)
+from utils.report_export_i18n import (
+    statement_title as localized_statement_title,
+)
 from utils.tag_utils import format_tags_inline
 
 logger = logging.getLogger(__name__)
@@ -43,7 +72,7 @@ def _append_debt_summary(
 ) -> None:
     if not debts:
         return
-    title = Table([["Debt summary"]], colWidths=[available_width])
+    title = Table([[debt_summary_title()]], colWidths=[available_width])
     title.setStyle(
         TableStyle(
             [
@@ -58,17 +87,18 @@ def _append_debt_summary(
     )
     elems.append(Spacer(1, 8))  # type: ignore
     elems.append(title)
+    debt_header_row = debt_headers()
     data = [
         [
-            "Contact",
-            "Kind",
-            "Status",
-            "Opened",
-            "Closed",
-            "Total",
-            "Remain",
-            "Covered",
-            "Progress %",
+            debt_header_row[0],
+            debt_header_row[1],
+            debt_header_row[2],
+            debt_header_row[3],
+            debt_header_row[4],
+            debt_header_row[6],
+            debt_header_row[7],
+            debt_header_row[8],
+            debt_header_row[9],
         ]
     ]
     for debt in debts:
@@ -76,8 +106,8 @@ def _append_debt_summary(
         data.append(
             [
                 _safe_str(debt.contact_name),
-                str(debt.kind.value).title(),
-                str(debt.status.value).title(),
+                debt_kind_label(str(debt.kind.value)),
+                debt_status_label(str(debt.status.value)),
                 _safe_str(debt.created_at),
                 _safe_str(debt.closed_at or "-"),
                 f"{debt.total_amount_minor / 100.0:.2f}",
@@ -206,26 +236,38 @@ def _register_cyrillic_font() -> str:
     return "Helvetica"
 
 
-def report_to_pdf(report: Report, filepath: str, *, debts: list[Debt] | None = None) -> None:
+def report_to_pdf(
+    report: Report,
+    filepath: str,
+    *,
+    debts: list[Debt] | None = None,
+    base_currency: str = "KZT",
+) -> None:
     """Export report as PDF (fixed amounts by operation-time FX rates)."""
     # Build table data
     data = []
-    header = ["Date", "Type", "Category", "Amount (KZT, fixed)", "Tags"]
+    header = report_xlsx_headers(base_currency)
     data.append(header)
 
-    data.append(["", "", "", "", "Fixed amounts by operation-time FX rates"])
+    data.append(["", "", "", "", fixed_amounts_note()])
     if getattr(report, "initial_balance", 0) != 0 or report.is_opening_balance:
         data.append(
-            [f"{report.balance_label.upper()}", "", "", f"{report.initial_balance:.2f}", ""]
+            [
+                localized_balance_label(report.balance_label).upper(),
+                "",
+                "",
+                f"{report.initial_balance:.2f}",
+                "",
+            ]
         )
 
-    for record in sorted(report.records(), key=lambda r: r.date):
+    for record in report.sorted_records_desc():
         if isinstance(record, IncomeRecord):
-            record_type = "Income"
+            record_type = record_type_label_key("income")
         elif isinstance(record, MandatoryExpenseRecord):
-            record_type = "Mandatory Expense"
+            record_type = record_type_label_key("mandatory_expense")
         else:
-            record_type = "Expense"
+            record_type = record_type_label_key("expense")
         data.append(
             [
                 _safe_str(record.date),
@@ -238,8 +280,8 @@ def report_to_pdf(report: Report, filepath: str, *, debts: list[Debt] | None = N
 
     total = report.total_fixed()
     records_total = sum(r.signed_amount_base() for r in report.records())
-    data.append(["SUBTOTAL", "", "", f"{records_total:.2f}", ""])
-    data.append(["FINAL BALANCE", "", "", f"{total:.2f}", ""])
+    data.append([subtotal_label(), "", "", f"{records_total:.2f}", ""])
+    data.append([final_balance_label(), "", "", f"{total:.2f}", ""])
 
     # Ensure directory
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
@@ -279,7 +321,9 @@ def report_to_pdf(report: Report, filepath: str, *, debts: list[Debt] | None = N
     table.setStyle(style)
     elems: list[Table] = [table]
     # Add a header before the statement table
-    title_table = Table([[report.statement_title]], colWidths=[available_width])
+    title_table = Table(
+        [[localized_statement_title(report.statement_title)]], colWidths=[available_width]
+    )
     title_style = TableStyle(
         [
             ("FONT", (0, 0), (-1, -1), font_name),
@@ -300,7 +344,7 @@ def report_to_pdf(report: Report, filepath: str, *, debts: list[Debt] | None = N
     except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
         logger.warning("Failed to build grouped report sections for PDF export: %s", exc)
         groups = {}
-        grouped_warning = f"Warning: category breakdown unavailable ({exc})"
+        grouped_warning = warnings_grouping_unavailable(exc)
 
     summary_year, monthly_rows = report.monthly_income_expense_rows()
 
@@ -327,7 +371,7 @@ def report_to_pdf(report: Report, filepath: str, *, debts: list[Debt] | None = N
         # Insert category tables after the main table
         elems.append(Spacer(1, 8))  # type: ignore
         # Add a header before the group report tables
-        group_title = Table([["Group report on category"]], colWidths=[available_width])
+        group_title = Table([[group_report_on_category_title()]], colWidths=[available_width])
         group_title_style = TableStyle(
             [
                 ("FONT", (0, 0), (-1, -1), font_name),
@@ -342,7 +386,7 @@ def report_to_pdf(report: Report, filepath: str, *, debts: list[Debt] | None = N
         elems.append(group_title)
         for category, subreport in sorted(groups.items(), key=lambda x: x[0] or ""):
             # Title row for category
-            title_table = Table([[f"Category: {category}"]], colWidths=[available_width])
+            title_table = Table([[category_title(category)]], colWidths=[available_width])
             title_style = TableStyle(
                 [
                     ("FONT", (0, 0), (-1, -1), font_name),
@@ -356,15 +400,15 @@ def report_to_pdf(report: Report, filepath: str, *, debts: list[Debt] | None = N
             elems.append(title_table)
 
             # Category data table: Date, Type, Amount
-            cat_data = [["Date", "Type", "Amount (KZT)"]]
+            cat_data = [category_breakdown_headers(base_currency)]
             cat_total = 0.0
-            for r in sorted(subreport.records(), key=lambda rr: rr.date):
+            for r in subreport.sorted_records_desc():
                 if isinstance(r, IncomeRecord):
-                    r_type = "Income"
+                    r_type = record_type_label_key("income")
                 elif isinstance(r, MandatoryExpenseRecord):
-                    r_type = "Mandatory Expense"
+                    r_type = record_type_label_key("mandatory_expense")
                 else:
-                    r_type = "Expense"
+                    r_type = record_type_label_key("expense")
                 amt = getattr(r, "amount_base", 0.0)
                 cat_total += (
                     getattr(r, "amount_base", 0.0)
@@ -372,7 +416,7 @@ def report_to_pdf(report: Report, filepath: str, *, debts: list[Debt] | None = N
                     else 0.0
                 )
                 cat_data.append([_safe_str(r.date), r_type, f"{abs(amt):.2f}"])
-            cat_data.append(["SUBTOTAL", "", f"{abs(cat_total):.2f}"])
+            cat_data.append([subtotal_label(), "", f"{abs(cat_total):.2f}"])
 
             cat_col_widths = [
                 available_width * 0.50,
@@ -398,8 +442,8 @@ def report_to_pdf(report: Report, filepath: str, *, debts: list[Debt] | None = N
     tag_rows = build_tag_group_rows(report)
     if _should_add_by_tag_section(tag_rows):
         elems.append(Spacer(1, 8))  # type: ignore
-        tag_title = Table([["Group report on tag"]], colWidths=[available_width])
-        tag_title.setStyle(
+        tag_title_table = Table([[group_report_on_tag_title()]], colWidths=[available_width])
+        tag_title_table.setStyle(
             TableStyle(
                 [
                     ("FONT", (0, 0), (-1, -1), font_name),
@@ -411,8 +455,12 @@ def report_to_pdf(report: Report, filepath: str, *, debts: list[Debt] | None = N
                 ]
             )
         )
-        elems.append(tag_title)
-        tag_data = [["Tag", "Operations", "Total"], ["", "", "Grouped tag totals"]]
+        elems.append(tag_title_table)
+        tag_headers = grouped_tag_headers(base_currency)
+        tag_data = [
+            [tag_headers[0], tag_headers[1], tag_headers[2]],
+            ["", "", grouped_tag_totals_note()],
+        ]
         for row in tag_rows:
             tag_data.append(
                 [f"#{row.tag}", str(int(row.operations_count)), f"{float(row.total_base):.2f}"]
@@ -445,7 +493,7 @@ def report_to_pdf(report: Report, filepath: str, *, debts: list[Debt] | None = N
         font_name=font_name,
     )
 
-    summary_header = [f"Month ({summary_year})", "Income (KZT)", "Expense (KZT)"]
+    summary_header = monthly_summary_headers(summary_year, base_currency)
     summary_data = [summary_header]
     total_income = 0.0
     total_expense = 0.0
@@ -453,7 +501,7 @@ def report_to_pdf(report: Report, filepath: str, *, debts: list[Debt] | None = N
         total_income += income
         total_expense += expense
         summary_data.append([month_label, f"{income:.2f}", f"{expense:.2f}"])
-    summary_data.append(["TOTAL", f"{total_income:.2f}", f"{total_expense:.2f}"])
+    summary_data.append([total_label(), f"{total_income:.2f}", f"{total_expense:.2f}"])
 
     summary_col_widths = [
         available_width * 0.30,
@@ -478,7 +526,7 @@ def report_to_pdf(report: Report, filepath: str, *, debts: list[Debt] | None = N
     HEIGHT = 14
     elems.append(Spacer(WIDTH, HEIGHT))  # type: ignore
     # Add a title before the report of monthly income/expenses
-    monthly_title = Table([["Monthly income and expense report"]], colWidths=[available_width])
+    monthly_title = Table([[monthly_report_title()]], colWidths=[available_width])
     monthly_title_style = TableStyle(
         [
             ("FONT", (0, 0), (-1, -1), font_name),
@@ -500,6 +548,8 @@ def grouped_report_to_pdf(
     statement_title: str,
     grouped_rows: list[tuple[str, int, float]],
     filepath: str,
+    *,
+    base_currency: str = "KZT",
 ) -> None:
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
 
@@ -528,12 +578,12 @@ def grouped_report_to_pdf(
         )
     )
 
-    data = [["Category", "Operations", "Total"], ["", "", "Grouped category totals"]]
+    data = [grouped_report_csv_headers(base_currency), ["", "", grouped_category_totals_note()]]
     total_base = 0.0
     for category, operations_count, amount_base in grouped_rows:
         total_base += float(amount_base)
         data.append([_safe_str(category), str(int(operations_count)), f"{float(amount_base):.2f}"])
-    data.append(["TOTAL", "", f"{total_base:.2f}"])
+    data.append([total_label(), "", f"{total_base:.2f}"])
 
     table = Table(
         data,

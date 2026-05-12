@@ -8,7 +8,18 @@ import pytest
 from domain.records import ExpenseRecord, IncomeRecord
 from domain.reports import Report
 from domain.transfers import Transfer
+from gui.i18n import get_language, set_language
 from utils.csv_utils import report_from_csv, report_to_csv
+
+
+@pytest.fixture(autouse=True)
+def _english_report_exports():
+    previous = get_language()
+    set_language("en")
+    try:
+        yield
+    finally:
+        set_language(previous)
 
 
 def test_to_csv():
@@ -27,10 +38,60 @@ def test_to_csv():
         assert rows[0] == ["Transaction statement", "", "", ""]
         assert rows[1] == ["Date", "Type", "Category", "Amount (KZT)"]
         assert rows[2] == ["", "", "", "Fixed amounts by operation-time FX rates"]
-        assert rows[3] == ["2025-01-01", "Income", "Salary", "100.00"]
-        assert rows[4] == ["2025-01-02", "Expense", "Food", "30.00"]
+        assert rows[3] == ["2025-01-02", "Expense", "Food", "30.00"]
+        assert rows[4] == ["2025-01-01", "Income", "Salary", "100.00"]
         assert rows[5] == ["SUBTOTAL", "", "", "70.00"]
     finally:
+        os.unlink(tmp_path)
+
+
+def test_to_csv_localizes_exported_report_and_keeps_roundtrip_in_ru():
+    records = [
+        IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Зарплата"),
+        ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Еда"),
+    ]
+    report = Report(records, initial_balance=50.0)
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv") as tmp:
+        tmp_path = tmp.name
+    previous = get_language()
+    try:
+        set_language("ru")
+        report_to_csv(report, tmp_path)
+        with open(tmp_path, encoding="utf-8") as f:
+            rows = list(csv.reader(f))
+        assert rows[0] == ["Отчет по операциям", "", "", ""]
+        assert rows[1] == ["Дата", "Тип", "Категория", "Сумма (KZT)"]
+        assert rows[3] == ["", "Начальный баланс", "", "50.00"]
+        assert rows[4] == ["2025-01-02", "Расход", "Еда", "30.00"]
+        assert rows[5] == ["2025-01-01", "Доход", "Зарплата", "100.00"]
+        imported = report_from_csv(tmp_path)
+        assert len(imported.records()) == 2
+        assert abs(imported.initial_balance - 50.0) < 1e-6
+        assert abs(imported.total() - report.total()) < 1e-6
+    finally:
+        set_language(previous)
+        os.unlink(tmp_path)
+
+
+def test_to_csv_localized_report_roundtrips_after_language_switch():
+    records = [
+        IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Зарплата"),
+        ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Еда"),
+    ]
+    report = Report(records, initial_balance=50.0)
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv") as tmp:
+        tmp_path = tmp.name
+    previous = get_language()
+    try:
+        set_language("ru")
+        report_to_csv(report, tmp_path)
+        set_language("en")
+        imported = report_from_csv(tmp_path)
+        assert len(imported.records()) == 2
+        assert abs(imported.initial_balance - 50.0) < 1e-6
+        assert abs(imported.total() - report.total()) < 1e-6
+    finally:
+        set_language(previous)
         os.unlink(tmp_path)
 
 
@@ -51,8 +112,8 @@ def test_to_csv_with_initial_balance():
         assert rows[1] == ["Date", "Type", "Category", "Amount (KZT)"]
         assert rows[2] == ["", "", "", "Fixed amounts by operation-time FX rates"]
         assert rows[3] == ["", "Initial balance", "", "50.00"]
-        assert rows[4] == ["2025-01-01", "Income", "Salary", "100.00"]
-        assert rows[5] == ["2025-01-02", "Expense", "Food", "30.00"]
+        assert rows[4] == ["2025-01-02", "Expense", "Food", "30.00"]
+        assert rows[5] == ["2025-01-01", "Income", "Salary", "100.00"]
         assert rows[6] == ["SUBTOTAL", "", "", "70.00"]
         assert rows[7] == ["FINAL BALANCE", "", "", "120.00"]
     finally:
@@ -254,7 +315,7 @@ def test_csv_export_grouped_drill_down():
         assert len(salary_rows) == 2
         # Check amounts
         amounts = [float(r[3]) for r in rows if r[0] and r[0].startswith("2025")]
-        assert amounts == [100.0, 50.0]
+        assert amounts == [50.0, 100.0]
         # SUBTOTAL should be sum of amounts (150.0)
         subtotal_row = next(r for r in rows if r[0] == "SUBTOTAL")
         assert subtotal_row[3] == "150.00"

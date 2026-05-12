@@ -615,6 +615,7 @@ class ReportsFrame(ttk.Frame):
         if not filepath:
             return
         try:
+            base_currency = self._context.controller.get_base_currency_code()
             export_grouped_summary = bool(self.group_var.get()) and not drill_category
             if export_grouped_summary:
                 from gui.exporters import export_grouped_report
@@ -632,6 +633,7 @@ class ReportsFrame(ttk.Frame):
                     grouped_rows,
                     filepath,
                     fmt,
+                    base_currency=base_currency,
                 )
             else:
                 report_to_export = (
@@ -642,7 +644,7 @@ class ReportsFrame(ttk.Frame):
                 if fmt == "csv":
                     # Export report view
                     # (includes Opening/Initial balance and Total/Final balance rows)
-                    report_to_csv(report_to_export, filepath)
+                    report_to_csv(report_to_export, filepath, base_currency=base_currency)
                 else:
                     from gui.exporters import export_report
 
@@ -651,6 +653,7 @@ class ReportsFrame(ttk.Frame):
                         filepath,
                         fmt,
                         debts=self._context.controller.get_debts(result.filters.wallet_id),
+                        base_currency=base_currency,
                     )
             show_info(
                 "\n\n".join(

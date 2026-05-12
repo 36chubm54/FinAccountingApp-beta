@@ -14,18 +14,25 @@ def _raise_missing_pdf_dependency(exc: ModuleNotFoundError) -> None:
     raise exc
 
 
-def export_report(report, filepath: str, fmt: str, *, debts=None) -> None:
+def export_report(
+    report,
+    filepath: str,
+    fmt: str,
+    *,
+    debts=None,
+    base_currency: str = "KZT",
+) -> None:
     fmt = (fmt or "csv").lower()
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     try:
         if fmt == "csv":
             from utils.csv_utils import report_to_csv
 
-            report_to_csv(report, filepath)
+            report_to_csv(report, filepath, base_currency=base_currency)
         elif fmt in ("xlsx", "xls"):
             from utils.excel_utils import report_to_xlsx
 
-            report_to_xlsx(report, filepath, debts=list(debts or []))
+            report_to_xlsx(report, filepath, debts=list(debts or []), base_currency=base_currency)
         elif fmt == "pdf":
             report_to_pdf = None
             try:
@@ -36,7 +43,7 @@ def export_report(report, filepath: str, fmt: str, *, debts=None) -> None:
                 _raise_missing_pdf_dependency(exc)
 
             assert report_to_pdf is not None
-            report_to_pdf(report, filepath, debts=list(debts or []))
+            report_to_pdf(report, filepath, debts=list(debts or []), base_currency=base_currency)
         else:
             raise ValueError(f"Unsupported export format: {fmt}")
     except (ImportError, OSError, TypeError, ValueError, RuntimeError):
@@ -49,6 +56,8 @@ def export_grouped_report(
     grouped_rows: list[tuple[str, int, float]],
     filepath: str,
     fmt: str,
+    *,
+    base_currency: str = "KZT",
 ) -> None:
     fmt = (fmt or "csv").lower()
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
@@ -56,11 +65,18 @@ def export_grouped_report(
         if fmt == "csv":
             from utils.csv_utils import grouped_report_to_csv
 
-            grouped_report_to_csv(statement_title, grouped_rows, filepath)
+            grouped_report_to_csv(
+                statement_title,
+                grouped_rows,
+                filepath,
+                base_currency=base_currency,
+            )
         elif fmt in ("xlsx", "xls"):
             from utils.excel_utils import grouped_report_to_xlsx
 
-            grouped_report_to_xlsx(statement_title, grouped_rows, filepath)
+            grouped_report_to_xlsx(
+                statement_title, grouped_rows, filepath, base_currency=base_currency
+            )
         elif fmt == "pdf":
             grouped_report_to_pdf = None
             try:
@@ -71,7 +87,12 @@ def export_grouped_report(
                 _raise_missing_pdf_dependency(exc)
 
             assert grouped_report_to_pdf is not None
-            grouped_report_to_pdf(statement_title, grouped_rows, filepath)
+            grouped_report_to_pdf(
+                statement_title,
+                grouped_rows,
+                filepath,
+                base_currency=base_currency,
+            )
         else:
             raise ValueError(f"Unsupported export format: {fmt}")
     except (ImportError, OSError, TypeError, ValueError, RuntimeError):

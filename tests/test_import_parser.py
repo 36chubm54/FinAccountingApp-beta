@@ -1,11 +1,18 @@
 import json
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
 
 from domain.import_policy import ImportPolicy
+from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
+from domain.reports import Report
+from gui.i18n import get_language, set_language
 from services import import_parser
 from utils.backup_utils import BackupReadonlyError, compute_checksum
+from utils.csv_utils import report_to_csv
+from utils.excel_utils import report_to_xlsx
 
 
 def test_parse_import_file_rejects_large_file(monkeypatch, tmp_path: Path) -> None:
@@ -240,6 +247,92 @@ def test_parse_transfer_row_accepts_legacy_amount_kzt_for_full_backup() -> None:
     assert transfer is not None
     assert transfer.amount_base == pytest.approx(5000.0)
     assert next_transfer_id == 2
+
+
+def test_parse_import_file_accepts_localized_report_csv_export() -> None:
+    previous = get_language()
+    fd, path = tempfile.mkstemp(suffix=".csv")
+    os.close(fd)
+    try:
+        set_language("ru")
+        report = Report(
+            [
+                IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Зарплата"),
+                ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Еда"),
+            ],
+            initial_balance=50.0,
+        )
+        report_to_csv(report, path)
+
+        parsed = import_parser.parse_import_file(path)
+
+        assert len(parsed.rows) == 2
+        assert parsed.initial_balance == pytest.approx(50.0)
+        assert parsed.rows[0]["date"] == "2025-01-02"
+        assert parsed.rows[0]["category"] == "Еда"
+    finally:
+        set_language(previous)
+        if os.path.exists(path):
+            os.unlink(path)
+
+
+def test_parse_import_file_accepts_localized_report_xlsx_export() -> None:
+    previous = get_language()
+    fd, path = tempfile.mkstemp(suffix=".xlsx")
+    os.close(fd)
+    try:
+        set_language("ru")
+        report = Report(
+            [
+                IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Зарплата"),
+                ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Еда"),
+            ],
+            initial_balance=50.0,
+        )
+        report_to_xlsx(report, path)
+
+        parsed = import_parser.parse_import_file(path)
+
+        assert len(parsed.rows) == 2
+        assert parsed.initial_balance == pytest.approx(50.0)
+        assert parsed.rows[0]["date"] == "2025-01-02"
+        assert parsed.rows[0]["category"] == "Еда"
+        assert parsed.rows[1]["date"] == "2025-01-01"
+    finally:
+        set_language(previous)
+        if os.path.exists(path):
+            os.unlink(path)
+
+
+def test_parse_import_file_preserves_mandatory_expense_from_localized_report_csv() -> None:
+    previous = get_language()
+    fd, path = tempfile.mkstemp(suffix=".csv")
+    os.close(fd)
+    try:
+        set_language("ru")
+        report = Report(
+            [
+                MandatoryExpenseRecord(
+                    date="2025-01-02",
+                    wallet_id=1,
+                    _amount_init=30.0,
+                    category="Подписка",
+                    period="monthly",
+                    auto_pay=True,
+                )
+            ]
+        )
+        report_to_csv(report, path)
+
+        parsed = import_parser.parse_import_file(path)
+
+        assert len(parsed.rows) == 1
+        assert parsed.rows[0]["type"] == "mandatory_expense"
+        assert parsed.rows[0]["category"] == "Подписка"
+    finally:
+        set_language(previous)
+        if os.path.exists(path):
+            os.unlink(path)
 
 
 def test_parse_import_file_reads_debts_from_json(tmp_path: Path) -> None:

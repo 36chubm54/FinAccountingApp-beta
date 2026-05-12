@@ -14,6 +14,17 @@ from domain.reports import Report
 from domain.transfers import Transfer
 from domain.wallets import Wallet
 from gui import exporters, importers
+from gui.i18n import get_language, set_language
+
+
+@pytest.fixture(autouse=True)
+def _english_report_exports():
+    previous = get_language()
+    set_language("en")
+    try:
+        yield
+    finally:
+        set_language(previous)
 
 
 def make_sample_report():

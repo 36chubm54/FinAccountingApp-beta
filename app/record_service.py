@@ -12,7 +12,7 @@ class RecordService:
     def _base_currency_code(self) -> str:
         try:
             wallet = self._repository.get_system_wallet()
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             return "KZT"
         currency = str(getattr(wallet, "currency", "") or "").strip().upper()
         if not currency or any(ch in currency for ch in "<>() "):

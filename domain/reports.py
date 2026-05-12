@@ -222,6 +222,9 @@ class Report:
     def sorted_display_records(self) -> list[Record]:
         return sorted(self._display_records(), key=self._sort_key)
 
+    def sorted_display_records_desc(self) -> list[Record]:
+        return sorted(self._display_records(), key=self._reverse_sort_key)
+
     def sorted_by_date(self) -> "Report":
         return Report(
             sorted(self._records, key=self._sort_key),
@@ -235,6 +238,9 @@ class Report:
 
     def records(self) -> list[Record]:
         return list(self._records)
+
+    def sorted_records_desc(self) -> list[Record]:
+        return sorted(self._records, key=self._reverse_sort_key)
 
     @property
     def initial_balance(self) -> float:
@@ -367,6 +373,13 @@ class Report:
         if parsed is None:
             return (1, dt_date.max)
         return (0, parsed)
+
+    @staticmethod
+    def _reverse_sort_key(record: Record) -> tuple[int, int]:
+        parsed = Report._record_date(record)
+        if parsed is None:
+            return (1, 0)
+        return (0, -parsed.toordinal())
 
     def _profit_records(self) -> list[Record]:
         if self._wallet_id is not None:

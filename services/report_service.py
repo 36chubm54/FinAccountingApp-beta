@@ -99,7 +99,7 @@ def _display_date(value: str | dt_date) -> str:
 
 def build_operations_rows(report: Report) -> list[ReportOperationRow]:
     rows: list[ReportOperationRow] = []
-    for record in report.sorted_display_records():
+    for record in report.sorted_display_records_desc():
         rows.append(
             ReportOperationRow(
                 date=_display_date(record.date),

@@ -25,6 +25,40 @@ from utils.import_core import (
     safe_type,
 )
 from utils.money import to_money_float
+from utils.report_export_i18n import (
+    balance_label as localized_balance_label,
+)
+from utils.report_export_i18n import (
+    canonical_report_header,
+    canonical_report_row_type,
+    category_breakdown_headers,
+    category_breakdown_unavailable,
+    category_title,
+    debt_headers,
+    debt_kind_label,
+    debt_status_label,
+    final_balance_label,
+    fixed_amounts_note,
+    grouped_category_totals_note,
+    grouped_report_csv_headers,
+    is_report_total_row_label,
+    is_statement_title,
+    monthly_summary_headers,
+    report_xlsx_headers,
+    sheet_title_by_category,
+    sheet_title_by_tag,
+    sheet_title_debts,
+    sheet_title_report,
+    sheet_title_warnings,
+    sheet_title_yearly,
+    subtotal_label,
+    tag_title,
+    total_label,
+    warnings_header,
+)
+from utils.report_export_i18n import (
+    statement_title as localized_statement_title,
+)
 from utils.tabular_utils import (
     mandatory_expense_export_rows,
     record_export_rows,
@@ -129,12 +163,12 @@ def _grouped_sections_with_warning(report: Report) -> tuple[dict[str, Report], s
         return report.grouped_by_category(), None
     except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
         logger.warning("Failed to build grouped report sections for XLSX export: %s", exc)
-        return {}, f"Category breakdown unavailable: {exc}"
+        return {}, category_breakdown_unavailable(exc)
 
 
 def _append_warning_sheet(wb: Workbook, message: str) -> None:
-    ws = wb.create_sheet(title="Warnings")
-    ws.append(["Warning"])
+    ws = wb.create_sheet(title=sheet_title_warnings())
+    ws.append([warnings_header()])
     _style_header_row(ws, 1)
     ws.append([message])
     ws.cell(row=2, column=1).alignment = Alignment(wrap_text=True, vertical="top")
@@ -176,21 +210,8 @@ def _should_add_by_tag_sheet(report: Report, groups: dict[str, Report]) -> bool:
 def _append_debts_sheet(wb: Workbook, debts: list[Debt]) -> None:
     if not debts:
         return
-    ws = wb.create_sheet("Debts", index=len(wb.sheetnames))
-    ws.append(
-        [
-            "Contact",
-            "Kind",
-            "Status",
-            "Opened",
-            "Closed",
-            "Currency",
-            "Total",
-            "Remaining",
-            "Settled",
-            "Progress %",
-        ]
-    )
+    ws = wb.create_sheet(sheet_title_debts(), index=len(wb.sheetnames))
+    ws.append(debt_headers())
     _style_header_row(ws, 1)
     ws.freeze_panes = "A2"
     for debt in debts:
@@ -198,8 +219,8 @@ def _append_debts_sheet(wb: Workbook, debts: list[Debt]) -> None:
         ws.append(
             [
                 str(debt.contact_name),
-                str(debt.kind.value).title(),
-                str(debt.status.value).title(),
+                debt_kind_label(str(debt.kind.value)),
+                debt_status_label(str(debt.status.value)),
                 str(debt.created_at),
                 str(debt.closed_at or "-"),
                 str(debt.currency).upper(),
@@ -215,29 +236,40 @@ def _append_debts_sheet(wb: Workbook, debts: list[Debt]) -> None:
     _set_auto_width(ws)
 
 
-def report_to_xlsx(report: Report, filepath: str, *, debts: list[Debt] | None = None) -> None:
+def report_to_xlsx(
+    report: Report,
+    filepath: str,
+    *,
+    debts: list[Debt] | None = None,
+    base_currency: str = "KZT",
+) -> None:
     """Export report view (fixed amounts) to XLSX. Read-only format."""
     wb = Workbook()
     ws = wb.active
     if ws is not None:
-        ws.title = "Report"
-        ws.append([report.statement_title, "", "", "", ""])
+        ws.title = sheet_title_report()
+        ws.append([localized_statement_title(report.statement_title), "", "", "", ""])
         _style_title_row(ws, 1, columns=5)
-        ws.append(["Date", "Type", "Category", "Amount (KZT)", "Tags"])
+        ws.append(report_xlsx_headers(base_currency))
         _style_header_row(ws, 2)
-        ws.append(["", "", "", "", "Fixed amounts by operation-time FX rates"])
+        ws.append(["", "", "", "", fixed_amounts_note()])
         ws["D3"].alignment = Alignment(horizontal="right", vertical="center")
         ws["D3"].font = Font(italic=True, color="666666")
         ws.freeze_panes = "A3"
 
     if (getattr(report, "initial_balance", 0) != 0 or report.is_opening_balance) and ws is not None:
-        ws.append(["", report.balance_label, "", report.initial_balance, ""])
+        ws.append(
+            [
+                "",
+                localized_balance_label(report.balance_label),
+                "",
+                report.initial_balance,
+                "",
+            ]
+        )
         _style_total_row(ws, ws.max_row, fill=SECTION_FILL, amount_columns=(4,))
 
-    for record in sorted(
-        report.records(),
-        key=lambda r: (0, r.date) if isinstance(r.date, dt_date) else (1, dt_date.max),
-    ):
+    for record in report.sorted_records_desc():
         if ws is not None:
             record_date = (
                 record.date.isoformat() if isinstance(record.date, dt_date) else record.date
@@ -256,17 +288,17 @@ def report_to_xlsx(report: Report, filepath: str, *, debts: list[Debt] | None = 
     total = report.total_fixed()
     records_total = sum(r.signed_amount_base() for r in report.records())
     if ws is not None:
-        ws.append(["SUBTOTAL", "", "", records_total, ""])
+        ws.append([subtotal_label(), "", "", records_total, ""])
         _style_total_row(ws, ws.max_row, fill=SUBTOTAL_FILL, amount_columns=(4,))
-        ws.append(["FINAL BALANCE", "", "", total, ""])
+        ws.append([final_balance_label(), "", "", total, ""])
         _style_total_row(ws, ws.max_row, fill=TOTAL_FILL, amount_columns=(4,))
         ws.auto_filter.ref = f"A2:E{ws.max_row}"
         _set_auto_width(ws)
 
     summary_year, monthly_rows = report.monthly_income_expense_rows()
-    summary_ws = wb.create_sheet("Yearly Report")
+    summary_ws = wb.create_sheet(sheet_title_yearly())
     if summary_ws is not None:
-        summary_ws.append([f"Month ({summary_year})", "Income (KZT)", "Expense (KZT)"])
+        summary_ws.append(monthly_summary_headers(summary_year, base_currency))
         _style_header_row(summary_ws, 1, center=True)
         summary_ws.freeze_panes = "A2"
         total_income = 0.0
@@ -276,7 +308,7 @@ def report_to_xlsx(report: Report, filepath: str, *, debts: list[Debt] | None = 
             total_expense += expense
             summary_ws.append([month_label, income, expense])
             _style_data_row(summary_ws, summary_ws.max_row, amount_columns=(2, 3))
-        summary_ws.append(["TOTAL", total_income, total_expense])
+        summary_ws.append([total_label(), total_income, total_expense])
         _style_total_row(summary_ws, summary_ws.max_row, fill=TOTAL_FILL, amount_columns=(2, 3))
         summary_ws.auto_filter.ref = f"A1:C{summary_ws.max_row}"
         _set_auto_width(summary_ws)
@@ -284,9 +316,9 @@ def report_to_xlsx(report: Report, filepath: str, *, debts: list[Debt] | None = 
     groups, grouped_warning = _grouped_sections_with_warning(report)
 
     if _should_add_by_category_sheet(report, groups):
-        bycat_ws = wb.create_sheet(title="By Category", index=1)
+        bycat_ws = wb.create_sheet(title=sheet_title_by_category(), index=1)
         for category, subreport in sorted(groups.items(), key=lambda x: x[0] or ""):
-            bycat_ws.append([f"Category: {category}"])
+            bycat_ws.append([category_title(category)])
             category_row = bycat_ws.max_row
             bycat_ws.merge_cells(
                 start_row=category_row,
@@ -297,13 +329,10 @@ def report_to_xlsx(report: Report, filepath: str, *, debts: list[Debt] | None = 
             bycat_ws.cell(row=category_row, column=1).font = Font(bold=True, color="1F1F1F")
             bycat_ws.cell(row=category_row, column=1).fill = SECTION_FILL
             bycat_ws.cell(row=category_row, column=1).border = THIN_BORDER
-            bycat_ws.append(["Date", "Type", "Amount (KZT)"])
+            bycat_ws.append(category_breakdown_headers(base_currency))
             _style_header_row(bycat_ws, bycat_ws.max_row)
             records_total = 0.0
-            for r in sorted(
-                subreport.records(),
-                key=lambda rr: (0, rr.date) if isinstance(rr.date, dt_date) else (1, dt_date.max),
-            ):
+            for r in subreport.sorted_records_desc():
                 amt = getattr(r, "amount", 0.0)
                 records_total += (
                     getattr(r, "amount", 0.0) if getattr(r, "amount", None) is not None else 0.0
@@ -313,7 +342,7 @@ def report_to_xlsx(report: Report, filepath: str, *, debts: list[Debt] | None = 
                     display_date = display_date.isoformat()
                 bycat_ws.append([display_date, report_record_type_label(r), abs(amt)])
                 _style_data_row(bycat_ws, bycat_ws.max_row, amount_columns=(3,))
-            bycat_ws.append(["SUBTOTAL", "", abs(records_total)])
+            bycat_ws.append([subtotal_label(), "", abs(records_total)])
             _style_total_row(bycat_ws, bycat_ws.max_row, fill=SUBTOTAL_FILL, amount_columns=(3,))
             bycat_ws.append([""])
         bycat_ws.freeze_panes = "A2"
@@ -323,9 +352,9 @@ def report_to_xlsx(report: Report, filepath: str, *, debts: list[Debt] | None = 
 
     tag_groups = build_tag_group_reports(report)
     if _should_add_by_tag_sheet(report, tag_groups):
-        bytag_ws = wb.create_sheet(title="By Tag", index=2)
+        bytag_ws = wb.create_sheet(title=sheet_title_by_tag(), index=2)
         for tag, subreport in sorted(tag_groups.items(), key=lambda item: item[0].casefold()):
-            bytag_ws.append([f"Tag: #{tag}"])
+            bytag_ws.append([tag_title(tag)])
             tag_row = bytag_ws.max_row
             bytag_ws.merge_cells(
                 start_row=tag_row,
@@ -336,13 +365,10 @@ def report_to_xlsx(report: Report, filepath: str, *, debts: list[Debt] | None = 
             bytag_ws.cell(row=tag_row, column=1).font = Font(bold=True, color="1F1F1F")
             bytag_ws.cell(row=tag_row, column=1).fill = SECTION_FILL
             bytag_ws.cell(row=tag_row, column=1).border = THIN_BORDER
-            bytag_ws.append(["Date", "Type", "Category", "Amount (KZT)", "Tags"])
+            bytag_ws.append(report_xlsx_headers(base_currency))
             _style_header_row(bytag_ws, bytag_ws.max_row)
             records_total = 0.0
-            for record in sorted(
-                subreport.records(),
-                key=lambda rr: (0, rr.date) if isinstance(rr.date, dt_date) else (1, dt_date.max),
-            ):
+            for record in subreport.sorted_records_desc():
                 amount = float(getattr(record, "amount_base", 0.0) or 0.0)
                 records_total += float(record.signed_amount_base())
                 display_date = getattr(record, "date", "")
@@ -358,7 +384,7 @@ def report_to_xlsx(report: Report, filepath: str, *, debts: list[Debt] | None = 
                     ]
                 )
                 _style_data_row(bytag_ws, bytag_ws.max_row, amount_columns=(4,))
-            bytag_ws.append(["SUBTOTAL", "", "", abs(records_total), ""])
+            bytag_ws.append([subtotal_label(), "", "", abs(records_total), ""])
             _style_total_row(bytag_ws, bytag_ws.max_row, fill=SUBTOTAL_FILL, amount_columns=(4,))
             bytag_ws.append([""])
         bytag_ws.freeze_panes = "A2"
@@ -379,16 +405,18 @@ def grouped_report_to_xlsx(
     statement_title: str,
     grouped_rows: list[tuple[str, int, float]],
     filepath: str,
+    *,
+    base_currency: str = "KZT",
 ) -> None:
     wb = Workbook()
     ws = wb.active
     if ws is not None:
-        ws.title = "Grouped Report"
+        ws.title = sheet_title_report()
         ws.append([statement_title, "", ""])
         _style_title_row(ws, 1, columns=3)
-        ws.append(["Category", "Operations", "Total (KZT)"])
+        ws.append(grouped_report_csv_headers(base_currency))
         _style_header_row(ws, 2)
-        ws.append(["", "", "Grouped category totals"])
+        ws.append(["", "", grouped_category_totals_note()])
         ws["C3"].alignment = Alignment(horizontal="right", vertical="center")
         ws["C3"].font = Font(italic=True, color="666666")
         ws.freeze_panes = "A3"
@@ -399,7 +427,7 @@ def grouped_report_to_xlsx(
             ws.append([category, int(operations_count), float(amount_base)])
             _style_data_row(ws, ws.max_row, amount_columns=(3,))
 
-        ws.append(["TOTAL", "", total_base])
+        ws.append([total_label(), "", total_base])
         _style_total_row(ws, ws.max_row, fill=TOTAL_FILL, amount_columns=(3,))
         ws.auto_filter.ref = f"A2:C{ws.max_row}"
         _set_auto_width(ws)
@@ -478,13 +506,14 @@ def import_records_from_xlsx(
 
         header_offset = 0
         header_row = first_row
-        if first_row and _safe_str(first_row[0]).strip().startswith("Transaction statement"):
+        first_cell = _safe_str(first_row[0]).strip()
+        if is_statement_title(first_cell):
             header_row = next(rows_iter, None)
             header_offset = 1
         if header_row is None:
             return [], 0.0, (0, 0, [])
 
-        headers = [norm_key(_safe_str(h)) for h in header_row]
+        headers = [canonical_report_header(_safe_str(h)) for h in header_row]
         records: list[Record] = []
         initial_balance = to_money_float(existing_initial_balance)
         errors: list[str] = []
@@ -494,7 +523,9 @@ def import_records_from_xlsx(
         transfers = {}
         next_transfer_id = 1
 
-        is_report_xlsx = {"date", "type", "category", "amount_(kzt)"}.issubset(set(headers))
+        is_report_xlsx = {"date", "type", "category", "amount"}.issubset(
+            set(headers)
+        ) and "amount_original" not in set(headers)
         get_rate = None
         if policy == ImportPolicy.CURRENT_RATE:
             get_rate = resolve_get_rate(currency_service)
@@ -512,16 +543,16 @@ def import_records_from_xlsx(
 
             if is_report_xlsx:
                 date_value = _safe_str(raw.get("date", "")).strip()
-                if date_value.upper() in {"SUBTOTAL", "FINAL_BALANCE", "FINAL BALANCE"}:
+                if is_report_total_row_label(date_value):
                     continue
-                if date_value == "" and norm_key(_safe_str(raw.get("type", "")).strip()) in {
-                    "initial_balance",
-                    "opening_balance",
-                }:
+                row_type_value = canonical_report_row_type(_safe_str(raw.get("type", "")).strip())
+                amount_value = raw.get("amount")
+                if date_value == "" and row_type_value in {"initial_balance", "opening_balance"}:
                     raw["type"] = "initial_balance"
-                    raw["amount_original"] = raw.get("amount_(kzt)")
+                    raw["amount_original"] = amount_value
                 else:
-                    raw["amount"] = raw.get("amount_(kzt)")
+                    raw["type"] = row_type_value or raw.get("type", "")
+                    raw["amount"] = amount_value
 
             row_type = safe_type(_safe_str(raw.get("type", "")).lower())
             if row_type == "transfer":

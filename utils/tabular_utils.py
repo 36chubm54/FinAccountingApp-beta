@@ -6,6 +6,7 @@ from datetime import date as dt_date
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 from domain.transfers import Transfer
 from utils.import_core import record_type_name
+from utils.report_export_i18n import record_type_label_key
 from utils.tag_utils import format_tags_inline
 
 
@@ -18,12 +19,7 @@ def resolve_get_rate(currency_service):
 
 
 def report_record_type_label(record: Record) -> str:
-    record_type = record_type_name(record)
-    if record_type == "income":
-        return "Income"
-    if record_type == "mandatory_expense":
-        return "Mandatory Expense"
-    return "Expense"
+    return record_type_label_key(record_type_name(record))
 
 
 def record_export_rows(
