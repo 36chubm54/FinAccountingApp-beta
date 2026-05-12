@@ -3,6 +3,7 @@ import tempfile
 import time
 from datetime import date as dt_date
 
+import pytest
 from openpyxl import load_workbook
 
 import domain.reports as reports_module
@@ -15,6 +16,7 @@ from domain.records import (
 )
 from domain.reports import Report
 from domain.transfers import Transfer
+from gui.i18n import get_language, set_language
 from utils.csv_utils import (
     export_mandatory_expenses_to_csv,
     import_mandatory_expenses_from_csv,
@@ -27,6 +29,16 @@ from utils.excel_utils import (
     report_from_xlsx,
     report_to_xlsx,
 )
+
+
+@pytest.fixture(autouse=True)
+def _english_report_exports():
+    previous = get_language()
+    set_language("en")
+    try:
+        yield
+    finally:
+        set_language(previous)
 
 
 def test_report_xlsx_roundtrip():
@@ -46,6 +58,10 @@ def test_report_xlsx_roundtrip():
             assert report_ws.cell(1, 1).value == "Transaction statement"
             assert report_ws.cell(4, 2).value == "Initial balance"
             assert report_ws.cell(4, 4).value == 50.0
+            assert report_ws.cell(5, 1).value == "2025-01-02"
+            assert report_ws.cell(5, 2).value == "Expense"
+            assert report_ws.cell(6, 1).value == "2025-01-01"
+            assert report_ws.cell(6, 2).value == "Income"
             assert report_ws.freeze_panes == "A3"
             assert report_ws.auto_filter.ref == "A2:E8"
             assert "Yearly Report" in wb.sheetnames
@@ -112,9 +128,9 @@ def test_report_xlsx_by_tag_sheet_repeats_multi_tag_record_under_each_single_tag
             food_block = rows[food_idx:home_idx]
             home_block = rows[home_idx:]
 
-            assert ("2025-01-02", "Expense", "Food", 30.0, "#food #home") in food_block
-            assert ("2025-01-02", "Expense", "Food", 30.0, "#food #home") in home_block
-            assert ("2025-01-03", "Expense", "Home", 15.0, "#home") in home_block
+            assert food_block[2] == ("2025-01-02", "Expense", "Food", 30.0, "#food #home")
+            assert home_block[2] == ("2025-01-03", "Expense", "Home", 15.0, "#home")
+            assert home_block[3] == ("2025-01-02", "Expense", "Food", 30.0, "#food #home")
         finally:
             wb.close()
     finally:
@@ -234,6 +250,48 @@ def test_report_xlsx_uses_opening_balance_label_for_filtered_report():
                 time.sleep(0.1)
 
 
+def test_report_xlsx_localizes_visible_sheets_and_keeps_roundtrip_in_ru():
+    records = [
+        IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Зарплата", tags=("работа",)),
+        ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Еда", tags=("дом",)),
+    ]
+    report = Report(records, initial_balance=50.0)
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        tmp_path = tmp.name
+    previous = get_language()
+    try:
+        set_language("ru")
+        report_to_xlsx(report, tmp_path)
+        wb = load_workbook(tmp_path, data_only=True)
+        try:
+            assert "Отчет" in wb.sheetnames
+            ws = wb["Отчет"]
+            assert ws.cell(1, 1).value == "Отчет по операциям"
+            assert ws.cell(2, 1).value == "Дата"
+            assert ws.cell(2, 4).value == "Сумма (KZT)"
+            assert ws.cell(4, 2).value == "Начальный баланс"
+            assert ws.cell(5, 1).value == "2025-01-02"
+            assert ws.cell(6, 1).value == "2025-01-01"
+            assert "Годовой отчет" in wb.sheetnames
+            assert "По категориям" in wb.sheetnames
+            assert "По тегам" in wb.sheetnames
+        finally:
+            wb.close()
+        imported = report_from_xlsx(tmp_path)
+        assert len(imported.records()) == 2
+        assert abs(imported.initial_balance - 50.0) < 1e-6
+        assert abs(imported.total() - report.total()) < 1e-6
+    finally:
+        set_language(previous)
+        for _ in range(5):
+            try:
+                os.unlink(tmp_path)
+                break
+            except PermissionError:
+                time.sleep(0.1)
+
+
 def test_mandatory_xlsx_roundtrip():
     expenses = [
         MandatoryExpenseRecord(
@@ -335,9 +393,9 @@ def test_xlsx_export_grouped_drill_down():
                     data_rows.append(row)
             assert len(data_rows) == 2
             assert data_rows[0][2] == "Salary"
-            assert data_rows[0][3] == 100.0
+            assert data_rows[0][3] == 50.0
             assert data_rows[1][2] == "Salary"
-            assert data_rows[1][3] == 50.0
+            assert data_rows[1][3] == 100.0
             # Find SUBTOTAL row
             subtotal_found = False
             for row in ws.iter_rows(min_row=1, max_col=4, values_only=True):

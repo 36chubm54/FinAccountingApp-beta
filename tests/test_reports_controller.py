@@ -84,6 +84,7 @@ def test_reports_controller_monthly_summary_uses_filtered_report_period(
         )
 
         assert [row.month for row in result.monthly] == ["2026-02", "2026-03", "2026-04"]
+        assert [row.date for row in result.operations] == ["2026-04-01", "2026-02-10"]
         assert result.monthly[0].income == 100.0
         assert result.monthly[1].income == 0.0
         assert result.monthly[2].expense == 40.0

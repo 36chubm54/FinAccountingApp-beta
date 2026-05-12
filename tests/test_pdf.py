@@ -3,12 +3,25 @@ import os
 import tempfile
 from datetime import date as dt_date
 
+import pytest
+
 import domain.reports as reports_module
 from domain.debt import Debt, DebtKind, DebtStatus
 from domain.records import ExpenseRecord, IncomeRecord
 from domain.reports import Report
+from gui.i18n import get_language, set_language
 from utils.debt_report_utils import debts_for_report_period
 from utils.pdf_utils import _should_add_by_category_section, report_to_pdf
+
+
+@pytest.fixture(autouse=True)
+def _english_report_exports():
+    previous = get_language()
+    set_language("en")
+    try:
+        yield
+    finally:
+        set_language(previous)
 
 
 def test_report_pdf_roundtrip():

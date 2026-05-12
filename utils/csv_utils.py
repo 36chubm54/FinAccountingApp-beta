@@ -21,6 +21,24 @@ from utils.money import (
     to_money_float,
     to_rate_float,
 )
+from utils.report_export_i18n import (
+    balance_label as localized_balance_label,
+)
+from utils.report_export_i18n import (
+    canonical_report_header,
+    canonical_report_row_type,
+    final_balance_label,
+    fixed_amounts_note,
+    grouped_category_totals_note,
+    grouped_report_csv_headers,
+    is_report_total_row_label,
+    report_csv_headers,
+    subtotal_label,
+    total_label,
+)
+from utils.report_export_i18n import (
+    statement_title as localized_statement_title,
+)
 from utils.tabular_utils import (
     mandatory_expense_export_rows,
     record_export_rows,
@@ -33,8 +51,6 @@ MAX_IMPORT_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 MAX_IMPORT_ROWS = 200_000
 MAX_CSV_FIELD_SIZE = 1_000_000
 
-REPORT_HEADERS = ["Date", "Type", "Category", "Amount (KZT)"]
-GROUPED_REPORT_HEADERS = ["Category", "Operations", "Total (KZT)"]
 DATA_HEADERS = [
     "date",
     "type",
@@ -177,23 +193,20 @@ def _validate_transfer_integrity(
     return errors
 
 
-def report_to_csv(report: Report, filepath: str) -> None:
+def report_to_csv(report: Report, filepath: str, *, base_currency: str = "KZT") -> None:
     """Export report view (fixed amounts) to CSV. Read-only format."""
-    sorted_records = sorted(
-        report.records(),
-        key=lambda r: (0, r.date) if isinstance(r.date, dt_date) else (1, dt_date.max),
-    )
+    sorted_records = report.sorted_records_desc()
     with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow([report.statement_title, "", "", ""])
-        writer.writerow(REPORT_HEADERS)
-        writer.writerow(["", "", "", "Fixed amounts by operation-time FX rates"])
+        writer.writerow([localized_statement_title(report.statement_title), "", "", ""])
+        writer.writerow(report_csv_headers(base_currency))
+        writer.writerow(["", "", "", fixed_amounts_note()])
 
         if report.initial_balance != 0 or report.is_opening_balance:
             writer.writerow(
                 [
                     "",
-                    report.balance_label,
+                    localized_balance_label(report.balance_label),
                     "",
                     f"{report.initial_balance:.2f}",
                 ]
@@ -213,14 +226,16 @@ def report_to_csv(report: Report, filepath: str) -> None:
             )
 
         records_total = sum(r.signed_amount_base() for r in report.records())
-        writer.writerow(["SUBTOTAL", "", "", f"{records_total:.2f}"])
-        writer.writerow(["FINAL BALANCE", "", "", f"{report.total_fixed():.2f}"])
+        writer.writerow([subtotal_label(), "", "", f"{records_total:.2f}"])
+        writer.writerow([final_balance_label(), "", "", f"{report.total_fixed():.2f}"])
 
 
 def grouped_report_to_csv(
     statement_title: str,
     grouped_rows: list[tuple[str, int, float]],
     filepath: str,
+    *,
+    base_currency: str = "KZT",
 ) -> None:
     """Export grouped category summary as currently shown in grouped Reports view."""
 
@@ -228,12 +243,12 @@ def grouped_report_to_csv(
     with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow([statement_title, "", ""])
-        writer.writerow(GROUPED_REPORT_HEADERS)
-        writer.writerow(["", "", "Grouped category totals"])
+        writer.writerow(grouped_report_csv_headers(base_currency))
+        writer.writerow(["", "", grouped_category_totals_note()])
         for category, operations_count, amount_base in grouped_rows:
             total_base += float(amount_base)
             writer.writerow([category, int(operations_count), f"{float(amount_base):.2f}"])
-        writer.writerow(["TOTAL", "", f"{total_base:.2f}"])
+        writer.writerow([total_label(), "", f"{total_base:.2f}"])
 
 
 def report_from_csv(filepath: str) -> Report:
@@ -303,14 +318,17 @@ def import_records_from_csv(
                 break
 
         normalized_first_line = first_data_line.lstrip("\ufeff").strip()
-        if not normalized_first_line.startswith("Transaction statement"):
+        if not (
+            normalized_first_line.startswith("Transaction statement")
+            or normalized_first_line.startswith(localized_statement_title("Transaction statement"))
+        ):
             csvfile.seek(first_data_pos)
         reader = csv.DictReader(csvfile)
         if not reader.fieldnames:
             return records, initial_balance, (0, 0, [])
 
-        normalized_headers = {norm_key(h) for h in reader.fieldnames if h}
-        is_report_csv = {"date", "type", "category", "amount_(kzt)"}.issubset(
+        normalized_headers = {canonical_report_header(h) for h in reader.fieldnames if h}
+        is_report_csv = {"date", "type", "category", "amount"}.issubset(
             normalized_headers
         ) and "amount_original" not in normalized_headers
 
@@ -318,22 +336,26 @@ def import_records_from_csv(
             seen_rows += 1
             if seen_rows > MAX_IMPORT_ROWS:
                 raise ValueError(f"CSV import exceeded row limit ({MAX_IMPORT_ROWS})")
-            row_lc = {norm_key(str(k)): v for k, v in row.items()}
+            if is_report_csv:
+                row_lc = {
+                    canonical_report_header(str(k)): v for k, v in row.items() if k is not None
+                }
+            else:
+                row_lc = {norm_key(str(k)): v for k, v in row.items()}
             if not any(str(v or "").strip() for v in row_lc.values()):
                 continue
 
             if is_report_csv:
                 date_value = str(row_lc.get("date", "") or "").strip()
-                if date_value.upper() in {"SUBTOTAL", "FINAL BALANCE"}:
+                if is_report_total_row_label(date_value):
                     continue
-                if date_value == "" and str(row_lc.get("type", "") or "").strip().lower() in {
-                    "initial balance",
-                    "opening balance",
-                }:
+                row_type_value = canonical_report_row_type(str(row_lc.get("type", "") or ""))
+                if date_value == "" and row_type_value in {"initial_balance", "opening_balance"}:
                     row_lc["type"] = "initial_balance"
-                    row_lc["amount_original"] = row_lc.get("amount_(kzt)")
+                    row_lc["amount_original"] = row_lc.get("amount")
                 else:
-                    row_lc["amount"] = row_lc.get("amount_(kzt)")
+                    row_lc["type"] = row_type_value or row_lc.get("type", "")
+                    row_lc["amount"] = row_lc.get("amount")
 
             row_type = safe_type(str(row_lc.get("type", "") or "").lower())
             if row_type == "transfer":
