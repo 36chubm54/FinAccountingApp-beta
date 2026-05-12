@@ -474,6 +474,16 @@ def test_get_runtime_currency_config_uses_active_mode_fallback() -> None:
     assert config["fallback_provider"] == "cbr"
 
 
+def test_get_supported_provider_names_excludes_cbr_for_unsupported_base() -> None:
+    svc = CurrencyService(rates={"EUR": 1.18, "KZT": 0.002, "RUB": 0.011}, base="USD")
+
+    supported = svc.get_supported_provider_names()
+
+    assert "cbr" not in supported
+    assert "exchange_rate" in supported
+    assert "static" in supported
+
+
 def test_update_runtime_currency_config_persists_and_rebuilds(monkeypatch, tmp_path: Path) -> None:
     config_path = tmp_path / "currency_config.json"
     monkeypatch.setattr(CurrencyService, "CONFIG_FILE", config_path)

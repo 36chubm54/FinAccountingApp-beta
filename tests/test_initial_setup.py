@@ -156,6 +156,14 @@ def test_supported_provider_names_use_passed_current_config() -> None:
     assert names == ("custom",)
 
 
+def test_supported_provider_names_exclude_cbr_for_usd_base() -> None:
+    names = _supported_provider_names("USD")
+
+    assert "cbr" not in names
+    assert "exchange_rate" in names
+    assert "static" in names
+
+
 def test_ensure_initial_setup_cancellation_stops_launch(tmp_path: Path) -> None:
     config_path = tmp_path / "currency_config.json"
 
