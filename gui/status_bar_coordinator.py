@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Protocol, TypeAlias, cast
 
 from gui.i18n import tr
@@ -47,6 +47,10 @@ class StatusBarController(Protocol):
     def get_display_currency(self) -> str: ...
 
     def get_available_display_currencies(self) -> list[str]: ...
+
+    def get_runtime_currency_config(self) -> dict[str, object]: ...
+
+    def refresh_currency_rates(self) -> bool: ...
 
 
 class BackgroundRunner(Protocol):
@@ -102,6 +106,7 @@ class StatusBarCoordinator:
     def __init__(self, owner: Any, *, logger: logging.Logger) -> None:
         self._owner = cast(StatusBarOwner, owner)
         self._logger = logger
+        self._auto_refresh_running = False
 
     def on_online_toggle(self) -> None:
         if self._owner._online_var is None or self._owner._currency_status_label is None:
@@ -173,6 +178,7 @@ class StatusBarCoordinator:
 
     def start_status_refresh_timer(self) -> None:
         self.refresh_status_bar()
+        self._run_auto_refresh_if_due()
         self._owner._schedule_after("status_refresh", 60_000, self.start_status_refresh_timer)
 
     def apply_saved_online_mode(self) -> None:
@@ -209,3 +215,61 @@ class StatusBarCoordinator:
             self._owner._online_var.set(False)
             self.refresh_status_bar()
         self.start_status_refresh_timer()
+
+    def _run_auto_refresh_if_due(self) -> None:
+        if self._auto_refresh_running or self._owner._online_toggle_running:
+            return
+        try:
+            status = self._owner.controller.get_online_status()
+            config = self._owner.controller.get_runtime_currency_config()
+        except (RuntimeError, ValueError, TypeError):
+            return
+        if not status.is_online or not bool(config.get("auto_update", False)):
+            return
+
+        raw_interval = config.get("update_interval_minutes", 60)
+        if isinstance(raw_interval, bool):
+            interval_minutes = 1 if raw_interval else 60
+        elif isinstance(raw_interval, int):
+            interval_minutes = max(1, raw_interval)
+        elif isinstance(raw_interval, float):
+            interval_minutes = max(1, int(raw_interval))
+        elif isinstance(raw_interval, str):
+            try:
+                interval_minutes = max(1, int(raw_interval.strip() or "60"))
+            except ValueError:
+                interval_minutes = 60
+        else:
+            interval_minutes = 60
+        last_fetched_at = status.last_fetched_at
+        now = datetime.now()
+        if last_fetched_at is not None and now - last_fetched_at < timedelta(
+            minutes=interval_minutes
+        ):
+            return
+
+        if self._owner._currency_status_label is not None:
+            self._owner._currency_status_label.config(
+                text=tr("app.status.currency_fetching", "Обновляем курсы...")
+            )
+        self._auto_refresh_running = True
+
+        def task() -> bool:
+            return self._owner.controller.refresh_currency_rates()
+
+        def on_success(_refreshed: Any) -> None:
+            self._auto_refresh_running = False
+            self.refresh_status_bar()
+
+        def on_error(exc: BaseException) -> None:
+            self._auto_refresh_running = False
+            self._logger.warning("Auto currency refresh error: %s", exc)
+            self.refresh_status_bar()
+
+        self._owner._run_background(
+            task,
+            on_success=on_success,
+            on_error=on_error,
+            busy_message="",
+            block_ui=False,
+        )
