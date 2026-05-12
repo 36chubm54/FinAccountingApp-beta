@@ -291,12 +291,14 @@ def test_currency_service_accepts_injected_aggregator():
     assert svc.get_rate("USD") == 507.0
 
 
-def test_display_currency_default_equals_base():
+def test_display_currency_default_equals_base(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(CurrencyService, "CONFIG_FILE", tmp_path / "currency_config.json")
     svc = CurrencyService(rates={"USD": 500.0}, base="KZT")
     assert svc.display_currency == svc.base_currency
 
 
-def test_to_display_same_currency():
+def test_to_display_same_currency(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(CurrencyService, "CONFIG_FILE", tmp_path / "currency_config.json")
     svc = CurrencyService(rates={"USD": 500.0}, base="KZT")
     assert svc.to_display(1000.0) == 1000.0
 
@@ -307,7 +309,8 @@ def test_to_display_converts_correctly():
     assert svc.to_display(500_000.0) == 1000.0
 
 
-def test_display_symbol_known_currencies():
+def test_display_symbol_known_currencies(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(CurrencyService, "CONFIG_FILE", tmp_path / "currency_config.json")
     svc = CurrencyService(rates={"USD": 500.0, "EUR": 590.0, "RUB": 6.5}, base="KZT")
     assert svc.display_symbol == "₸"
     svc.set_display_currency("USD")
@@ -437,3 +440,145 @@ def test_load_config_uses_environment_api_key(monkeypatch, tmp_path):
     svc = CurrencyService()
 
     assert svc._config["exchange_rate_api_key"] == "env-secret"
+
+
+def test_currency_service_applies_configured_display_currency(monkeypatch, tmp_path):
+    config_path = tmp_path / "currency_config.json"
+    config_path.write_text('{"display_currency": "USD"}', encoding="utf-8")
+    monkeypatch.setattr(CurrencyService, "CONFIG_FILE", config_path)
+
+    svc = CurrencyService(rates={"USD": 500.0}, base="KZT")
+
+    assert svc.display_currency == "USD"
+
+
+def test_default_rates_are_derived_for_non_kzt_base():
+    svc = CurrencyService(base="USD")
+
+    assert svc.get_rate("KZT") == pytest.approx(0.002)
+    assert svc.get_rate("EUR") == pytest.approx(590.0 / 500.0)
+
+
+def test_get_runtime_currency_config_uses_active_mode_fallback() -> None:
+    svc = CurrencyService(rates={"USD": 500.0}, base="KZT")
+    svc._config["provider_mode"] = "commercial"
+    svc._config["primary_provider"] = "nbk"
+    svc._config["fallback_provider"] = "exchange_rate"
+    svc._config["commercial_fallback_provider"] = "cbr"
+
+    config = svc.get_runtime_currency_config()
+
+    assert config["base_currency"] == "KZT"
+    assert config["provider_mode"] == "commercial"
+    assert config["primary_provider"] == "nbk"
+    assert config["fallback_provider"] == "cbr"
+
+
+def test_update_runtime_currency_config_persists_and_rebuilds(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "currency_config.json"
+    monkeypatch.setattr(CurrencyService, "CONFIG_FILE", config_path)
+    svc = CurrencyService(rates={"USD": 500.0, "EUR": 590.0}, base="KZT")
+    previous_aggregator = svc._aggregator
+
+    svc.update_runtime_currency_config(
+        display_currency="USD",
+        provider_mode="commercial",
+        primary_provider="nbk",
+        fallback_provider="exchange_rate",
+        exchange_rate_api_key="test-key",
+        auto_update=False,
+        update_interval_minutes=15,
+    )
+
+    saved = CurrencyService.load_config_payload(config_file=config_path, use_env_override=False)
+    assert svc.display_currency == "USD"
+    assert svc._config["provider_mode"] == "commercial"
+    assert svc._config["commercial_fallback_provider"] == "exchange_rate"
+    assert svc._aggregator is not previous_aggregator
+    assert saved["display_currency"] == "USD"
+    assert saved["provider_mode"] == "commercial"
+    assert saved["primary_provider"] == "nbk"
+    assert saved["fallback_provider"] == "exchange_rate"
+    assert saved["commercial_fallback_provider"] == "exchange_rate"
+    assert saved["exchange_rate_api_key"] == "test-key"
+    assert saved["auto_update"] is False
+    assert saved["update_interval_minutes"] == 15
+
+
+def test_update_runtime_currency_config_preserves_inactive_mode_fallback(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "currency_config.json"
+    monkeypatch.setattr(CurrencyService, "CONFIG_FILE", config_path)
+    svc = CurrencyService(rates={"USD": 500.0, "EUR": 590.0}, base="KZT")
+    svc._config["provider_mode"] = "personal"
+    svc._config["fallback_provider"] = "exchange_rate"
+    svc._config["commercial_fallback_provider"] = "cbr"
+
+    svc.update_runtime_currency_config(
+        display_currency="USD",
+        provider_mode="personal",
+        primary_provider="nbk",
+        fallback_provider="static",
+        exchange_rate_api_key="test-key",
+        auto_update=True,
+        update_interval_minutes=30,
+    )
+
+    saved = CurrencyService.load_config_payload(config_file=config_path, use_env_override=False)
+    assert saved["fallback_provider"] == "static"
+    assert saved["commercial_fallback_provider"] == "cbr"
+
+
+def test_update_runtime_currency_config_refreshes_immediately_when_online(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(CurrencyService, "CONFIG_FILE", tmp_path / "currency_config.json")
+    svc = CurrencyService(rates={"USD": 500.0, "EUR": 590.0}, base="KZT")
+    svc._use_online = True
+    refreshed: list[str] = []
+    monkeypatch.setattr(svc, "refresh_rates", lambda: refreshed.append("refresh") or True)
+
+    svc.update_runtime_currency_config(
+        display_currency="USD",
+        provider_mode="commercial",
+        primary_provider="nbk",
+        fallback_provider="exchange_rate",
+        exchange_rate_api_key="new-key",
+        auto_update=True,
+        update_interval_minutes=60,
+    )
+
+    assert refreshed == ["refresh"]
+
+
+def test_update_runtime_currency_config_rejects_duplicate_providers() -> None:
+    svc = CurrencyService(rates={"USD": 500.0}, base="KZT")
+
+    with pytest.raises(ValueError, match="different"):
+        svc.update_runtime_currency_config(
+            display_currency="USD",
+            provider_mode="personal",
+            primary_provider="nbk",
+            fallback_provider="nbk",
+            exchange_rate_api_key="",
+            auto_update=True,
+            update_interval_minutes=60,
+        )
+
+
+def test_update_runtime_currency_config_rejects_invalid_update_interval() -> None:
+    svc = CurrencyService(rates={"USD": 500.0}, base="KZT")
+
+    with pytest.raises(ValueError, match="positive integer"):
+        svc.update_runtime_currency_config(
+            display_currency="USD",
+            provider_mode="personal",
+            primary_provider="nbk",
+            fallback_provider="exchange_rate",
+            exchange_rate_api_key="",
+            auto_update=True,
+            update_interval_minutes="abc",
+        )

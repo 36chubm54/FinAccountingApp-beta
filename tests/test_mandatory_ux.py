@@ -58,6 +58,23 @@ def _find_buttons(parent: tk.Misc, text: str) -> list[tk.Button | ttk.Button]:
     return found
 
 
+def _find_labels(parent: tk.Misc, text: str) -> list[tk.Label | ttk.Label]:
+    found: list[tk.Label | ttk.Label] = []
+
+    def _walk(node: tk.Misc) -> None:
+        for child in node.winfo_children():
+            if isinstance(child, (tk.Label, ttk.Label)):
+                try:
+                    if child.cget("text") == text:
+                        found.append(child)
+                except Exception:
+                    pass
+            _walk(child)
+
+    _walk(parent)
+    return found
+
+
 def _find_entry_by_value(parent: tk.Misc, value: str) -> tk.Entry | ttk.Entry:
     found: tk.Entry | ttk.Entry | None = None
 
@@ -78,6 +95,31 @@ def _find_entry_by_value(parent: tk.Misc, value: str) -> tk.Entry | ttk.Entry:
     _walk(parent)
     if found is None:
         raise AssertionError(f"Entry with value {value!r} not found")
+    return found
+
+
+def _find_combobox_by_values(
+    parent: tk.Misc,
+    *,
+    expected_values: tuple[str, ...],
+) -> ttk.Combobox:
+    found: ttk.Combobox | None = None
+
+    def _walk(node: tk.Misc) -> None:
+        nonlocal found
+        for child in node.winfo_children():
+            if isinstance(child, ttk.Combobox):
+                values = tuple(str(item) for item in child.cget("values"))
+                if values == expected_values:
+                    found = child
+                    return
+            _walk(child)
+            if found is not None:
+                return
+
+    _walk(parent)
+    if found is None:
+        raise AssertionError(f"Combobox with values {expected_values!r} not found")
     return found
 
 
@@ -326,6 +368,99 @@ def test_settings_tab_builds_with_current_treeview_anchors(tmp_path: Path) -> No
 
         build_settings_tab(parent, context, {"CSV": {"ext": ".csv", "desc": "CSV"}})
         root.update_idletasks()
+    finally:
+        root.destroy()
+        repo.close()
+
+
+def test_settings_tab_currency_section_saves_runtime_config(tmp_path: Path) -> None:
+    db_path = tmp_path / "settings_currency.db"
+    config_path = tmp_path / "currency_config.json"
+    repo = SQLiteRecordRepository(str(db_path), schema_path=_schema_path())
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        with patch.object(CurrencyService, "CONFIG_FILE", config_path):
+            controller = FinancialController(repo, CurrencyService(use_online=False))
+            calls: list[dict[str, object]] = []
+            original_update = controller.update_runtime_currency_config
+
+            def _capture_update(**kwargs: object) -> None:
+                calls.append(dict(kwargs))
+                original_update(
+                    display_currency=str(kwargs["display_currency"]),
+                    provider_mode=str(kwargs["provider_mode"]),
+                    primary_provider=str(kwargs["primary_provider"]),
+                    fallback_provider=str(kwargs["fallback_provider"]),
+                    exchange_rate_api_key=str(kwargs["exchange_rate_api_key"]),
+                    auto_update=bool(kwargs["auto_update"]),
+                    update_interval_minutes=str(kwargs["update_interval_minutes"]),
+                )
+
+            controller.update_runtime_currency_config = _capture_update  # type: ignore[method-assign]
+            parent = tk.Frame(root)
+            parent.pack()
+            context = cast(
+                SettingsTabContext,
+                type(
+                    "Ctx",
+                    (),
+                    {
+                        "controller": controller,
+                        "repository": repo,
+                        "refresh_operation_wallet_menu": None,
+                        "refresh_transfer_wallet_menus": None,
+                        "refresh_wallets": None,
+                        "_refresh_list": lambda self: None,
+                        "_refresh_charts": lambda self: None,
+                        "_refresh_budgets": lambda self: None,
+                        "_refresh_all": lambda self: None,
+                        "_run_background": lambda self, task, **kwargs: kwargs.get(
+                            "on_success", lambda *_: None
+                        )(task()),
+                    },
+                )(),
+            )
+
+            build_settings_tab(parent, context, {"CSV": {"ext": ".csv", "desc": "CSV"}})
+            root.update()
+
+            base_currency_labels = _find_labels(parent, "KZT")
+            assert base_currency_labels
+
+            display_combo = _find_combobox_by_values(
+                parent,
+                expected_values=("EUR", "KZT", "RUB", "USD"),
+            )
+            provider_mode_combo = _find_combobox_by_values(
+                parent,
+                expected_values=("personal", "commercial"),
+            )
+
+            display_combo.set("USD")
+            provider_mode_combo.set("commercial")
+            root.update()
+
+            with (
+                patch("gui.tabs.settings_tab.messagebox.showerror"),
+                patch("gui.tabs.settings_tab.messagebox.showinfo"),
+            ):
+                save_buttons = _find_buttons(parent, "Сохранить")
+                assert save_buttons
+                save_buttons[0].invoke()
+                root.update()
+
+            assert calls
+            assert calls[-1]["display_currency"] == "USD"
+            assert calls[-1]["provider_mode"] == "commercial"
+            assert calls[-1]["update_interval_minutes"] == "60"
+            saved = CurrencyService.load_config_payload(
+                config_file=config_path,
+                use_env_override=False,
+            )
+            assert saved["display_currency"] == "USD"
+            assert saved["provider_mode"] == "commercial"
+            assert saved["update_interval_minutes"] == 60
     finally:
         root.destroy()
         repo.close()
