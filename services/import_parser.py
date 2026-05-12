@@ -15,6 +15,7 @@ from domain.transfers import Transfer
 from utils.backup_utils import unwrap_backup_payload
 from utils.import_core import as_float, norm_key, parse_optional_strict_int
 from utils.money import quantize_money, to_decimal, to_money_float, to_rate_float
+from utils.report_export_i18n import is_statement_title
 from utils.tag_utils import normalize_tag_name, normalize_tag_names
 
 MAX_IMPORT_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
@@ -52,11 +53,21 @@ def parse_import_file(path: str, *, force: bool = False) -> ParsedImportData:
         raise ValueError(f"Import file is too large: {source.stat().st_size} bytes")
     suffix = source.suffix.lower()
     if suffix == ".csv":
-        rows = _read_csv_rows(path)
-        return ParsedImportData(path=path, file_type="csv", rows=rows)
+        rows, initial_balance = _read_csv_rows(path)
+        return ParsedImportData(
+            path=path,
+            file_type="csv",
+            rows=rows,
+            initial_balance=initial_balance,
+        )
     if suffix in {".xlsx", ".xlsm"}:
-        rows = _read_xlsx_rows(path)
-        return ParsedImportData(path=path, file_type="xlsx", rows=rows)
+        rows, initial_balance = _read_xlsx_rows(path)
+        return ParsedImportData(
+            path=path,
+            file_type="xlsx",
+            rows=rows,
+            initial_balance=initial_balance,
+        )
     if suffix == ".json":
         return _read_json_payload(path, force=force)
     raise ValueError(f"Unsupported import file type: {suffix}")
@@ -204,7 +215,26 @@ def parse_transfer_row(
     return [expense_record, income_record], transfer, next_transfer_id, None
 
 
-def _read_csv_rows(path: str) -> list[dict[str, Any]]:
+def _record_row_payload(record: Record) -> dict[str, Any]:
+    return {
+        "date": (
+            record.date.isoformat()
+            if hasattr(record.date, "isoformat") and not isinstance(record.date, str)
+            else str(record.date or "")
+        ),
+        "type": "income" if isinstance(record, IncomeRecord) else "expense",
+        "wallet_id": int(record.wallet_id),
+        "category": str(record.category or ""),
+        "amount_original": to_money_float(record.amount_original or 0.0),
+        "currency": str(record.currency or "KZT").upper(),
+        "rate_at_operation": to_rate_float(record.rate_at_operation),
+        "amount_base": to_money_float(record.amount_base or 0.0),
+        "description": str(record.description or ""),
+        "tags": tuple(getattr(record, "tags", ()) or ()),
+    }
+
+
+def _read_csv_rows(path: str) -> tuple[list[dict[str, Any]], float | None]:
     # Guardrail: prevent pathological CSV fields from allocating huge amounts of memory.
     # (This is a process-global limit in the stdlib csv module.)
     try:
@@ -225,7 +255,17 @@ def _read_csv_rows(path: str) -> list[dict[str, Any]]:
                 first_line = line
                 break
         normalized = first_line.lstrip("\ufeff").strip()
-        if not normalized.startswith("Transaction statement"):
+        title_candidate = next(csv.reader([normalized]), [""])[0].strip() if normalized else ""
+        if is_statement_title(title_candidate):
+            from utils.csv_utils import import_records_from_csv
+
+            records, initial_balance, _summary = import_records_from_csv(
+                path,
+                policy=ImportPolicy.LEGACY,
+            )
+            return ([_record_row_payload(record) for record in records], initial_balance)
+
+        if not is_statement_title(normalized):
             csv_file.seek(first_pos)
         reader = csv.DictReader(csv_file)
         rows: list[dict[str, Any]] = []
@@ -234,23 +274,29 @@ def _read_csv_rows(path: str) -> list[dict[str, Any]]:
                 raise ValueError(f"CSV import exceeded row limit ({MAX_IMPORT_ROWS})")
             if row:
                 rows.append(_normalize_row(row))
-        return rows
+        return rows, None
 
 
-def _read_xlsx_rows(path: str) -> list[dict[str, Any]]:
+def _read_xlsx_rows(path: str) -> tuple[list[dict[str, Any]], float | None]:
     wb = load_workbook(path, data_only=True, read_only=True)
     try:
         if not wb.worksheets:
-            return []
+            return [], None
         ws = wb.worksheets[0]
         rows_iter = ws.iter_rows(values_only=True)
         header_row = next(rows_iter, None)
         if header_row is None:
-            return []
-        if header_row and str(header_row[0] or "").strip().startswith("Transaction statement"):
-            header_row = next(rows_iter, None)
+            return [], None
+        if header_row and is_statement_title(str(header_row[0] or "").strip()):
+            from utils.excel_utils import import_records_from_xlsx
+
+            records, initial_balance, _summary = import_records_from_xlsx(
+                path,
+                policy=ImportPolicy.LEGACY,
+            )
+            return ([_record_row_payload(record) for record in records], initial_balance)
         if header_row is None:
-            return []
+            return [], None
         headers = [norm_key(str(cell or "")) for cell in header_row]
         rows: list[dict[str, Any]] = []
         for index, row in enumerate(rows_iter, start=1):
@@ -260,7 +306,7 @@ def _read_xlsx_rows(path: str) -> list[dict[str, Any]]:
             if not any(str(value or "").strip() for value in payload.values()):
                 continue
             rows.append(payload)
-        return rows
+        return rows, None
     finally:
         try:
             wb.close()

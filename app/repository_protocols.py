@@ -75,7 +75,7 @@ class GoalRepositoryProtocol(SqlMutationRepository, Protocol):
 
 @runtime_checkable
 class BudgetRepositoryProtocol(SqlMutationRepository, Protocol):
-    pass
+    def supports_budget_repository(self) -> bool: ...
 
 
 @runtime_checkable
@@ -107,7 +107,7 @@ class DebtRepositoryProtocol(SqlMutationRepository, Protocol):
 
 @runtime_checkable
 class DistributionRepositoryProtocol(SqlMutationRepository, Protocol):
-    pass
+    def supports_distribution_repository(self) -> bool: ...
 
 
 @runtime_checkable

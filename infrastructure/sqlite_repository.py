@@ -43,6 +43,12 @@ class SQLiteRecordRepository(RecordRepository):
     def set_sqlite_sequence(self, table: str, seq: int | None = None) -> None:
         self._storage.set_sqlite_sequence(table, seq)
 
+    def supports_budget_repository(self) -> bool:
+        return True
+
+    def supports_distribution_repository(self) -> bool:
+        return True
+
     def ensure_schema_meta(self) -> None:
         self._conn.execute(
             """

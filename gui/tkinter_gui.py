@@ -1,3 +1,9 @@
+"""Main Tkinter composition shell.
+
+Keep feature-specific behavior in gui.tabs.* and shell-policy/runtime orchestration
+in gui.shell.* so this module stays a shell-only composition root.
+"""
+
 import logging
 import tkinter as tk
 from collections.abc import Callable

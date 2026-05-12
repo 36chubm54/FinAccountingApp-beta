@@ -188,6 +188,31 @@ def test_service_updates_kzt_record_amount_as_primary_amount():
     assert updated.description == "Updated"
 
 
+def test_service_does_not_swallow_unexpected_system_wallet_errors():
+    repo = Mock(spec=RecordRepository)
+    record = IncomeRecord(
+        date="2026-01-01",
+        wallet_id=1,
+        amount_original=100.0,
+        currency="KZT",
+        rate_at_operation=1.0,
+        amount_base=100.0,
+        category="Salary",
+        description="Old",
+    )
+    repo.get_by_id.return_value = record
+    repo.get_system_wallet.side_effect = RuntimeError("db failure")
+
+    service = RecordService(repo)
+    with pytest.raises(RuntimeError, match="db failure"):
+        service.update_record_inline(
+            record.id,
+            new_amount_base=125.0,
+            new_category="Bonus",
+            new_description="Updated",
+        )
+
+
 def test_service_updates_date_and_wallet():
     repo = Mock(spec=RecordRepository)
     record = ExpenseRecord(
