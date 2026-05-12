@@ -41,6 +41,20 @@ def _mark_migration_verified(sqlite_repo: SQLiteRecordRepository) -> None:
     sqlite_repo.set_schema_meta("migration_verified", "true")
 
 
+def _apply_initial_base_currency(
+    sqlite_repo: SQLiteRecordRepository,
+    initial_base_currency: str | None,
+) -> None:
+    normalized = str(initial_base_currency or "").strip().upper()
+    if not normalized:
+        return
+    _ensure_schema_meta(sqlite_repo)
+    current = str(sqlite_repo.get_schema_meta("base_currency") or "").strip().upper()
+    if current and (current != "KZT" or sqlite_repo.has_system_wallet_row()):
+        return
+    sqlite_repo.set_schema_meta("base_currency", normalized)
+
+
 def _run_startup_migrations(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
@@ -281,7 +295,11 @@ def run_post_startup_maintenance() -> None:
     _run_post_startup_maintenance(db_path)
 
 
-def bootstrap_repository(*, run_maintenance: bool = True) -> RecordRepository:
+def bootstrap_repository(
+    *,
+    run_maintenance: bool = True,
+    initial_base_currency: str | None = None,
+) -> RecordRepository:
     db_path = Path(SQLITE_PATH)
     db_existed = db_path.exists()
     _run_startup_migrations(db_path)
@@ -302,6 +320,7 @@ def bootstrap_repository(*, run_maintenance: bool = True) -> RecordRepository:
             "prefer graceful shutdowns."
         )
 
+    _apply_initial_base_currency(repository, initial_base_currency)
     _ensure_system_wallet(repository)
     if not _is_migration_verified(repository):
         _mark_migration_verified(repository)

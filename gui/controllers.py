@@ -242,8 +242,38 @@ class FinancialController:
     def get_available_display_currencies(self) -> list[str]:
         return self._currency.get_available_display_currencies()
 
+    def get_runtime_currency_config(self) -> dict[str, object]:
+        return self._currency.get_runtime_currency_config()
+
+    def get_supported_currency_provider_names(self) -> list[str]:
+        return self._currency.get_supported_provider_names()
+
     def set_display_currency(self, code: str) -> None:
         self._currency.set_display_currency(code)
+
+    def refresh_currency_rates(self) -> bool:
+        return self._currency.refresh_rates()
+
+    def update_runtime_currency_config(
+        self,
+        *,
+        display_currency: str,
+        provider_mode: str,
+        primary_provider: str,
+        fallback_provider: str,
+        exchange_rate_api_key: str,
+        auto_update: bool,
+        update_interval_minutes: int | str,
+    ) -> None:
+        self._currency.update_runtime_currency_config(
+            display_currency=display_currency,
+            provider_mode=provider_mode,
+            primary_provider=primary_provider,
+            fallback_provider=fallback_provider,
+            exchange_rate_api_key=exchange_rate_api_key,
+            auto_update=auto_update,
+            update_interval_minutes=update_interval_minutes,
+        )
 
     def to_display_amount(self, amount_base: float) -> float:
         return float(self._currency.to_display(amount_base))

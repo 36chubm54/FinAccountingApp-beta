@@ -305,6 +305,8 @@ def build_default_provider_registry() -> CurrencyProviderRegistry:
         return NBKProvider()
 
     def _build_cbr(context: ProviderBuildContext) -> BaseRateProvider | None:
+        if context.target_base not in {"RUB", "KZT"}:
+            return None
         return CBRProvider(target_base=context.target_base)
 
     def _build_exchange_rate(context: ProviderBuildContext) -> BaseRateProvider | None:

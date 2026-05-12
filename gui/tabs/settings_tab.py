@@ -91,7 +91,8 @@ def build_settings_tab(
 
     right_panel = ttk.Frame(parent)
     right_panel.grid(row=0, column=1, sticky="nsew", padx=(PAD_SM, PAD_XL), pady=PAD_LG)
-    right_panel.grid_rowconfigure(0, weight=1)
+    right_panel.grid_rowconfigure(0, weight=0)
+    right_panel.grid_rowconfigure(1, weight=1)
     right_panel.grid_columnconfigure(0, weight=1)
 
     wallets_card = create_card_section(left_panel, tr("settings.wallets", "Кошельки"))
@@ -395,8 +396,206 @@ def build_settings_tab(
 
     refresh_wallets()
 
+    currency_card = create_card_section(
+        right_panel,
+        tr("settings.currency.title", "Валюта и курсы"),
+    )
+    currency_card.grid(row=0, column=0, sticky="ew", pady=(0, PAD_LG))
+    currency_frame = currency_card.winfo_children()[-1]
+    currency_frame.grid_columnconfigure(1, weight=1)
+    currency_frame.grid_columnconfigure(3, weight=1)
+
+    runtime_config = context.controller.get_runtime_currency_config()
+    provider_names = context.controller.get_supported_currency_provider_names()
+
+    base_currency_text = str(runtime_config.get("base_currency", "KZT") or "KZT").upper()
+    display_currency_var = tk.StringVar(
+        value=str(
+            runtime_config.get("display_currency", context.controller.get_display_currency_code())
+            or context.controller.get_display_currency_code()
+        ).upper()
+    )
+    provider_mode_var = tk.StringVar(
+        value=str(runtime_config.get("provider_mode", "personal") or "personal").lower()
+    )
+    primary_provider_var = tk.StringVar(
+        value=str(runtime_config.get("primary_provider", "") or "").lower()
+    )
+    fallback_provider_var = tk.StringVar(
+        value=str(runtime_config.get("fallback_provider", "") or "").lower()
+    )
+    exchange_api_key_var = tk.StringVar(
+        value=str(runtime_config.get("exchange_rate_api_key", "") or "")
+    )
+    auto_update_var = tk.BooleanVar(value=bool(runtime_config.get("auto_update", True)))
+    update_interval_var = tk.StringVar(
+        value=str(runtime_config.get("update_interval_minutes", 60) or 60)
+    )
+
+    ttk.Label(
+        currency_frame,
+        text=tr("settings.currency.base_currency", "Базовая валюта:"),
+    ).grid(row=0, column=0, sticky="w", padx=pad_x, pady=pad_y)
+    ttk.Label(
+        currency_frame,
+        text=base_currency_text,
+    ).grid(row=0, column=1, sticky="w", padx=(0, pad_x), pady=pad_y)
+
+    ttk.Label(
+        currency_frame,
+        text=tr("settings.currency.display_currency", "Валюта отображения:"),
+    ).grid(row=0, column=2, sticky="w", padx=pad_x, pady=pad_y)
+    display_currency_combo = ttk.Combobox(
+        currency_frame,
+        textvariable=display_currency_var,
+        values=context.controller.get_available_display_currencies(),
+        state="readonly",
+        width=18,
+    )
+    display_currency_combo.grid(row=0, column=3, sticky="ew", padx=(0, pad_x), pady=pad_y)
+
+    ttk.Label(
+        currency_frame,
+        text=tr("settings.currency.provider_mode", "Режим провайдера:"),
+    ).grid(row=1, column=0, sticky="w", padx=pad_x, pady=pad_y)
+    provider_mode_combo = ttk.Combobox(
+        currency_frame,
+        textvariable=provider_mode_var,
+        values=["personal", "commercial"],
+        state="readonly",
+        width=18,
+    )
+    provider_mode_combo.grid(row=1, column=1, sticky="ew", padx=(0, pad_x), pady=pad_y)
+
+    ttk.Label(
+        currency_frame,
+        text=tr("settings.currency.primary_provider", "Основной провайдер:"),
+    ).grid(row=1, column=2, sticky="w", padx=pad_x, pady=pad_y)
+    primary_provider_combo = ttk.Combobox(
+        currency_frame,
+        textvariable=primary_provider_var,
+        values=provider_names,
+        state="readonly",
+        width=18,
+    )
+    primary_provider_combo.grid(row=1, column=3, sticky="ew", padx=(0, pad_x), pady=pad_y)
+
+    ttk.Label(
+        currency_frame,
+        text=tr("settings.currency.fallback_provider", "Резервный провайдер:"),
+    ).grid(row=2, column=0, sticky="w", padx=pad_x, pady=pad_y)
+    fallback_provider_combo = ttk.Combobox(
+        currency_frame,
+        textvariable=fallback_provider_var,
+        values=provider_names,
+        state="readonly",
+        width=18,
+    )
+    fallback_provider_combo.grid(row=2, column=1, sticky="ew", padx=(0, pad_x), pady=pad_y)
+
+    ttk.Label(
+        currency_frame,
+        text=tr("settings.currency.exchange_api_key", "API key ExchangeRate:"),
+    ).grid(row=2, column=2, sticky="w", padx=pad_x, pady=pad_y)
+    ttk.Entry(
+        currency_frame,
+        textvariable=exchange_api_key_var,
+        width=24,
+    ).grid(row=2, column=3, sticky="ew", padx=(0, pad_x), pady=pad_y)
+
+    ttk.Checkbutton(
+        currency_frame,
+        text=tr("settings.currency.auto_update", "Автообновление курсов"),
+        variable=auto_update_var,
+    ).grid(row=3, column=0, columnspan=2, sticky="w", padx=pad_x, pady=(pad_y, 0))
+
+    ttk.Label(
+        currency_frame,
+        text=tr("settings.currency.update_interval", "Интервал обновления (мин):"),
+    ).grid(row=4, column=0, sticky="w", padx=pad_x, pady=(pad_y, 0))
+    ttk.Entry(
+        currency_frame,
+        textvariable=update_interval_var,
+        width=12,
+    ).grid(row=4, column=1, sticky="w", padx=(0, pad_x), pady=(pad_y, 0))
+
+    ttk.Label(
+        currency_frame,
+        text=tr(
+            "settings.currency.base_currency_note",
+            "Базовая валюта доступна только при первом запуске приложения.",
+        ),
+        wraplength=440,
+        justify="left",
+    ).grid(row=3, column=2, rowspan=2, columnspan=2, sticky="w", padx=pad_x, pady=(pad_y, 0))
+
+    def _refresh_provider_choices(*_args: object) -> None:
+        available = context.controller.get_supported_currency_provider_names()
+        current_primary = str(primary_provider_var.get() or "").strip().lower()
+        if current_primary not in available:
+            current_primary = available[0] if available else ""
+            primary_provider_var.set(current_primary)
+        primary_provider_combo.config(values=available)
+
+        fallback_values = [name for name in available if name != current_primary] or available
+        current_fallback = str(fallback_provider_var.get() or "").strip().lower()
+        if current_fallback not in fallback_values:
+            for candidate in ("exchange_rate", "static", "cbr", "nbk"):
+                if candidate in fallback_values:
+                    current_fallback = candidate
+                    break
+            if not current_fallback and fallback_values:
+                current_fallback = fallback_values[0]
+            fallback_provider_var.set(current_fallback)
+        fallback_provider_combo.config(values=fallback_values)
+
+    def _save_currency_settings() -> None:
+        try:
+            context.controller.update_runtime_currency_config(
+                display_currency=str(display_currency_var.get() or ""),
+                provider_mode=str(provider_mode_var.get() or ""),
+                primary_provider=str(primary_provider_var.get() or ""),
+                fallback_provider=str(fallback_provider_var.get() or ""),
+                exchange_rate_api_key=str(exchange_api_key_var.get() or ""),
+                auto_update=auto_update_var.get(),
+                update_interval_minutes=str(update_interval_var.get() or ""),
+            )
+        except (ValueError, RuntimeError) as error:
+            log_ui_error(logger, "UI_SETTINGS_UPDATE_CURRENCY_CONFIG_FAILED", error)
+            messagebox.showerror(
+                tr("common.error", "Ошибка"),
+                tr(
+                    "settings.currency.error.save",
+                    "Не удалось сохранить настройки валюты: {error}",
+                    error=str(error),
+                ),
+            )
+            return
+
+        display_currency_combo.config(values=context.controller.get_available_display_currencies())
+        _refresh_provider_choices()
+        context._refresh_list()
+        context._refresh_charts()
+        context._refresh_budgets()
+        context._refresh_all()
+        messagebox.showinfo(
+            tr("common.done", "Готово"),
+            tr("settings.currency.saved", "Настройки валюты сохранены."),
+        )
+
+    provider_mode_combo.bind("<<ComboboxSelected>>", _refresh_provider_choices, add="+")
+    primary_provider_combo.bind("<<ComboboxSelected>>", _refresh_provider_choices, add="+")
+    _refresh_provider_choices()
+
+    ttk.Button(
+        currency_frame,
+        text=tr("common.save", "Сохранить"),
+        style="Primary.TButton",
+        command=_save_currency_settings,
+    ).grid(row=5, column=0, columnspan=4, sticky="ew", padx=pad_x, pady=(PAD_SM, pad_y))
+
     mand_card = create_card_section(right_panel, tr("settings.mandatory", "Обязательные расходы"))
-    mand_card.grid(row=0, column=0, sticky="nsew")
+    mand_card.grid(row=1, column=0, sticky="nsew")
     mand_frame = mand_card.winfo_children()[-1]
     mand_frame.grid_rowconfigure(0, weight=1)
     mand_frame.grid_columnconfigure(0, weight=1)

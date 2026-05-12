@@ -78,6 +78,11 @@ class _FakeChartApp:
 class _FakeStatusController:
     def __init__(self) -> None:
         self.set_online_mode = Mock()
+        self.refresh_currency_rates = Mock(return_value=True)
+        self.runtime_config = {
+            "auto_update": True,
+            "update_interval_minutes": 60,
+        }
 
     def get_online_status(self):
         return SimpleNamespace(last_fetched_at=datetime(2026, 5, 9, 12, 30), is_online=True)
@@ -94,6 +99,9 @@ class _FakeStatusController:
     def get_available_display_currencies(self) -> list[str]:
         return ["EUR", "KZT", "USD"]
 
+    def get_runtime_currency_config(self) -> dict[str, object]:
+        return dict(self.runtime_config)
+
 
 class _FakeStatusOwner:
     def __init__(self) -> None:
@@ -104,7 +112,9 @@ class _FakeStatusOwner:
         self._display_currency_var = _FakeVar("KZT")
         self._display_currency_combo = _FakeCombo()
         self._online_toggle_running = False
-        self._run_background = Mock()
+        self._run_background = Mock(
+            side_effect=lambda task, **kwargs: kwargs.get("on_success", lambda *_: None)(task())
+        )
         self._scheduled: list[tuple[str, int, object]] = []
 
     def _schedule_after(self, key: str, delay_ms: int, callback):
@@ -171,3 +181,14 @@ def test_status_bar_coordinator_refreshes_and_schedules_timer_through_owner_cont
     assert len(owner._scheduled) == 1
     assert owner._scheduled[0][0] == "status_refresh"
     assert owner._scheduled[0][1] == 60_000
+    owner.controller.refresh_currency_rates.assert_called_once()
+
+
+def test_status_bar_coordinator_skips_auto_refresh_when_disabled():
+    owner = _FakeStatusOwner()
+    owner.controller.runtime_config["auto_update"] = False
+    coordinator = StatusBarCoordinator(cast(StatusBarOwner, owner), logger=Mock())
+
+    coordinator.start_status_refresh_timer()
+
+    owner.controller.refresh_currency_rates.assert_not_called()

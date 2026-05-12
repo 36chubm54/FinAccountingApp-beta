@@ -3,6 +3,7 @@ import logging
 import os
 import tempfile
 import threading
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
@@ -40,6 +41,7 @@ class CurrencyService:
     DEFAULT_RATES = {"USD": 500.0, "EUR": 590.0, "RUB": 6.5}
     DEFAULT_CONFIG = {
         "base_currency": "KZT",
+        "display_currency": "",
         "provider_mode": "personal",
         "primary_provider": "nbk",
         "fallback_provider": "exchange_rate",
@@ -50,6 +52,8 @@ class CurrencyService:
         "auto_update": True,
         "update_interval_minutes": 60,
     }
+    SUPPORTED_SETUP_CURRENCIES = ("KZT", "USD", "EUR", "RUB")
+    SUPPORTED_PROVIDER_MODES = ("personal", "commercial")
 
     def __init__(
         self,
@@ -65,22 +69,98 @@ class CurrencyService:
         self._online_lock = threading.Lock()
         self._last_fetched_at: datetime | None = None
         self._config = self._load_config()
+        self._default_rates = self.default_rates_for_base(self._base)
         self._provider_registry = provider_registry or DEFAULT_PROVIDER_REGISTRY
         self._aggregator: RateAggregator = aggregator or self._build_default_aggregator()
 
         if rates is not None:
             self._service = DomainCurrencyService(rates=rates, base=self._base)
-            return
-
-        if use_online:
+        elif use_online:
             parsed = self._fetch_online_rates()
             if parsed:
                 self._service = DomainCurrencyService(rates=parsed, base=self._base)
                 self._last_fetched_at = datetime.now()
-                return
-            logger.info("Falling back to default currency rates after online fetch")
+            else:
+                logger.info("Falling back to default currency rates after online fetch")
+                self._service = DomainCurrencyService(rates=self._default_rates, base=self._base)
+        else:
+            self._service = DomainCurrencyService(rates=self._default_rates, base=self._base)
+        self._apply_configured_display_currency()
 
-        self._service = DomainCurrencyService(rates=self.DEFAULT_RATES, base=self._base)
+    @classmethod
+    def default_rates_for_base(cls, base: str) -> dict[str, float]:
+        normalized_base = str(base or "KZT").strip().upper() or "KZT"
+        if normalized_base == "KZT":
+            return dict(cls.DEFAULT_RATES)
+        reference_rates = {"KZT": 1.0, **cls.DEFAULT_RATES}
+        base_rate = reference_rates.get(normalized_base)
+        if not base_rate:
+            return dict(cls.DEFAULT_RATES)
+        derived: dict[str, float] = {}
+        for code, rate in reference_rates.items():
+            if code == normalized_base:
+                continue
+            derived[code] = float(rate) / float(base_rate)
+        return derived
+
+    @classmethod
+    def load_config_payload(
+        cls,
+        *,
+        config_file: Path | None = None,
+        use_env_override: bool = True,
+    ) -> dict[str, object]:
+        config = dict(cls.DEFAULT_CONFIG)
+        target = config_file or cls.CONFIG_FILE
+        try:
+            if target.exists():
+                with open(target, encoding="utf-8") as fh:
+                    payload = json.load(fh)
+                if isinstance(payload, dict):
+                    config.update(payload)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            logger.exception("Failed to load currency configuration, using defaults")
+        if use_env_override:
+            api_key = str(os.environ.get(cls.EXCHANGE_RATE_API_KEY_ENV, "") or "").strip()
+            if api_key:
+                config["exchange_rate_api_key"] = api_key
+        return config
+
+    @classmethod
+    def save_config_payload(
+        cls,
+        payload: Mapping[str, object],
+        *,
+        config_file: Path | None = None,
+    ) -> None:
+        target = config_file or cls.CONFIG_FILE
+        normalized = dict(cls.DEFAULT_CONFIG)
+        normalized.update(dict(payload))
+        temp_path: str | None = None
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            fd, temp_path = tempfile.mkstemp(
+                prefix=".currency_config_",
+                suffix=".json",
+                dir=str(target.parent),
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(normalized, fh, ensure_ascii=False, indent=2)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(temp_path, target)
+        except OSError:
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    logger.exception(
+                        "Failed to cleanup temporary currency config: %s",
+                        temp_path,
+                    )
+            raise
 
     def convert(self, amount: float, currency: str) -> float:
         try:
@@ -127,6 +207,161 @@ class CurrencyService:
             if code == self.base_currency or code in rates:
                 available.add(code)
         return sorted(available)
+
+    def get_supported_provider_names(self) -> list[str]:
+        context = ProviderBuildContext(
+            target_base=self._base,
+            config=self._config,
+            default_rates=self._default_rates,
+        )
+        supported: list[str] = []
+        for name in self._provider_registry.names():
+            if self._provider_registry.create(name, context) is not None:
+                supported.append(name)
+        return supported
+
+    @staticmethod
+    def _normalize_update_interval_minutes(value: object) -> int:
+        if isinstance(value, bool):
+            return 1 if value else 60
+        if isinstance(value, int):
+            return max(1, value)
+        if isinstance(value, float):
+            return max(1, int(value))
+        if isinstance(value, str):
+            try:
+                interval = int(value.strip() or "60")
+            except ValueError:
+                return 60
+            return max(1, interval)
+        return 60
+
+    @staticmethod
+    def parse_update_interval_minutes(value: object) -> int:
+        if isinstance(value, bool):
+            raise ValueError("Update interval must be a positive integer")
+        if isinstance(value, int):
+            if value <= 0:
+                raise ValueError("Update interval must be positive")
+            return value
+        if isinstance(value, float):
+            if not value.is_integer():
+                raise ValueError("Update interval must be a whole number")
+            if value <= 0:
+                raise ValueError("Update interval must be positive")
+            return int(value)
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized:
+                raise ValueError("Update interval is required")
+            try:
+                parsed = int(normalized)
+            except ValueError as err:
+                raise ValueError("Update interval must be a positive integer") from err
+            if parsed <= 0:
+                raise ValueError("Update interval must be positive")
+            return parsed
+        raise ValueError("Update interval must be a positive integer")
+
+    def get_runtime_currency_config(self) -> dict[str, object]:
+        provider_mode = str(self._config.get("provider_mode", "personal") or "personal").lower()
+        fallback_key = (
+            "commercial_fallback_provider" if provider_mode == "commercial" else "fallback_provider"
+        )
+        return {
+            "base_currency": self.base_currency,
+            "display_currency": self.display_currency,
+            "provider_mode": provider_mode,
+            "primary_provider": str(self._config.get("primary_provider", "") or "").lower(),
+            "fallback_provider": str(self._config.get(fallback_key, "") or "").lower(),
+            "exchange_rate_api_key": str(self._config.get("exchange_rate_api_key", "") or ""),
+            "auto_update": bool(self._config.get("auto_update", True)),
+            "update_interval_minutes": self._normalize_update_interval_minutes(
+                self._config.get("update_interval_minutes", 60)
+            ),
+        }
+
+    def update_runtime_currency_config(
+        self,
+        *,
+        display_currency: str,
+        provider_mode: str,
+        primary_provider: str,
+        fallback_provider: str,
+        exchange_rate_api_key: str,
+        auto_update: bool,
+        update_interval_minutes: int | str,
+    ) -> None:
+        normalized_display = str(display_currency or "").strip().upper()
+        normalized_mode = str(provider_mode or "").strip().lower()
+        normalized_primary = str(primary_provider or "").strip().lower()
+        normalized_fallback = str(fallback_provider or "").strip().lower()
+        normalized_key = str(exchange_rate_api_key or "").strip()
+        normalized_interval = self.parse_update_interval_minutes(update_interval_minutes)
+
+        if normalized_display not in self.SUPPORTED_SETUP_CURRENCIES:
+            raise ValueError("Unsupported display currency")
+        if (
+            normalized_display != self.base_currency
+            and normalized_display not in self._default_rates
+        ):
+            raise ValueError("Display currency is not supported for the selected base currency")
+        if normalized_mode not in self.SUPPORTED_PROVIDER_MODES:
+            raise ValueError("Unsupported provider mode")
+
+        supported_providers = self.get_supported_provider_names()
+        if normalized_primary not in supported_providers:
+            raise ValueError("Unsupported primary provider")
+        if normalized_fallback not in supported_providers:
+            raise ValueError("Unsupported fallback provider")
+        if normalized_primary == normalized_fallback:
+            raise ValueError("Primary and fallback providers must be different")
+
+        provider_mode_changed = (
+            normalized_mode
+            != str(self._config.get("provider_mode", "personal") or "personal").lower()
+        )
+        provider_settings_changed = (
+            provider_mode_changed
+            or normalized_primary
+            != str(self._config.get("primary_provider", "") or "").strip().lower()
+            or normalized_fallback
+            != str(
+                self._config.get(
+                    "commercial_fallback_provider"
+                    if normalized_mode == "commercial"
+                    else "fallback_provider",
+                    "",
+                )
+                or ""
+            )
+            .strip()
+            .lower()
+            or normalized_key != str(self._config.get("exchange_rate_api_key", "") or "").strip()
+        )
+
+        self._config["display_currency"] = normalized_display
+        self._config["provider_mode"] = normalized_mode
+        self._config["primary_provider"] = normalized_primary
+        active_fallback_key = (
+            "commercial_fallback_provider"
+            if normalized_mode == "commercial"
+            else "fallback_provider"
+        )
+        self._config[active_fallback_key] = normalized_fallback
+        self._config["exchange_rate_api_key"] = normalized_key
+        self._config["auto_update"] = bool(auto_update)
+        self._config["update_interval_minutes"] = normalized_interval
+
+        self._aggregator = self._build_default_aggregator()
+        self.set_display_currency(normalized_display)
+        if self._use_online and provider_settings_changed:
+            refreshed = self.refresh_rates()
+            if not refreshed:
+                logger.warning(
+                    "CurrencyService: runtime provider settings were updated but refresh failed"
+                )
+        self.save_config_payload(self._config)
 
     def set_display_currency(self, code: str) -> None:
         normalized = (code or "").strip().upper()
@@ -195,7 +430,7 @@ class CurrencyService:
         if cached:
             self._service = DomainCurrencyService(rates=cached, base=self._base)
             return
-        self._service = DomainCurrencyService(rates=self.DEFAULT_RATES, base=self._base)
+        self._service = DomainCurrencyService(rates=self._default_rates, base=self._base)
 
     def _safe_load_cached(self) -> dict[str, float] | None:
         try:
@@ -229,26 +464,27 @@ class CurrencyService:
         return rates
 
     def _load_config(self) -> dict[str, object]:
-        config = dict(self.DEFAULT_CONFIG)
+        return self.load_config_payload()
+
+    def _apply_configured_display_currency(self) -> None:
+        configured = str(self._config.get("display_currency", "") or "").strip().upper()
+        if not configured:
+            return
         try:
-            if self.CONFIG_FILE.exists():
-                with open(self.CONFIG_FILE, encoding="utf-8") as fh:
-                    payload = json.load(fh)
-                if isinstance(payload, dict):
-                    config.update(payload)
-        except (OSError, json.JSONDecodeError, TypeError, ValueError):
-            logger.exception("Failed to load currency configuration, using defaults")
-        api_key = str(os.environ.get(self.EXCHANGE_RATE_API_KEY_ENV, "") or "").strip()
-        if api_key:
-            config["exchange_rate_api_key"] = api_key
-        return config
+            self.set_display_currency(configured)
+        except ValueError:
+            logger.warning(
+                "CurrencyService: configured display currency '%s' is unsupported for base '%s'",
+                configured,
+                self._base,
+            )
 
     def _build_default_aggregator(self) -> CurrencyAggregator:
         providers = []
         context = ProviderBuildContext(
             target_base=self._base,
             config=self._config,
-            default_rates=self.DEFAULT_RATES,
+            default_rates=self._default_rates,
         )
         for name in self._resolve_provider_order():
             provider = self._provider_registry.create(name, context)

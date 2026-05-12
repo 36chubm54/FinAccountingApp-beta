@@ -22,7 +22,6 @@ tests/_tmp/
 *.xlsx
 *.pdf
 *.json
-!currency_config.json
 
 # Database files
 *.db

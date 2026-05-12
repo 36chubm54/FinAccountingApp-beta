@@ -127,14 +127,17 @@ class FinancialApp(tk.Tk):
     daily_bar_canvas: tk.Canvas | None
     monthly_bar_canvas: tk.Canvas | None
 
-    def __init__(self) -> None:
+    def __init__(self, *, initial_base_currency: str | None = None) -> None:
         super().__init__()
 
         icons_dir = Path(__file__).resolve().parent / "assets" / "icons"
         apply_window_icon(self, icons_dir=icons_dir)
         configure_main_window(self)
 
-        self.repository = bootstrap_repository(run_maintenance=False)
+        self.repository = bootstrap_repository(
+            run_maintenance=False,
+            initial_base_currency=initial_base_currency,
+        )
         base_currency = "KZT"
         get_schema_meta = getattr(self.repository, "get_schema_meta", None)
         if callable(get_schema_meta):
@@ -442,9 +445,9 @@ class FinancialApp(tk.Tk):
         scroll_owner_legend_canvas(self, event)
 
 
-def main() -> None:
+def main(*, initial_base_currency: str | None = None) -> None:
     try:
-        app = FinancialApp()
+        app = FinancialApp(initial_base_currency=initial_base_currency)
         app.mainloop()
     except KeyboardInterrupt:
         show_info(
