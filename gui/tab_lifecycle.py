@@ -220,8 +220,6 @@ def build_tab(app: Any, tab_key: str) -> bool:
     if tab_key == "settings":
         from gui.tabs.settings_tab import build_settings_tab
 
-        app._settings_bindings = build_settings_tab(
-            app.tab_settings, cast(SettingsTabContext, app), app._import_formats
-        )
+        app._settings_bindings = build_settings_tab(app.tab_settings, cast(SettingsTabContext, app))
         return True
     return False

@@ -54,7 +54,6 @@ class SettingsTabBindings:
 def build_settings_tab(
     parent: tk.Frame | ttk.Frame,
     context: SettingsTabContext,
-    import_formats: dict[str, dict[str, str]],
 ) -> SettingsTabBindings:
     def _base_currency_code() -> str:
         getter = getattr(context.controller, "get_base_currency_code", None)
@@ -73,10 +72,6 @@ def build_settings_tab(
 
     def refresh_wallets() -> None:
         refresh_wallet_related_ui(context)
-
-    def refresh_mandatory() -> None:
-        if context.refresh_mandatory is not None:
-            context.refresh_mandatory()
 
     context.refresh_wallets = refresh_wallets
 
@@ -117,7 +112,6 @@ def build_settings_tab(
         parent=parent,
         context=context,
         refresh_wallets=refresh_wallets,
-        refresh_mandatory=refresh_mandatory,
         messagebox_module=messagebox,
         row_index=2,
     )

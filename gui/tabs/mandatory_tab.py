@@ -40,6 +40,10 @@ class MandatoryTabContext(Protocol):
 @dataclass(slots=True)
 class MandatoryTabBindings:
     refresh: Callable[[], None]
+    add_mandatory: Callable[[], None]
+    edit_mandatory: Callable[[], None]
+    add_to_records: Callable[[], None]
+    delete_mandatory: Callable[[], None]
 
 
 def build_mandatory_tab(
@@ -67,7 +71,7 @@ def build_mandatory_tab(
         else:
             refresh_wallet_related_ui(context)
 
-    refresh_mandatory = build_mandatory_section(
+    mandatory = build_mandatory_section(
         content,
         context=context,
         import_formats=import_formats,
@@ -76,6 +80,13 @@ def build_mandatory_tab(
         messagebox_module=messagebox,
         row_index=0,
     )
+    refresh_mandatory = mandatory.refresh
     context.refresh_mandatory = refresh_mandatory
     refresh_mandatory()
-    return MandatoryTabBindings(refresh=refresh_mandatory)
+    return MandatoryTabBindings(
+        refresh=refresh_mandatory,
+        add_mandatory=mandatory.add_mandatory,
+        edit_mandatory=mandatory.edit_mandatory,
+        add_to_records=mandatory.add_to_records,
+        delete_mandatory=mandatory.delete_mandatory,
+    )

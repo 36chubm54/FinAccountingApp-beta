@@ -426,6 +426,7 @@ def build_wallets_section(
         except (DomainError, ValueError, TypeError, RuntimeError) as error:
             log_ui_error(logger, "UI_SETTINGS_DELETE_WALLET_FAILED", error, wallet_id=wallet_id)
             messagebox_module.showerror(tr("common.error", "Ошибка"), str(error))
+
     _build_wallet_actions(
         wallets_frame,
         pad_x=pad_x,
@@ -581,7 +582,6 @@ def build_currency_section(
         width=24,
     ).grid(row=7, column=1, sticky="ew", padx=(0, pad_x), pady=pad_y)
 
-
     def _refresh_provider_choices(*_args: object) -> None:
         available = context.controller.get_supported_currency_provider_names()
         current_primary = str(primary_provider_var.get() or "").strip().lower()
@@ -657,7 +657,6 @@ def build_backup_section(
     parent: tk.Frame | ttk.Frame,
     context: Any,
     refresh_wallets: Callable[[], None],
-    refresh_mandatory: Callable[[], None],
     messagebox_module: MessageBoxLike = messagebox,
     row_index: int = 2,
 ) -> None:
@@ -669,6 +668,11 @@ def build_backup_section(
     backup_frame = backup_card.winfo_children()[-1]
     backup_frame.grid_columnconfigure(0, weight=1)
     backup_frame.grid_columnconfigure(1, weight=1)
+
+    def _refresh_mandatory_if_available() -> None:
+        refresh_mandatory = getattr(context, "refresh_mandatory", None)
+        if callable(refresh_mandatory):
+            refresh_mandatory()
 
     def import_backup() -> None:
         filepath = filedialog.askopenfilename(
@@ -710,7 +714,7 @@ def build_backup_section(
                     details=details,
                 ),
             )
-            refresh_mandatory()
+            _refresh_mandatory_if_available()
             refresh_wallets()
             context._refresh_list()
             context._refresh_charts()
