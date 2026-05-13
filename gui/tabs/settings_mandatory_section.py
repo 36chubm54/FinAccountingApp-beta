@@ -4,6 +4,7 @@ import logging
 import os
 import tkinter as tk
 from collections.abc import Callable
+from dataclasses import dataclass
 from tkinter import filedialog, ttk
 from typing import Any, Protocol
 
@@ -32,31 +33,348 @@ class MessageBoxLike(Protocol):
     def askyesno(self, title: str, message: str) -> bool: ...
 
 
-def build_mandatory_section(
-    right_panel: tk.Frame | ttk.Frame,
+@dataclass(slots=True)
+class MandatoryAddFormFields:
+    panel: ttk.Frame
+    amount_entry: ttk.Entry
+    currency_entry: ttk.Entry
+    wallet_var: tk.StringVar
+    wallet_map: dict[str, int]
+    category_entry: ttk.Entry
+    description_entry: ttk.Entry
+    period_var: tk.StringVar
+    date_entry: ttk.Entry
+
+
+@dataclass(slots=True)
+class MandatoryEditFormFields:
+    panel: ttk.Frame
+    amount_base_entry: ttk.Entry
+    wallet_var: tk.StringVar
+    wallet_map: dict[str, int]
+    period_var: tk.StringVar
+    date_entry: ttk.Entry
+
+
+@dataclass(slots=True)
+class MandatoryAddToRecordsFields:
+    panel: ttk.Frame
+    wallet_var: tk.StringVar
+    wallet_map: dict[str, int]
+    date_entry: ttk.Entry
+
+
+def _create_mandatory_inline_panel(parent: tk.Misc) -> ttk.Frame:
+    panel = ttk.Frame(parent, style="InlinePanel.TFrame", padding=(PAD_SM, PAD_XS))
+    panel.grid(row=2, column=0, columnspan=2, pady=PAD_SM, sticky="ew")
+    _configure_inline_panel_grid(panel)
+    return panel
+
+
+def _mandatory_wallet_map(controller: Any) -> dict[str, int]:
+    return {
+        f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id
+        for wallet in controller.load_active_wallets()
+    }
+
+
+def _build_mandatory_wallet_selector(
+    panel: ttk.Frame,
     *,
-    context: Any,
-    import_formats: dict[str, dict[str, str]],
-    refresh_wallets: Callable[[], None],
+    row_index: int,
+    controller: Any,
+    selected_wallet_id: int | None = None,
+) -> tuple[tk.StringVar, ttk.Combobox, dict[str, int]]:
+    ttk.Label(panel, text=tr("common.wallet", "Кошелек:")).grid(
+        row=row_index, column=0, sticky="w"
+    )
+    wallet_var = tk.StringVar(value="")
+    wallet_menu = ttk.Combobox(
+        panel,
+        textvariable=wallet_var,
+        values=[],
+        state="readonly",
+    )
+    wallet_menu.grid(row=row_index, column=1, sticky="ew")
+    wallet_map = _mandatory_wallet_map(controller)
+    wallet_labels = list(wallet_map.keys()) or [""]
+    wallet_menu["values"] = wallet_labels
+    if selected_wallet_id is None:
+        wallet_var.set(wallet_labels[0])
+    else:
+        current_wallet_label = next(
+            (
+                label
+                for label, wallet_id in wallet_map.items()
+                if int(wallet_id) == int(selected_wallet_id)
+            ),
+            wallet_labels[0],
+        )
+        wallet_var.set(current_wallet_label)
+    return wallet_var, wallet_menu, wallet_map
+
+
+def _build_add_mandatory_panel(
+    parent: tk.Misc,
+    *,
+    controller: Any,
     base_currency_code: str,
-    messagebox_module: MessageBoxLike = messagebox,
-) -> Callable[[], None]:
-    pad_x = PAD_SM
-    pad_y = PAD_XS
+) -> MandatoryAddFormFields:
+    panel = _create_mandatory_inline_panel(parent)
 
-    mand_card = create_card_section(right_panel, tr("settings.mandatory", "Обязательные расходы"))
-    mand_card.grid(row=1, column=0, sticky="nsew")
-    mand_frame = mand_card.winfo_children()[-1]
-    mand_frame.grid_rowconfigure(0, weight=1)
-    mand_frame.grid_columnconfigure(0, weight=1)
+    ttk.Label(panel, text=tr("settings.mandatory.field.amount", "Сумма:")).grid(
+        row=0, column=0, sticky="w"
+    )
+    amount_entry = ttk.Entry(panel)
+    amount_entry.grid(row=0, column=1, sticky="ew", pady=2)
 
-    mand_list_frame = ttk.Frame(mand_frame)
-    mand_list_frame.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=pad_x, pady=pad_y)
-    mand_list_frame.grid_rowconfigure(0, weight=1)
-    mand_list_frame.grid_columnconfigure(0, weight=1)
+    ttk.Label(
+        panel,
+        text=tr(
+            "settings.mandatory.field.currency_default",
+            "Валюта (по умолчанию валюта базы):",
+        ),
+    ).grid(row=1, column=0, sticky="w")
+    currency_entry = ttk.Entry(panel)
+    currency_entry.insert(0, base_currency_code)
+    currency_entry.grid(row=1, column=1, sticky="ew", pady=2)
 
+    wallet_var, _wallet_menu, wallet_map = _build_mandatory_wallet_selector(
+        panel,
+        row_index=2,
+        controller=controller,
+    )
+
+    ttk.Label(
+        panel,
+        text=tr(
+            "settings.mandatory.field.category_default", "Категория (по умолчанию Mandatory):"
+        ),
+    ).grid(row=3, column=0, sticky="w")
+    category_entry = ttk.Entry(panel)
+    category_entry.insert(0, "Mandatory")
+    category_entry.grid(row=3, column=1, sticky="ew", pady=2)
+
+    ttk.Label(panel, text=tr("common.description", "Описание:")).grid(
+        row=4, column=0, sticky="w"
+    )
+    description_entry = ttk.Entry(panel)
+    description_entry.grid(row=4, column=1, sticky="ew", pady=2)
+
+    ttk.Label(panel, text=tr("common.period", "Период:")).grid(row=5, column=0, sticky="w")
+    period_var = tk.StringVar(value="monthly")
+    period_combo = ttk.Combobox(
+        panel,
+        textvariable=period_var,
+        values=["daily", "weekly", "monthly", "yearly"],
+        state="readonly",
+    )
+    period_combo.grid(row=5, column=1, sticky="ew", pady=2)
+
+    ttk.Label(
+        panel,
+        text=tr("settings.mandatory.field.date_optional", "Дата (YYYY-MM-DD, необязательно):"),
+    ).grid(row=6, column=0, sticky="w")
+    date_entry = ttk.Entry(panel)
+    date_entry.grid(row=6, column=1, sticky="ew", pady=2)
+
+    return MandatoryAddFormFields(
+        panel=panel,
+        amount_entry=amount_entry,
+        currency_entry=currency_entry,
+        wallet_var=wallet_var,
+        wallet_map=wallet_map,
+        category_entry=category_entry,
+        description_entry=description_entry,
+        period_var=period_var,
+        date_entry=date_entry,
+    )
+
+
+def _build_edit_mandatory_panel(
+    parent: tk.Misc,
+    *,
+    controller: Any,
+    expense: Any,
+) -> MandatoryEditFormFields:
+    panel = _create_mandatory_inline_panel(parent)
+
+    ttk.Label(
+        panel,
+        text=tr("settings.mandatory.field.amount_base", "Сумма в валюте базы:"),
+    ).grid(row=0, column=0, sticky="w")
+    amount_base_entry = ttk.Entry(panel)
+    amount_base_entry.insert(0, str(expense.amount_base))
+    amount_base_entry.grid(row=0, column=1, sticky="ew", pady=2)
+
+    wallet_var, _wallet_menu, wallet_map = _build_mandatory_wallet_selector(
+        panel,
+        row_index=1,
+        controller=controller,
+        selected_wallet_id=int(expense.wallet_id),
+    )
+
+    ttk.Label(panel, text=tr("common.period", "Период:")).grid(row=2, column=0, sticky="w")
+    period_var = tk.StringVar(value=str(expense.period or "monthly"))
+    period_combo = ttk.Combobox(
+        panel,
+        textvariable=period_var,
+        values=["daily", "weekly", "monthly", "yearly"],
+        state="readonly",
+    )
+    period_combo.grid(row=2, column=1, sticky="ew")
+
+    ttk.Label(
+        panel,
+        text=tr("settings.mandatory.field.date_optional", "Дата (YYYY-MM-DD, необязательно):"),
+    ).grid(row=3, column=0, sticky="w")
+    date_entry = ttk.Entry(panel)
+    date_entry.insert(0, _mandatory_date_text(expense))
+    date_entry.grid(row=3, column=1, sticky="ew", pady=2)
+
+    return MandatoryEditFormFields(
+        panel=panel,
+        amount_base_entry=amount_base_entry,
+        wallet_var=wallet_var,
+        wallet_map=wallet_map,
+        period_var=period_var,
+        date_entry=date_entry,
+    )
+
+
+def _build_add_to_records_panel(
+    parent: tk.Misc,
+    *,
+    controller: Any,
+) -> MandatoryAddToRecordsFields:
+    panel = _create_mandatory_inline_panel(parent)
+
+    ttk.Label(
+        panel,
+        text=tr("settings.mandatory.field.date_required", "Дата (YYYY-MM-DD):"),
+    ).grid(row=0, column=0, sticky="w")
+    date_entry = ttk.Entry(panel)
+    date_entry.grid(row=0, column=1, sticky="ew", pady=2)
+
+    wallet_var, _wallet_menu, wallet_map = _build_mandatory_wallet_selector(
+        panel,
+        row_index=1,
+        controller=controller,
+    )
+    return MandatoryAddToRecordsFields(
+        panel=panel,
+        wallet_var=wallet_var,
+        wallet_map=wallet_map,
+        date_entry=date_entry,
+    )
+
+
+def _configure_inline_panel_grid(panel: ttk.Frame) -> None:
+    panel.grid_columnconfigure(0, minsize=280)
+    panel.grid_columnconfigure(1, weight=1, minsize=320)
+
+
+def _build_inline_action_buttons(
+    panel: ttk.Frame,
+    *,
+    row_index: int,
+    on_save: Callable[[], None],
+    on_cancel: Callable[[], None],
+) -> None:
+    buttons = ttk.Frame(panel, style="InlinePanel.TFrame")
+    buttons.grid(row=row_index, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+    buttons.grid_columnconfigure(0, weight=1)
+    buttons.grid_columnconfigure(1, weight=1)
+    ttk.Button(
+        buttons,
+        text=tr("common.save", "Сохранить"),
+        style="Primary.TButton",
+        command=on_save,
+    ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+    ttk.Button(buttons, text=tr("common.cancel", "Отмена"), command=on_cancel).grid(
+        row=0, column=1, sticky="ew", padx=(6, 0)
+    )
+
+
+def _selected_mandatory_index(
+    mand_tree: ttk.Treeview,
+    *,
+    messagebox_module: MessageBoxLike,
+    missing_message: str,
+) -> int | None:
+    selection = mand_tree.selection()
+    if not selection:
+        messagebox_module.showerror(tr("common.error", "Ошибка"), missing_message)
+        return None
+    try:
+        return int(selection[0])
+    except (TypeError, ValueError):
+        messagebox_module.showerror(
+            tr("common.error", "Ошибка"),
+            tr("common.invalid_selection", "Некорректный выбор."),
+        )
+        return None
+
+
+def _build_mandatory_actions_row(
+    parent: tk.Misc,
+    *,
+    format_var: tk.StringVar,
+    on_create: Callable[[], None],
+    on_edit: Callable[[], None],
+    on_add_to_records: Callable[[], None],
+    on_delete: Callable[[], None],
+    on_delete_all: Callable[[], None],
+    on_refresh: Callable[[], None],
+    on_import: Callable[[], None],
+    on_export: Callable[[], None],
+    pad_x: int,
+    pad_y: int,
+) -> None:
+    actions = ttk.Frame(parent)
+    actions.grid(row=1, column=0, columnspan=2, sticky="ew", padx=pad_x, pady=(0, pad_y))
+    for idx in range(5):
+        actions.grid_columnconfigure(idx, weight=1)
+
+    ttk.Button(actions, text=tr("common.create", "Создать"), command=on_create).grid(
+        row=0, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
+    )
+    ttk.Button(actions, text=tr("common.edit", "Редактировать"), command=on_edit).grid(
+        row=0, column=1, sticky="ew", padx=6, pady=(0, 6)
+    )
+    ttk.Button(
+        actions,
+        text=tr("settings.mandatory.add_to_records", "Добавить в записи"),
+        command=on_add_to_records,
+    ).grid(row=0, column=2, sticky="ew", padx=6, pady=(0, 6))
+    ttk.Button(actions, text=tr("common.delete", "Удалить"), command=on_delete).grid(
+        row=0, column=3, sticky="ew", padx=6, pady=(0, 6)
+    )
+    ttk.Button(
+        actions,
+        text=tr("settings.mandatory.delete_all", "Удалить все"),
+        command=on_delete_all,
+    ).grid(row=0, column=4, sticky="ew", padx=(6, 0), pady=(0, 6))
+    ttk.Button(actions, text=tr("common.refresh", "Обновить"), command=on_refresh).grid(
+        row=1, column=0, sticky="ew", padx=(0, 6)
+    )
+    ttk.Combobox(
+        actions,
+        textvariable=format_var,
+        values=["CSV", "XLSX"],
+        state="readonly",
+    ).grid(row=1, column=1, sticky="ew", padx=6)
+    ttk.Button(actions, text=tr("operations.import", "Импорт"), command=on_import).grid(
+        row=1, column=2, sticky="ew", padx=6
+    )
+    ttk.Button(actions, text=tr("operations.export", "Экспорт"), command=on_export).grid(
+        row=1, column=3, sticky="ew", padx=6
+    )
+
+
+def _build_mandatory_tree(parent: tk.Misc) -> tuple[ttk.Treeview, ttk.Scrollbar | None]:
     mand_tree = ttk.Treeview(
-        mand_list_frame,
+        parent,
         show="headings",
         selectmode="browse",
         columns=(
@@ -92,11 +410,16 @@ def build_mandatory_section(
         max_width=360,
     )
     mand_tree.grid(row=0, column=0, sticky="nsew")
-
     _mand_scroll, mand_xscroll = attach_treeview_scrollbars(
-        mand_list_frame, mand_tree, row=0, column=0, horizontal=True
+        parent, mand_tree, row=0, column=0, horizontal=True
     )
+    return mand_tree, mand_xscroll
 
+
+def _bind_mandatory_horizontal_scroll(
+    mand_tree: ttk.Treeview,
+    mand_xscroll: ttk.Scrollbar | None,
+) -> None:
     def _mandatory_scroll_units(delta: int, *, multiplier: int = 12) -> int:
         if delta == 0:
             return 0
@@ -127,29 +450,72 @@ def build_mandatory_section(
             widget.bind("<Shift-Button-4>", _on_mandatory_shift_button4, add="+")
             widget.bind("<Shift-Button-5>", _on_mandatory_shift_button5, add="+")
 
+
+def _mandatory_date_text(expense: Any) -> str:
+    return (
+        expense.date.isoformat()
+        if getattr(expense.date, "isoformat", None) is not None
+        else str(expense.date or "")
+    )
+
+
+def _populate_mandatory_tree(
+    mand_tree: ttk.Treeview,
+    *,
+    context: Any,
+    base_currency_code: str,
+) -> None:
+    mand_tree.heading("kzt", text=context.controller.get_display_currency_code())
+    for iid in mand_tree.get_children():
+        mand_tree.delete(iid)
+    expenses = context.controller.load_mandatory_expenses()
+    for idx, expense in enumerate(expenses):
+        values = (
+            str(idx),
+            f"{float(expense.amount_original or 0.0):,.2f}",
+            str(expense.currency or base_currency_code).upper(),
+            context.controller.format_display_amount(float(expense.amount_base or 0.0)),
+            str(expense.category or ""),
+            str(expense.description or ""),
+            str(expense.period or ""),
+            _mandatory_date_text(expense),
+            "✓" if bool(expense.auto_pay) else "",
+        )
+        mand_tree.insert("", "end", iid=str(idx), values=values)
+
+
+def build_mandatory_section(
+    parent_panel: tk.Frame | ttk.Frame,
+    *,
+    context: Any,
+    import_formats: dict[str, dict[str, str]],
+    refresh_wallets: Callable[[], None],
+    base_currency_code: str,
+    messagebox_module: MessageBoxLike = messagebox,
+    row_index: int = 1,
+) -> Callable[[], None]:
+    pad_x = PAD_SM
+    pad_y = PAD_XS
+
+    mand_card = create_card_section(parent_panel, tr("settings.mandatory", "Обязательные расходы"))
+    mand_card.grid(row=row_index, column=0, sticky="nsew")
+    mand_frame = mand_card.winfo_children()[-1]
+    mand_frame.grid_rowconfigure(0, weight=1)
+    mand_frame.grid_columnconfigure(0, weight=1)
+
+    mand_list_frame = ttk.Frame(mand_frame)
+    mand_list_frame.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=pad_x, pady=pad_y)
+    mand_list_frame.grid_rowconfigure(0, weight=1)
+    mand_list_frame.grid_columnconfigure(0, weight=1)
+    mand_tree, mand_xscroll = _build_mandatory_tree(mand_list_frame)
+    _bind_mandatory_horizontal_scroll(mand_tree, mand_xscroll)
+
     def refresh_mandatory() -> None:
-        mand_tree.heading("kzt", text=context.controller.get_display_currency_code())
-        for iid in mand_tree.get_children():
-            mand_tree.delete(iid)
-        expenses = context.controller.load_mandatory_expenses()
-        for idx, expense in enumerate(expenses):
-            date_value = (
-                expense.date.isoformat()
-                if getattr(expense.date, "isoformat", None) is not None
-                else str(expense.date or "")
-            )
-            values = (
-                str(idx),
-                f"{float(expense.amount_original or 0.0):,.2f}",
-                str(expense.currency or base_currency_code).upper(),
-                context.controller.format_display_amount(float(expense.amount_base or 0.0)),
-                str(expense.category or ""),
-                str(expense.description or ""),
-                str(expense.period or ""),
-                str(date_value),
-                "✓" if bool(expense.auto_pay) else "",
-            )
-            mand_tree.insert("", "end", iid=str(idx), values=values)
+        _populate_mandatory_tree(
+            mand_tree,
+            context=context,
+            base_currency_code=base_currency_code,
+        )
 
     current_panel: dict[str, tk.Frame | ttk.Frame | None] = {
         "add": None,
@@ -164,90 +530,21 @@ def build_mandatory_section(
                 safe_destroy(panel)
                 current_panel[key] = None
 
-    def _configure_inline_panel_grid(panel: ttk.Frame) -> None:
-        panel.grid_columnconfigure(0, minsize=280)
-        panel.grid_columnconfigure(1, weight=1, minsize=320)
-
     def add_mandatory_inline() -> None:
         close_inline_panels()
 
-        add_panel = ttk.Frame(mand_frame, style="InlinePanel.TFrame", padding=(PAD_SM, PAD_XS))
-        add_panel.grid(row=2, column=0, columnspan=2, pady=PAD_SM, sticky="ew")
-        _configure_inline_panel_grid(add_panel)
-        current_panel["add"] = add_panel
-
-        ttk.Label(add_panel, text=tr("settings.mandatory.field.amount", "Сумма:")).grid(
-            row=0, column=0, sticky="w"
+        form = _build_add_mandatory_panel(
+            mand_frame,
+            controller=context.controller,
+            base_currency_code=base_currency_code,
         )
-        amount_entry = ttk.Entry(add_panel)
-        amount_entry.grid(row=0, column=1, sticky="ew", pady=2)
-
-        ttk.Label(
-            add_panel,
-            text=tr(
-                "settings.mandatory.field.currency_default",
-                "Валюта (по умолчанию валюта базы):",
-            ),
-        ).grid(row=1, column=0, sticky="w")
-        currency_entry = ttk.Entry(add_panel)
-        currency_entry.insert(0, base_currency_code)
-        currency_entry.grid(row=1, column=1, sticky="ew", pady=2)
-
-        ttk.Label(add_panel, text=tr("common.wallet", "Кошелек:")).grid(row=2, column=0, sticky="w")
-        mandatory_wallet_var = tk.StringVar(value="")
-        mandatory_wallet_menu = ttk.Combobox(
-            add_panel,
-            textvariable=mandatory_wallet_var,
-            values=[],
-            state="readonly",
-        )
-        mandatory_wallet_menu.grid(row=2, column=1, sticky="ew")
-        mandatory_wallet_map: dict[str, int] = {
-            f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id
-            for wallet in context.controller.load_active_wallets()
-        }
-        wallet_labels = list(mandatory_wallet_map.keys()) or [""]
-        mandatory_wallet_menu["values"] = wallet_labels
-        mandatory_wallet_var.set(wallet_labels[0])
-
-        ttk.Label(
-            add_panel,
-            text=tr(
-                "settings.mandatory.field.category_default", "Категория (по умолчанию Mandatory):"
-            ),
-        ).grid(row=3, column=0, sticky="w")
-        category_entry = ttk.Entry(add_panel)
-        category_entry.insert(0, "Mandatory")
-        category_entry.grid(row=3, column=1, sticky="ew", pady=2)
-
-        ttk.Label(add_panel, text=tr("common.description", "Описание:")).grid(
-            row=4, column=0, sticky="w"
-        )
-        description_entry = ttk.Entry(add_panel)
-        description_entry.grid(row=4, column=1, sticky="ew", pady=2)
-
-        ttk.Label(add_panel, text=tr("common.period", "Период:")).grid(row=5, column=0, sticky="w")
-        period_var = tk.StringVar(value="monthly")
-        period_combo = ttk.Combobox(
-            add_panel,
-            textvariable=period_var,
-            values=["daily", "weekly", "monthly", "yearly"],
-            state="readonly",
-        )
-        period_combo.grid(row=5, column=1, sticky="ew", pady=2)
-
-        ttk.Label(
-            add_panel,
-            text=tr("settings.mandatory.field.date_optional", "Дата (YYYY-MM-DD, необязательно):"),
-        ).grid(row=6, column=0, sticky="w")
-        date_entry = ttk.Entry(add_panel)
-        date_entry.grid(row=6, column=1, sticky="ew", pady=2)
+        current_panel["add"] = form.panel
 
         def save() -> None:
             wallet_id = None
             try:
-                amount = float(amount_entry.get())
-                description = description_entry.get()
+                amount = float(form.amount_entry.get())
+                description = form.description_entry.get()
                 if not description:
                     messagebox_module.showerror(
                         tr("common.error", "Ошибка"),
@@ -256,7 +553,7 @@ def build_mandatory_section(
                         ),
                     )
                     return
-                date_val = date_entry.get().strip()
+                date_val = form.date_entry.get().strip()
                 if date_val:
                     try:
                         from domain.validation import parse_ymd
@@ -271,7 +568,7 @@ def build_mandatory_section(
                             ),
                         )
                         return
-                wallet_id = mandatory_wallet_map.get(mandatory_wallet_var.get())
+                wallet_id = form.wallet_map.get(form.wallet_var.get())
                 if wallet_id is None:
                     messagebox_module.showerror(
                         tr("common.error", "Ошибка"),
@@ -280,18 +577,18 @@ def build_mandatory_section(
                     return
                 context.controller.create_mandatory_expense(
                     amount=amount,
-                    currency=(currency_entry.get() or base_currency_code).strip(),
+                    currency=(form.currency_entry.get() or base_currency_code).strip(),
                     wallet_id=wallet_id,
-                    category=(category_entry.get() or "Mandatory").strip(),
+                    category=(form.category_entry.get() or "Mandatory").strip(),
                     description=description,
-                    period=period_var.get(),
+                    period=form.period_var.get(),
                     date=date_val,
                 )
                 messagebox_module.showinfo(
                     tr("common.done", "Готово"),
                     tr("settings.mandatory.added", "Обязательный расход добавлен."),
                 )
-                safe_destroy(add_panel)
+                safe_destroy(form.panel)
                 current_panel["add"] = None
                 context._refresh_charts()
                 refresh_mandatory()
@@ -314,38 +611,27 @@ def build_mandatory_section(
 
         def cancel() -> None:
             try:
-                safe_destroy(add_panel)
+                safe_destroy(form.panel)
             finally:
                 current_panel["add"] = None
 
-        add_buttons = ttk.Frame(add_panel, style="InlinePanel.TFrame")
-        add_buttons.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        add_buttons.grid_columnconfigure(0, weight=1)
-        add_buttons.grid_columnconfigure(1, weight=1)
-        ttk.Button(
-            add_buttons, text=tr("common.save", "Сохранить"), style="Primary.TButton", command=save
-        ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        ttk.Button(add_buttons, text=tr("common.cancel", "Отмена"), command=cancel).grid(
-            row=0, column=1, sticky="ew", padx=(6, 0)
+        _build_inline_action_buttons(
+            form.panel,
+            row_index=7,
+            on_save=save,
+            on_cancel=cancel,
         )
 
     def edit_mandatory_inline() -> None:
-        selection = mand_tree.selection()
-        if not selection:
-            messagebox_module.showerror(
-                tr("common.error", "Ошибка"),
-                tr(
-                    "settings.mandatory.error.select_edit",
-                    "Выберите обязательный расход для редактирования.",
-                ),
-            )
-            return
-        try:
-            index = int(selection[0])
-        except (TypeError, ValueError):
-            messagebox_module.showerror(
-                tr("common.error", "Ошибка"), tr("common.invalid_selection", "Некорректный выбор.")
-            )
+        index = _selected_mandatory_index(
+            mand_tree,
+            messagebox_module=messagebox_module,
+            missing_message=tr(
+                "settings.mandatory.error.select_edit",
+                "Выберите обязательный расход для редактирования.",
+            ),
+        )
+        if index is None:
             return
         expenses = context.controller.load_mandatory_expenses()
         if not (0 <= index < len(expenses)):
@@ -354,68 +640,16 @@ def build_mandatory_section(
 
         close_inline_panels()
 
-        edit_panel = ttk.Frame(mand_frame, style="InlinePanel.TFrame", padding=(8, 6))
-        edit_panel.grid(row=2, column=0, columnspan=2, pady=6, sticky="ew")
-        current_panel["edit"] = edit_panel
-        _configure_inline_panel_grid(edit_panel)
-
-        ttk.Label(
-            edit_panel,
-            text=tr("settings.mandatory.field.amount_base", "Сумма в валюте базы:"),
-        ).grid(row=0, column=0, sticky="w")
-        amount_base_entry = ttk.Entry(edit_panel)
-        amount_base_entry.insert(0, str(expense.amount_base))
-        amount_base_entry.grid(row=0, column=1, sticky="ew", pady=2)
-
-        ttk.Label(edit_panel, text=tr("common.wallet", "Кошелек:")).grid(
-            row=1, column=0, sticky="w"
+        form = _build_edit_mandatory_panel(
+            mand_frame,
+            controller=context.controller,
+            expense=expense,
         )
-        edit_wallet_var = tk.StringVar(value="")
-        edit_wallet_menu = ttk.Combobox(
-            edit_panel,
-            textvariable=edit_wallet_var,
-            values=[],
-            state="readonly",
-        )
-        edit_wallet_menu.grid(row=1, column=1, sticky="ew")
-        edit_wallet_map: dict[str, int] = {
-            f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id
-            for wallet in context.controller.load_active_wallets()
-        }
-        edit_wallet_labels = list(edit_wallet_map.keys()) or [""]
-        edit_wallet_menu["values"] = edit_wallet_labels
-        current_wallet_label = next(
-            (label for label, wid in edit_wallet_map.items() if int(wid) == int(expense.wallet_id)),
-            edit_wallet_labels[0],
-        )
-        edit_wallet_var.set(current_wallet_label)
-
-        ttk.Label(edit_panel, text=tr("common.period", "Период:")).grid(row=2, column=0, sticky="w")
-        edit_period_var = tk.StringVar(value=str(expense.period or "monthly"))
-        edit_period_combo = ttk.Combobox(
-            edit_panel,
-            textvariable=edit_period_var,
-            values=["daily", "weekly", "monthly", "yearly"],
-            state="readonly",
-        )
-        edit_period_combo.grid(row=2, column=1, sticky="ew")
-
-        ttk.Label(
-            edit_panel,
-            text=tr("settings.mandatory.field.date_optional", "Дата (YYYY-MM-DD, необязательно):"),
-        ).grid(row=3, column=0, sticky="w")
-        date_entry = ttk.Entry(edit_panel)
-        date_entry.insert(
-            0,
-            expense.date.isoformat()
-            if hasattr(expense.date, "isoformat")
-            else str(expense.date or ""),
-        )
-        date_entry.grid(row=3, column=1, sticky="ew", pady=2)
+        current_panel["edit"] = form.panel
 
         def save_edit() -> None:
             expense_id = int(expense.id)
-            raw_amount = amount_base_entry.get().strip()
+            raw_amount = form.amount_base_entry.get().strip()
             current_amount = str(expense.amount_base)
             if raw_amount != current_amount:
                 try:
@@ -428,7 +662,7 @@ def build_mandatory_section(
                     )
                     return
 
-            new_wallet_id = edit_wallet_map.get(edit_wallet_var.get())
+            new_wallet_id = form.wallet_map.get(form.wallet_var.get())
             if new_wallet_id is None:
                 messagebox_module.showerror(
                     tr("common.error", "Ошибка"),
@@ -446,7 +680,7 @@ def build_mandatory_section(
                     )
                     return
 
-            new_period = str(edit_period_var.get() or "").strip().lower()
+            new_period = str(form.period_var.get() or "").strip().lower()
             if new_period and str(new_period) != str(expense.period):
                 try:
                     context.controller.update_mandatory_expense_period(expense_id, new_period)
@@ -457,11 +691,9 @@ def build_mandatory_section(
                     return
 
             current_date = (
-                expense.date.isoformat()
-                if hasattr(expense.date, "isoformat")
-                else str(expense.date or "")
+                _mandatory_date_text(expense)
             )
-            new_date = date_entry.get().strip()
+            new_date = form.date_entry.get().strip()
             if new_date != current_date:
                 try:
                     context.controller.update_mandatory_expense_date(expense_id, new_date)
@@ -471,7 +703,7 @@ def build_mandatory_section(
                     )
                     return
 
-            safe_destroy(edit_panel)
+            safe_destroy(form.panel)
             current_panel["edit"] = None
             refresh_mandatory()
             context._refresh_charts()
@@ -483,86 +715,44 @@ def build_mandatory_section(
 
         def cancel_edit() -> None:
             try:
-                safe_destroy(edit_panel)
+                safe_destroy(form.panel)
             finally:
                 current_panel["edit"] = None
 
-        edit_buttons = ttk.Frame(edit_panel, style="InlinePanel.TFrame")
-        edit_buttons.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        edit_buttons.grid_columnconfigure(0, weight=1)
-        edit_buttons.grid_columnconfigure(1, weight=1)
-        ttk.Button(
-            edit_buttons,
-            text=tr("common.save", "Сохранить"),
-            style="Primary.TButton",
-            command=save_edit,
-        ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        ttk.Button(edit_buttons, text=tr("common.cancel", "Отмена"), command=cancel_edit).grid(
-            row=0, column=1, sticky="ew", padx=(6, 0)
+        _build_inline_action_buttons(
+            form.panel,
+            row_index=4,
+            on_save=save_edit,
+            on_cancel=cancel_edit,
         )
 
     def add_to_records_inline() -> None:
-        selection = mand_tree.selection()
-        if not selection:
-            messagebox_module.showerror(
-                tr("common.error", "Ошибка"),
-                tr(
-                    "settings.mandatory.error.select_add_to_records",
-                    "Выберите обязательный расход для добавления в записи.",
-                ),
-            )
+        index = _selected_mandatory_index(
+            mand_tree,
+            messagebox_module=messagebox_module,
+            missing_message=tr(
+                "settings.mandatory.error.select_add_to_records",
+                "Выберите обязательный расход для добавления в записи.",
+            ),
+        )
+        if index is None:
             return
         close_inline_panels()
 
-        add_to_report_panel = ttk.Frame(mand_frame, style="InlinePanel.TFrame", padding=(8, 6))
-        add_to_report_panel.grid(row=2, column=0, columnspan=2, pady=6, sticky="ew")
-        _configure_inline_panel_grid(add_to_report_panel)
-        current_panel["report"] = add_to_report_panel
-
-        ttk.Label(
-            add_to_report_panel,
-            text=tr("settings.mandatory.field.date_required", "Дата (YYYY-MM-DD):"),
-        ).grid(row=0, column=0, sticky="w")
-        date_entry = ttk.Entry(add_to_report_panel)
-        date_entry.grid(row=0, column=1, sticky="ew", pady=2)
-
-        ttk.Label(add_to_report_panel, text=tr("common.wallet", "Кошелек:")).grid(
-            row=1, column=0, sticky="w"
+        form = _build_add_to_records_panel(
+            mand_frame,
+            controller=context.controller,
         )
-        mandatory_wallet_var = tk.StringVar(value="")
-        mandatory_wallet_menu = ttk.Combobox(
-            add_to_report_panel,
-            textvariable=mandatory_wallet_var,
-            values=[],
-            state="readonly",
-        )
-        mandatory_wallet_menu.grid(row=1, column=1, sticky="ew")
-
-        mandatory_wallet_map: dict[str, int] = {
-            f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id
-            for wallet in context.controller.load_active_wallets()
-        }
-        wallet_labels = list(mandatory_wallet_map.keys()) or [""]
-        mandatory_wallet_menu["values"] = wallet_labels
-        mandatory_wallet_var.set(wallet_labels[0])
-
-        selection = mand_tree.selection()
-        if selection:
-            try:
-                index = int(selection[0])
-            except (TypeError, ValueError):
-                index = -1
-        else:
-            index = -1
+        current_panel["report"] = form.panel
 
         def save() -> None:
             try:
                 from domain.validation import ensure_not_future, parse_ymd
 
-                date_value = date_entry.get()
+                date_value = form.date_entry.get()
                 entered_date = parse_ymd(date_value)
                 ensure_not_future(entered_date)
-                wallet_id = mandatory_wallet_map.get(mandatory_wallet_var.get())
+                wallet_id = form.wallet_map.get(form.wallet_var.get())
                 if wallet_id is None:
                     messagebox_module.showerror(
                         tr("common.error", "Ошибка"),
@@ -579,7 +769,7 @@ def build_mandatory_section(
                         date=date_value,
                     ),
                 )
-                safe_destroy(add_to_report_panel)
+                safe_destroy(form.panel)
                 current_panel["report"] = None
                 refresh_mandatory()
                 refresh_wallets()
@@ -599,41 +789,27 @@ def build_mandatory_section(
 
         def cancel() -> None:
             try:
-                safe_destroy(add_to_report_panel)
+                safe_destroy(form.panel)
             finally:
                 current_panel["report"] = None
 
-        report_buttons = ttk.Frame(add_to_report_panel, style="InlinePanel.TFrame")
-        report_buttons.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        report_buttons.grid_columnconfigure(0, weight=1)
-        report_buttons.grid_columnconfigure(1, weight=1)
-        ttk.Button(
-            report_buttons,
-            text=tr("common.save", "Сохранить"),
-            style="Primary.TButton",
-            command=save,
-        ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        ttk.Button(report_buttons, text=tr("common.cancel", "Отмена"), command=cancel).grid(
-            row=0, column=1, sticky="ew", padx=(6, 0)
+        _build_inline_action_buttons(
+            form.panel,
+            row_index=2,
+            on_save=save,
+            on_cancel=cancel,
         )
 
     def delete_mandatory() -> None:
-        selection = mand_tree.selection()
-        if not selection:
-            messagebox_module.showerror(
-                tr("common.error", "Ошибка"),
-                tr(
-                    "settings.mandatory.error.select_delete",
-                    "Выберите обязательный расход для удаления.",
-                ),
-            )
-            return
-        try:
-            index = int(selection[0])
-        except (TypeError, ValueError):
-            messagebox_module.showerror(
-                tr("common.error", "Ошибка"), tr("common.invalid_selection", "Некорректный выбор.")
-            )
+        index = _selected_mandatory_index(
+            mand_tree,
+            messagebox_module=messagebox_module,
+            missing_message=tr(
+                "settings.mandatory.error.select_delete",
+                "Выберите обязательный расход для удаления.",
+            ),
+        )
+        if index is None:
             return
         if context.controller.delete_mandatory_expense(index):
             messagebox_module.showinfo(
@@ -666,41 +842,7 @@ def build_mandatory_section(
         )
         refresh_mandatory()
 
-    actions = ttk.Frame(mand_frame)
-    actions.grid(row=1, column=0, columnspan=2, sticky="ew", padx=pad_x, pady=(0, pad_y))
-    for idx in range(5):
-        actions.grid_columnconfigure(idx, weight=1)
-
     format_var = tk.StringVar(value="CSV")
-
-    ttk.Button(actions, text=tr("common.create", "Создать"), command=add_mandatory_inline).grid(
-        row=0, column=0, sticky="ew", padx=(0, 6), pady=(0, 6)
-    )
-    ttk.Button(
-        actions, text=tr("common.edit", "Редактировать"), command=edit_mandatory_inline
-    ).grid(row=0, column=1, sticky="ew", padx=6, pady=(0, 6))
-    ttk.Button(
-        actions,
-        text=tr("settings.mandatory.add_to_records", "Добавить в записи"),
-        command=add_to_records_inline,
-    ).grid(row=0, column=2, sticky="ew", padx=6, pady=(0, 6))
-    ttk.Button(actions, text=tr("common.delete", "Удалить"), command=delete_mandatory).grid(
-        row=0, column=3, sticky="ew", padx=6, pady=(0, 6)
-    )
-    ttk.Button(
-        actions,
-        text=tr("settings.mandatory.delete_all", "Удалить все"),
-        command=delete_all_mandatory,
-    ).grid(row=0, column=4, sticky="ew", padx=(6, 0), pady=(0, 6))
-    ttk.Button(actions, text=tr("common.refresh", "Обновить"), command=refresh_mandatory).grid(
-        row=1, column=0, sticky="ew", padx=(0, 6)
-    )
-    ttk.Combobox(
-        actions,
-        textvariable=format_var,
-        values=["CSV", "XLSX"],
-        state="readonly",
-    ).grid(row=1, column=1, sticky="ew", padx=6)
 
     def import_mand() -> None:
         fmt = format_var.get()
@@ -829,11 +971,19 @@ def build_mandatory_section(
             ),
         )
 
-    ttk.Button(actions, text=tr("operations.import", "Импорт"), command=import_mand).grid(
-        row=1, column=2, sticky="ew", padx=6
-    )
-    ttk.Button(actions, text=tr("operations.export", "Экспорт"), command=export_mand).grid(
-        row=1, column=3, sticky="ew", padx=6
+    _build_mandatory_actions_row(
+        mand_frame,
+        format_var=format_var,
+        on_create=add_mandatory_inline,
+        on_edit=edit_mandatory_inline,
+        on_add_to_records=add_to_records_inline,
+        on_delete=delete_mandatory,
+        on_delete_all=delete_all_mandatory,
+        on_refresh=refresh_mandatory,
+        on_import=import_mand,
+        on_export=export_mand,
+        pad_x=pad_x,
+        pad_y=pad_y,
     )
 
     return refresh_mandatory
