@@ -1,10 +1,8 @@
-"""Compatibility shim for the distribution tab."""
+"""Distribution tab subpackage."""
 
-from __future__ import annotations
-
-from gui.tabs.distribution.builder import build_distribution_tab
-from gui.tabs.distribution.contracts import DistributionTabBindings, DistributionTabContext
-from gui.tabs.distribution.formatting import (
+from .builder import build_distribution_tab
+from .contracts import DistributionTabBindings, DistributionTabContext
+from .formatting import (
     _default_end,
     _default_start,
     _fmt_amount,

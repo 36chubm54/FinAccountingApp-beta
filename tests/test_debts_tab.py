@@ -202,6 +202,42 @@ def test_debts_tab_delete_confirmation_explains_records_are_kept(tmp_path: Path)
         root.destroy()
 
 
+def test_pay_does_not_trigger_global_refresh_when_no_debt_is_selected(tmp_path: Path) -> None:
+    repo = _build_repo(tmp_path, "debts_tab_no_selection.db")
+    controller = FinancialController(repo, CurrencyService())
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        parent = tk.Frame(root)
+        parent.pack()
+        build_debts_tab(
+            parent, context=cast(DebtsTabContext, type("Ctx", (), {"controller": controller})())
+        )
+        root.update_idletasks()
+
+        action_amount_entry = _find_entry_by_order(parent, 4)
+        action_date_entry = _find_entry_by_order(parent, 5)
+        action_amount_entry.delete(0, tk.END)
+        action_amount_entry.insert(0, "10")
+        action_date_entry.delete(0, tk.END)
+        action_date_entry.insert(0, "2026-03-02")
+
+        pay_button = _find_button(parent, "Погасить")
+        assert pay_button is not None
+
+        with (
+            patch("gui.tabs.debts_tab.messagebox.showerror"),
+            patch("gui.tabs.debts.builder.refresh_debts_views") as refresh_mock,
+        ):
+            pay_button.invoke()
+            root.update_idletasks()
+
+        refresh_mock.assert_not_called()
+    finally:
+        repo.close()
+        root.destroy()
+
+
 def test_debt_progress_segment_widths_keep_tiny_payment_visible() -> None:
     paid_w, forgiven_w, open_w = _segment_widths(
         total=1_000_000,
