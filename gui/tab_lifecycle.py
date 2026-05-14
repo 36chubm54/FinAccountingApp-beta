@@ -96,10 +96,6 @@ class TabBuildContext(Protocol):
     refresh_wallets: Any
     refresh_mandatory: Any
 
-    def bind_all(
-        self, sequence: str | None = None, func: Any | None = None, add: str | None = None
-    ) -> Any: ...
-
     def after(self, ms: int | str, func: Any | None = None, *args: object) -> Any: ...
 
     def after_cancel(self, id: str) -> None: ...
@@ -137,7 +133,6 @@ def build_tab(app: Any, tab_key: str) -> bool:
             on_chart_filter_change=app._on_chart_filter_change,
             on_refresh_charts=app._refresh_charts,
             on_legend_mousewheel=app._on_legend_mousewheel,
-            bind_all=app.bind_all,
             after=app.after,
             after_cancel=app.after_cancel,
         )

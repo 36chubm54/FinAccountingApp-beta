@@ -42,6 +42,13 @@ def test_settings_reports_and_mandatory_subpackages_are_importable() -> None:
     reports_controller = importlib.import_module("gui.tabs.reports.controller")
     reports_layout = importlib.import_module("gui.tabs.reports.layout")
     reports_render = importlib.import_module("gui.tabs.reports.render")
+    infographics_shim = importlib.import_module("gui.tabs.infographics_tab")
+    infographics_pkg = importlib.import_module("gui.tabs.infographics")
+    infographics_builder = importlib.import_module("gui.tabs.infographics.builder")
+    infographics_contracts = importlib.import_module("gui.tabs.infographics.contracts")
+    infographics_pie = importlib.import_module("gui.tabs.infographics.pie_section")
+    infographics_bar = importlib.import_module("gui.tabs.infographics.bar_section")
+    infographics_refresh = importlib.import_module("gui.tabs.infographics.refresh")
 
     assert analytics_shim.build_analytics_tab is analytics_builder.build_analytics_tab
     assert analytics_shim.AnalyticsTabBindings is analytics_pkg.AnalyticsTabBindings
@@ -107,3 +114,16 @@ def test_settings_reports_and_mandatory_subpackages_are_importable() -> None:
     assert hasattr(reports_controller, "ReportsController")
     assert hasattr(reports_layout, "build_reports_layout")
     assert hasattr(reports_render, "refresh_operations_table")
+
+    assert infographics_shim.build_infographics_tab is infographics_builder.build_infographics_tab
+    assert (
+        infographics_shim.InfographicsTabBindings is infographics_contracts.InfographicsTabBindings
+    )
+    assert infographics_pkg.build_infographics_tab is infographics_builder.build_infographics_tab
+    assert infographics_shim.draw_expense_pie is infographics_pie.draw_expense_pie
+    assert infographics_shim.update_pie_month_options is infographics_pie.update_pie_month_options
+    assert (
+        infographics_shim._legend_category_max_width is infographics_pie._legend_category_max_width
+    )
+    assert hasattr(infographics_bar, "draw_bar_chart")
+    assert hasattr(infographics_refresh, "refresh_infographics_charts")

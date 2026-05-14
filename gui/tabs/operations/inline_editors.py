@@ -6,6 +6,7 @@ import logging
 import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from tkinter import ttk
 from typing import Any
 
@@ -26,6 +27,12 @@ class InlineEditors:
     edit_selected_record_inline: Callable[[], None]
     edit_selected_transfer_inline: Callable[[int], None]
     inline_editor_active: Callable[[], bool]
+
+
+def _date_text(value: object) -> str:
+    if isinstance(value, date):
+        return value.isoformat()
+    return str(value)
 
 
 def build_inline_editors(
@@ -126,9 +133,7 @@ def build_inline_editors(
         description_edit_entry.grid(row=4, column=1, sticky="ew")
         edit_panel.grid_columnconfigure(1, weight=1)
 
-        date_value = (
-            transfer.date.isoformat() if hasattr(transfer.date, "isoformat") else str(transfer.date)
-        )
+        date_value = _date_text(transfer.date)
         date_edit_entry.insert(0, date_value)
         if is_kzt_currency(getattr(transfer, "currency", base_currency_code())):
             amount_value = float(transfer.amount_original or transfer.amount_base or 0.0)
@@ -343,9 +348,7 @@ def build_inline_editors(
         else:
             amount_value = float(record.amount_base or 0.0)
         amount_entry.insert(0, f"{amount_value:.2f}")
-        date_value = (
-            record.date.isoformat() if hasattr(record.date, "isoformat") else str(record.date)
-        )
+        date_value = _date_text(record.date)
         date_edit_entry.insert(0, date_value)
         try:
             if record.type == "income":

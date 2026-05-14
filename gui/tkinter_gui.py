@@ -57,7 +57,7 @@ from gui.startup_coordinator import DeferredStartupCoordinator
 from gui.status_bar_builder import build_status_bar
 from gui.status_bar_coordinator import StatusBarCoordinator, StatusBarOwner
 from gui.tab_lifecycle import TAB_ORDER, TabBuildContext, attach_tabs, build_tab, create_tab_frames
-from gui.tabs.infographics_support import (
+from gui.tabs.infographics.refresh import (
     handle_chart_filter_change,
     refresh_owner_infographics,
     scroll_owner_legend_canvas,
@@ -228,6 +228,7 @@ class FinancialApp(tk.Tk):
         notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed, add="+")
         notebook.bind("<Configure>", lambda _event: self._schedule_notebook_underline(), add="+")
         self.bind("<Configure>", lambda _event: self._schedule_notebook_underline(), add="+")
+        self.bind_all("<MouseWheel>", self._on_legend_mousewheel, add="+")
 
         self._ensure_tab_built("infographics")
         self._ensure_tab_built("operations")

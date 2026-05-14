@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import tkinter as tk
 from dataclasses import dataclass, field
 from types import SimpleNamespace
+from typing import cast
 
-from gui.tabs.infographics_support import (
+from gui.tabs.infographics.bar_section import draw_bar_chart
+from gui.tabs.infographics.contracts import (
+    InfographicsRefreshOwner,
+    MouseWheelEventLike,
+    ScrollOwner,
+)
+from gui.tabs.infographics.refresh import (
     derive_month_options,
     derive_year_options,
-    draw_bar_chart,
     handle_chart_filter_change,
     refresh_owner_infographics,
     scroll_owner_legend_canvas,
@@ -87,7 +94,7 @@ def test_update_chart_year_options_selects_latest_available_year() -> None:
 def test_draw_bar_chart_renders_empty_state() -> None:
     canvas = _Canvas()
 
-    draw_bar_chart(canvas, ["A", "B"], [0.0, 0.0], [0.0, 0.0], max_labels=8)
+    draw_bar_chart(cast(tk.Canvas, canvas), ["A", "B"], [0.0, 0.0], [0.0, 0.0], max_labels=8)
 
     assert canvas.deleted == ["all"]
     assert canvas.texts
@@ -130,11 +137,11 @@ def test_refresh_owner_infographics_uses_repository_and_controller(monkeypatch) 
     calls: list[tuple[object, dict[str, object]]] = []
 
     monkeypatch.setattr(
-        "gui.tabs.infographics_support.refresh_infographics_charts",
+        "gui.tabs.infographics.refresh.refresh_infographics_charts",
         lambda owner_arg, **kwargs: calls.append((owner_arg, kwargs)),
     )
 
-    refresh_owner_infographics(owner)
+    refresh_owner_infographics(cast(InfographicsRefreshOwner, owner))
 
     assert calls
     assert calls[0][0] is owner
@@ -173,11 +180,14 @@ def test_handle_chart_filter_change_and_scroll_owner_legend_canvas(monkeypatch) 
     )
 
     monkeypatch.setattr(
-        "gui.tabs.infographics_support.refresh_owner_infographics",
+        "gui.tabs.infographics.refresh.refresh_owner_infographics",
         lambda _owner, records=None: calls.append("refresh"),
     )
-    assert handle_chart_filter_change(owner) is True
+    assert handle_chart_filter_change(cast(InfographicsRefreshOwner, owner)) is True
 
     event = SimpleNamespace(x_root=0, y_root=0, delta=120)
-    assert scroll_owner_legend_canvas(owner, event) is True
+    assert (
+        scroll_owner_legend_canvas(cast(ScrollOwner, owner), cast(MouseWheelEventLike, event))
+        is True
+    )
     assert canvas.calls == [(-1, "units")]
