@@ -10,13 +10,14 @@ from typing import Any, Protocol
 from domain.errors import DomainError
 from gui.i18n import tr
 from gui.logging_utils import log_ui_error
-from gui.tabs.mandatory_section_widgets import (
+from gui.ui_helpers import parse_numeric_input
+
+from .widgets import (
     MandatoryAddFormFields,
     MandatoryAddToRecordsFields,
     MandatoryEditFormFields,
     mandatory_date_text,
 )
-from gui.ui_helpers import parse_numeric_input
 
 
 class MessageBoxLike(Protocol):

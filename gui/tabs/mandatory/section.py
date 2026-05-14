@@ -11,27 +11,31 @@ from typing import Any
 from domain.import_result import ImportResult
 from gui.helpers import open_in_file_manager
 from gui.i18n import tr
-from gui.tabs.mandatory_section_actions import (
+from gui.tabs.settings_support import safe_destroy
+from gui.ui_dialogs import messagebox_compat as messagebox
+from gui.ui_theme import PAD_SM, PAD_XS, create_card_section
+
+from .actions import (
     MandatorySectionActionContext,
     MessageBoxLike,
     selected_mandatory_index,
 )
-from gui.tabs.mandatory_section_actions import (
+from .actions import (
     delete_all_mandatory as delete_all_mandatory_action,
 )
-from gui.tabs.mandatory_section_actions import (
+from .actions import (
     delete_mandatory as delete_mandatory_action,
 )
-from gui.tabs.mandatory_section_actions import (
+from .actions import (
     save_add_to_records as save_add_to_records_action,
 )
-from gui.tabs.mandatory_section_actions import (
+from .actions import (
     save_create_form as save_create_form_action,
 )
-from gui.tabs.mandatory_section_actions import (
+from .actions import (
     save_edit_form as save_edit_form_action,
 )
-from gui.tabs.mandatory_section_widgets import (
+from .widgets import (
     bind_focus_navigation,
     bind_mandatory_horizontal_scroll,
     build_add_mandatory_panel,
@@ -44,9 +48,6 @@ from gui.tabs.mandatory_section_widgets import (
     populate_mandatory_tree,
     refresh_add_form_wallets,
 )
-from gui.tabs.settings_support import safe_destroy
-from gui.ui_dialogs import messagebox_compat as messagebox
-from gui.ui_theme import PAD_SM, PAD_XS, create_card_section
 
 logger = logging.getLogger(__name__)
 

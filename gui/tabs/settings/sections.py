@@ -327,11 +327,17 @@ def build_wallets_section(
     def refresh_wallets() -> None:
         for iid in wallet_tree.get_children():
             wallet_tree.delete(iid)
+        active_balances = {
+            int(balance.wallet_id): float(balance.balance)
+            for balance in context.controller.get_wallet_balances()
+        }
         for wallet in context.controller.load_wallets():
-            try:
-                balance = context.controller.wallet_balance(wallet.id)
-            except ValueError:
-                balance = wallet.initial_balance
+            balance = active_balances.get(int(wallet.id))
+            if balance is None:
+                try:
+                    balance = context.controller.wallet_balance(wallet.id)
+                except ValueError:
+                    balance = wallet.initial_balance
             wallet_tree.insert(
                 "",
                 tk.END,
@@ -793,32 +799,32 @@ def build_backup_section(
         if not filepath:
             return
 
-        wallets = context.repository.load_wallets()
-        records = context.repository.load_all()
-        mandatory_expenses = context.repository.load_mandatory_expenses()
-        budgets = context.controller.get_budgets()
-        debts = context.controller.get_debts()
-        debt_payments = []
-        for debt in debts:
-            debt_payments.extend(context.controller.get_debt_history(debt.id))
-        assets = context.controller.get_assets(active_only=False)
-        asset_snapshots = []
-        for asset in assets:
-            asset_snapshots.extend(context.controller.get_asset_history(asset.id))
-        goals = context.controller.get_goals()
-        distribution_items, distribution_subitems_by_item = (
-            context.controller.export_distribution_structure()
-        )
-        distribution_subitems = [
-            subitem
-            for item_id in sorted(distribution_subitems_by_item)
-            for subitem in distribution_subitems_by_item[item_id]
-        ]
-        distribution_snapshots = context.controller.get_frozen_distribution_rows()
-        transfers = context.repository.load_transfers()
-
         def task() -> None:
             from gui.exporters import export_full_backup
+
+            wallets = context.repository.load_wallets()
+            records = context.repository.load_all()
+            mandatory_expenses = context.repository.load_mandatory_expenses()
+            budgets = context.controller.get_budgets()
+            debts = context.controller.get_debts()
+            debt_payments = []
+            for debt in debts:
+                debt_payments.extend(context.controller.get_debt_history(debt.id))
+            assets = context.controller.get_assets(active_only=False)
+            asset_snapshots = []
+            for asset in assets:
+                asset_snapshots.extend(context.controller.get_asset_history(asset.id))
+            goals = context.controller.get_goals()
+            distribution_items, distribution_subitems_by_item = (
+                context.controller.export_distribution_structure()
+            )
+            distribution_subitems = [
+                subitem
+                for item_id in sorted(distribution_subitems_by_item)
+                for subitem in distribution_subitems_by_item[item_id]
+            ]
+            distribution_snapshots = context.controller.get_frozen_distribution_rows()
+            transfers = context.repository.load_transfers()
 
             export_full_backup(
                 filepath,

@@ -7,7 +7,7 @@ from gui.i18n import tr
 from gui.record_colors import foreground_for_kind
 from services.report_service import build_category_group_rows
 
-from .reports_layout import ReportsUiHandles
+from .layout import ReportsUiHandles
 
 
 def refresh_wallets(owner: Any, ui: ReportsUiHandles) -> None:
