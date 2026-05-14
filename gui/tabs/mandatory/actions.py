@@ -12,7 +12,7 @@ from gui.i18n import tr
 from gui.logging_utils import log_ui_error
 from gui.ui_helpers import parse_numeric_input
 
-from .widgets import (
+from .forms import (
     MandatoryAddFormFields,
     MandatoryAddToRecordsFields,
     MandatoryEditFormFields,

@@ -11,8 +11,8 @@ from typing import Any
 from domain.import_result import ImportResult
 from gui.helpers import open_in_file_manager
 from gui.i18n import tr
-from gui.tabs.settings_support import safe_destroy
 from gui.ui_dialogs import messagebox_compat as messagebox
+from gui.ui_helpers import safe_destroy
 from gui.ui_theme import PAD_SM, PAD_XS, create_card_section
 
 from .actions import (
@@ -35,18 +35,22 @@ from .actions import (
 from .actions import (
     save_edit_form as save_edit_form_action,
 )
-from .widgets import (
-    bind_focus_navigation,
-    bind_mandatory_horizontal_scroll,
+from .forms import (
     build_add_mandatory_panel,
     build_add_to_records_panel,
     build_edit_mandatory_panel,
+    next_grid_row,
+    refresh_add_form_wallets,
+)
+from .keyboard import (
+    bind_focus_navigation,
     build_inline_action_buttons,
+)
+from .tree_section import (
+    bind_mandatory_horizontal_scroll,
     build_mandatory_actions_row,
     build_mandatory_tree,
-    next_grid_row,
     populate_mandatory_tree,
-    refresh_add_form_wallets,
 )
 
 logger = logging.getLogger(__name__)

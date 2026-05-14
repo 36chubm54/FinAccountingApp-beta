@@ -1,28 +1,14 @@
+"""Import preview dialog for the operations tab."""
+
 from __future__ import annotations
 
 import tkinter as tk
 from pathlib import Path
 from tkinter import VERTICAL, ttk
+from typing import Any
 
 from gui.i18n import tr
 from gui.ui_helpers import center_dialog
-
-
-def safe_destroy(widget) -> None:
-    if widget is None:
-        return
-    try:
-        widget.destroy()
-    except tk.TclError:
-        return
-
-
-def refresh_operation_views(context) -> None:
-    context._refresh_list()
-    context._refresh_charts()
-    context._refresh_wallets()
-    context._refresh_budgets()
-    context._refresh_all()
 
 
 def _bind_dialog_button_navigation(buttons: list[ttk.Button]) -> None:
@@ -40,7 +26,7 @@ def _bind_dialog_button_navigation(buttons: list[ttk.Button]) -> None:
         button.bind("<Down>", lambda _event, i=index + 1: _focus_button(i), add="+")
 
 
-def _close_with_break(callback) -> str:
+def _close_with_break(callback: Any) -> str:
     callback()
     return "break"
 
@@ -60,7 +46,7 @@ def show_import_preview_dialog(
     *,
     filepath: str,
     policy_label: str,
-    preview,
+    preview: Any,
     force: bool = False,
 ) -> bool:
     dialog = tk.Toplevel(parent)

@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import date
 
 from domain.reports import Report
-from gui.controllers import FinancialController
 from services.report_service import (
     ReportFilters,
     ReportsResult,
@@ -14,9 +13,11 @@ from services.report_service import (
     parse_filter_tags,
 )
 
+from .contracts import ReportsControllerApi
+
 
 class ReportsController:
-    def __init__(self, controller: FinancialController, currency_service) -> None:
+    def __init__(self, controller: ReportsControllerApi, currency_service: object) -> None:
         self._controller = controller
         self._currency = currency_service
 

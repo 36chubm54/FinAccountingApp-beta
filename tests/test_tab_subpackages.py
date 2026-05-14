@@ -12,6 +12,11 @@ def test_settings_reports_and_mandatory_subpackages_are_importable() -> None:
     analytics_summary = importlib.import_module("gui.tabs.analytics.summary_section")
     analytics_breakdown = importlib.import_module("gui.tabs.analytics.breakdown_section")
     analytics_monthly = importlib.import_module("gui.tabs.analytics.monthly_section")
+    budget_shim = importlib.import_module("gui.tabs.budget_tab")
+    budget_pkg = importlib.import_module("gui.tabs.budget")
+    budget_builder = importlib.import_module("gui.tabs.budget.builder")
+    budget_actions = importlib.import_module("gui.tabs.budget.actions")
+    budget_list = importlib.import_module("gui.tabs.budget.list_section")
     debts_shim = importlib.import_module("gui.tabs.debts_tab")
     debts_pkg = importlib.import_module("gui.tabs.debts")
     debts_builder = importlib.import_module("gui.tabs.debts.builder")
@@ -31,12 +36,16 @@ def test_settings_reports_and_mandatory_subpackages_are_importable() -> None:
     distribution_actions = importlib.import_module("gui.tabs.distribution.actions")
     settings_pkg = importlib.import_module("gui.tabs.settings")
     settings_builder = importlib.import_module("gui.tabs.settings.builder")
-    settings_sections = importlib.import_module("gui.tabs.settings.sections")
+    settings_wallets = importlib.import_module("gui.tabs.settings.wallets_section")
+    settings_currency = importlib.import_module("gui.tabs.settings.currency_section")
+    settings_backup = importlib.import_module("gui.tabs.settings.backup_section")
     mandatory_pkg = importlib.import_module("gui.tabs.mandatory")
     mandatory_builder = importlib.import_module("gui.tabs.mandatory.builder")
     mandatory_section = importlib.import_module("gui.tabs.mandatory.section")
     mandatory_actions = importlib.import_module("gui.tabs.mandatory.actions")
-    mandatory_widgets = importlib.import_module("gui.tabs.mandatory.widgets")
+    mandatory_forms = importlib.import_module("gui.tabs.mandatory.forms")
+    mandatory_tree = importlib.import_module("gui.tabs.mandatory.tree_section")
+    mandatory_keyboard = importlib.import_module("gui.tabs.mandatory.keyboard")
     reports_pkg = importlib.import_module("gui.tabs.reports")
     reports_builder = importlib.import_module("gui.tabs.reports.builder")
     reports_controller = importlib.import_module("gui.tabs.reports.controller")
@@ -62,6 +71,13 @@ def test_settings_reports_and_mandatory_subpackages_are_importable() -> None:
     assert hasattr(analytics_summary, "build_summary_section")
     assert hasattr(analytics_breakdown, "build_breakdown_section")
     assert hasattr(analytics_monthly, "build_monthly_section")
+
+    assert budget_shim.build_budget_tab is budget_builder.build_budget_tab
+    assert budget_shim.BudgetTabBindings is budget_pkg.BudgetTabBindings
+    assert budget_shim.BudgetTabContext is budget_pkg.BudgetTabContext
+    assert budget_shim._normalize_budget_limit_input is budget_actions._normalize_budget_limit_input
+    assert budget_shim._visual_budget_state is budget_actions._visual_budget_state
+    assert hasattr(budget_list, "_draw_progress_bars")
 
     assert debts_shim.build_debts_tab is not None
     assert debts_shim.DebtsTabBindings is debts_pkg.DebtsTabBindings
@@ -100,14 +116,17 @@ def test_settings_reports_and_mandatory_subpackages_are_importable() -> None:
     assert hasattr(distribution_actions, "toggle_fixed_row")
 
     assert settings_pkg.build_settings_tab is settings_builder.build_settings_tab
-    assert hasattr(settings_sections, "build_currency_section")
-    assert hasattr(settings_sections, "build_backup_section")
-    assert hasattr(settings_sections, "build_audit_section")
+    assert hasattr(settings_wallets, "build_wallets_section")
+    assert hasattr(settings_currency, "build_currency_section")
+    assert hasattr(settings_currency, "build_audit_section")
+    assert hasattr(settings_backup, "build_backup_section")
 
     assert mandatory_pkg.build_mandatory_tab is mandatory_builder.build_mandatory_tab
     assert hasattr(mandatory_section, "build_mandatory_section")
     assert hasattr(mandatory_actions, "save_add_to_records")
-    assert hasattr(mandatory_widgets, "build_add_mandatory_panel")
+    assert hasattr(mandatory_forms, "build_add_mandatory_panel")
+    assert hasattr(mandatory_tree, "build_mandatory_tree")
+    assert hasattr(mandatory_keyboard, "bind_focus_navigation")
 
     assert reports_pkg.build_reports_tab is reports_builder.build_reports_tab
     assert hasattr(reports_builder, "ReportsFrame")

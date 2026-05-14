@@ -3,17 +3,18 @@ from __future__ import annotations
 import tkinter as tk
 from collections.abc import Callable
 from tkinter import ttk
-from typing import Any, Protocol
+from typing import Protocol
 
 from gui.i18n import tr
-from gui.tabs.settings.sections import MessageBoxLike, build_wallets_section
+from gui.tabs.settings.contracts import SettingsController
+from gui.tabs.settings.wallets_section import MessageBoxLike, build_wallets_section
 from gui.ui_dialogs import messagebox_compat as messagebox
 from gui.ui_helpers import center_dialog
 from gui.ui_theme import PAD_LG
 
 
 class WalletManagerContext(Protocol):
-    controller: Any
+    controller: SettingsController
     refresh_operation_wallet_menu: Callable[[], None] | None
     refresh_transfer_wallet_menus: Callable[[], None] | None
     refresh_wallets: Callable[[], None] | None

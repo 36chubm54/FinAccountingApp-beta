@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import tkinter as tk
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from tkinter import ttk
-from typing import Any
+from typing import Any, Protocol
 
 from gui.ui_theme import FONT_FAMILY, get_palette
 from utils.tag_utils import MAX_TAGS_PER_RECORD, normalize_tag_name, parse_tag_string
 
 
-def list_tags_safe(controller: Any) -> list[Any]:
+class TagController(Protocol):
+    def list_tags(self) -> Sequence[object]: ...
+
+
+def list_tags_safe(controller: TagController) -> list[Any]:
     list_tags = getattr(controller, "list_tags", None)
     if not callable(list_tags):
         return []
@@ -24,7 +28,7 @@ def list_tags_safe(controller: Any) -> list[Any]:
         return []
 
 
-def sorted_tags_by_popularity(controller: Any) -> list[Any]:
+def sorted_tags_by_popularity(controller: TagController) -> list[Any]:
     tags = list_tags_safe(controller)
     return sorted(
         tags,

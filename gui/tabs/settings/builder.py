@@ -9,13 +9,10 @@ from tkinter import ttk
 from gui.i18n import tr
 from gui.ui_theme import PAD_LG, PAD_SM, PAD_XL, create_card_section
 
+from .backup_section import build_backup_section
 from .contracts import SettingsTabBindings, SettingsTabContext
-from .sections import (
-    build_audit_section,
-    build_backup_section,
-    build_currency_section,
-    refresh_wallet_related_ui,
-)
+from .currency_section import build_audit_section, build_currency_section
+from .wallets_section import refresh_wallet_related_ui
 
 
 def build_settings_tab(

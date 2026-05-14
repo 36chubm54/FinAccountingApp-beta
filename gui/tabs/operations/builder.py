@@ -14,14 +14,15 @@ from domain.import_result import ImportResult
 from gui.helpers import open_in_file_manager
 from gui.i18n import tr
 from gui.logging_utils import log_ui_error
-from gui.tabs.operations_support import refresh_operation_views, show_import_preview_dialog
 from gui.ui_helpers import ask_confirm, show_error, show_info, show_warning
 from gui.ui_theme import PAD_LG, PAD_SM, PAD_XL
 
 from .contracts import OperationsTabBindings, OperationsTabContext
 from .form_section import build_operation_form_section
+from .import_dialog import show_import_preview_dialog
 from .inline_editors import InlineEditors, build_inline_editors
 from .journal_section import JournalSection, build_journal_section
+from .refresh import refresh_operation_views
 from .transfer_section import build_transfer_section
 
 logger = logging.getLogger(__name__)

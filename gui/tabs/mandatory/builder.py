@@ -7,7 +7,7 @@ from tkinter import ttk
 
 from gui.ui_theme import PAD_LG, PAD_XL
 
-from ..settings.sections import refresh_wallet_related_ui
+from ..settings.wallets_section import refresh_wallet_related_ui
 from .contracts import MandatoryTabBindings, MandatoryTabContext
 from .section import build_mandatory_section
 

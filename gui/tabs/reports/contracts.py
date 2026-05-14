@@ -5,6 +5,34 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 
+class ReportsControllerApi(Protocol):
+    def load_active_wallets(self) -> list[Any]: ...
+
+    def generate_report_for_wallet(self, wallet_id: int | None) -> Any: ...
+
+    def net_worth_fixed(self) -> float: ...
+
+    def net_worth_current(self) -> float: ...
+
+    def get_base_currency_code(self) -> str: ...
+
+    def get_debts(self, wallet_id: int | None = None) -> list[Any]: ...
+
+    def get_display_currency_code(self) -> str: ...
+
+    def format_display_money(
+        self,
+        amount_base: float,
+        *,
+        precision: int = 2,
+        with_code: bool = True,
+    ) -> str: ...
+
+    def format_display_amount(self, amount_base: float, precision: int = 2) -> str: ...
+
+    def list_tags(self) -> list[Any]: ...
+
+
 class ReportsTabContext(Protocol):
-    controller: Any
-    currency: Any
+    controller: ReportsControllerApi
+    currency: object

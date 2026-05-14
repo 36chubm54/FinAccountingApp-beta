@@ -13,9 +13,8 @@ from typing import Any
 from domain.errors import DomainError
 from gui.i18n import tr
 from gui.logging_utils import log_ui_error
-from gui.tabs.operations_support import safe_destroy
 from gui.tooltip import Tooltip
-from gui.ui_helpers import show_error, show_info
+from gui.ui_helpers import safe_destroy, show_error, show_info
 from utils.tag_utils import find_numeric_only_tags
 
 from .contracts import OperationsTabContext
