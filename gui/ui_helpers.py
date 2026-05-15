@@ -152,6 +152,15 @@ def center_dialog(
         dialog.geometry(f"{width}x{height}+{pos_x}+{pos_y}")
 
 
+def safe_destroy(widget: tk.Misc | None) -> None:
+    if widget is None:
+        return
+    try:
+        widget.destroy()
+    except tk.TclError:
+        return
+
+
 def set_status(label: ttk.Label, text: str, *, tone: str = "muted") -> None:
     style_map = {
         "muted": "StatusMuted.TLabel",

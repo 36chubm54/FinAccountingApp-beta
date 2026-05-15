@@ -3,8 +3,10 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from typing import cast
+from unittest.mock import MagicMock, patch
 
+from gui.tabs.operations.contracts import OperationsRepository
 from gui.tabs.operations_tab import OperationsTabContext, build_operations_tab
 
 
@@ -33,6 +35,13 @@ def _collect_combos(parent: tk.Misc) -> list[ttk.Combobox]:
 
     _walk(parent)
     return combos
+
+
+def _find_combo_by_values(parent: tk.Misc, expected_values: tuple[str, ...]) -> ttk.Combobox | None:
+    for combo in _collect_combos(parent):
+        if tuple(combo.cget("values")) == expected_values:
+            return combo
+    return None
 
 
 def _collect_entries(parent: tk.Misc) -> list[tk.Entry | ttk.Entry]:
@@ -117,5 +126,78 @@ def test_operations_creator_frames_have_keyboard_navigation() -> None:
         assert transfer_button.bind("<Return>")
         assert transfer_button.bind("<Left>")
         assert transfer_button.bind("<Right>")
+    finally:
+        root.destroy()
+
+
+def test_operations_format_selector_excludes_unsupported_export_formats() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        parent = tk.Frame(root)
+        parent.pack()
+        context = _make_context()
+        build_operations_tab(
+            parent,
+            context,
+            import_formats={
+                "CSV": {"ext": ".csv", "desc": "CSV"},
+                "XLSX": {"ext": ".xlsx", "desc": "Excel"},
+                "JSON": {"ext": ".json", "desc": "JSON"},
+            },
+        )
+        root.update_idletasks()
+
+        format_combo = _find_combo_by_values(parent, ("CSV", "XLSX"))
+
+        assert format_combo is not None
+        assert tuple(format_combo.cget("values")) == ("CSV", "XLSX")
+    finally:
+        root.destroy()
+
+
+def test_operations_export_defers_repository_loads_to_background_task() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        parent = tk.Frame(root)
+        parent.pack()
+        context = _make_context()
+        run_background_mock = MagicMock()
+        load_all_mock = MagicMock(return_value=[])
+        load_transfers_mock = MagicMock(return_value=[])
+        context._run_background = run_background_mock
+        context.repository = cast(
+            OperationsRepository,
+            SimpleNamespace(
+                load_all=load_all_mock,
+                load_transfers=load_transfers_mock,
+            ),
+        )
+        build_operations_tab(
+            parent,
+            context,
+            import_formats={
+                "CSV": {"ext": ".csv", "desc": "CSV"},
+                "XLSX": {"ext": ".xlsx", "desc": "Excel"},
+            },
+        )
+        root.update_idletasks()
+
+        export_button = _find_button(parent, "Экспорт")
+        assert export_button is not None
+
+        with patch(
+            "gui.tabs.operations.builder.filedialog.asksaveasfilename",
+            return_value="C:\\temp\\records.csv",
+        ):
+            export_button.invoke()
+
+        load_all_mock.assert_not_called()
+        load_transfers_mock.assert_not_called()
+        run_background_mock.assert_called_once()
+
+        task = run_background_mock.call_args.args[0]
+        assert callable(task)
     finally:
         root.destroy()

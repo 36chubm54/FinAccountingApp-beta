@@ -7,6 +7,28 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [2.0.0-beta.4] - 2026-05-15
+
+### Changed
+
+- Reworked the desktop GUI around real per-tab packages with thin public `*_tab.py` compatibility shims instead of flat tab implementation modules
+- Finished the shell and tab lifecycle cleanup so lazy build, rebuild, hotkeys, and refresh orchestration now flow through narrower shell adapters instead of a single oversized GUI entry path
+- Promoted mandatory expenses into a dedicated top-level `Mandatory` tab while keeping the rest of the settings/runtime preferences flow focused on wallets, currency/rates, backup, and audit
+- Aligned the tab architecture across `operations`, `reports`, `analytics`, `dashboard`, `budget`, `debts`, `distribution`, `mandatory`, `settings`, and `infographics`
+
+### Fixed
+
+- Removed the remaining synchronous `Reports` generate/export hotspots from the UI thread by moving heavy report work onto the existing background execution path
+- Stopped `Infographics` month/year filter changes from reloading the full record set on every interaction by reusing a shell-owned cached snapshot
+- Tightened shell refresh error handling so lifecycle-safe widget teardown is still tolerated, but real contract and value errors are no longer silently swallowed
+- Reduced avoidable work in the records refresh flow and finished several GUI typing and contract-seam cleanups discovered during the refactor wave
+
+### Testing
+
+- Full GUI cleanup gate is green: targeted GUI regressions pass, `pyright` passes project-wide, and release-facing docs are synchronized with the `2.0.0-beta.4` architecture/runtime state
+
+---
+
 ## [2.0.0-beta.3] - 2026-05-13
 
 ### Changed

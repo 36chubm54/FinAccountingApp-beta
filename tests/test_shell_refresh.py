@@ -24,6 +24,22 @@ def test_safe_call_ignores_none_and_runtime_errors() -> None:
     safe_call(lambda: (_ for _ in ()).throw(RuntimeError("boom")))
 
 
+def test_safe_call_propagates_value_and_type_errors() -> None:
+    try:
+        safe_call(lambda: (_ for _ in ()).throw(ValueError("bad value")))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("ValueError should not be swallowed")
+
+    try:
+        safe_call(lambda: (_ for _ in ()).throw(TypeError("bad type")))
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("TypeError should not be swallowed")
+
+
 def test_safe_refresh_reports_views_calls_all_known_refreshes() -> None:
     called: list[str] = []
     reports_tab = SimpleNamespace(
@@ -113,6 +129,7 @@ def test_owner_refresh_wrappers_delegate_to_expected_callbacks() -> None:
         _analytics_bindings=SimpleNamespace(refresh=lambda: called.append("analytics")),
         _dashboard_bindings=SimpleNamespace(refresh=lambda: called.append("dashboard")),
         _budget_bindings=SimpleNamespace(refresh=lambda: called.append("budget")),
+        _mandatory_bindings=SimpleNamespace(refresh=lambda: called.append("mandatory")),
         _debt_bindings=SimpleNamespace(refresh=lambda: called.append("debt")),
         _distribution_bindings=SimpleNamespace(refresh=lambda: called.append("distribution")),
         _settings_bindings=SimpleNamespace(refresh=lambda: called.append("settings")),

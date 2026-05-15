@@ -56,12 +56,21 @@ from gui.shell.shell_window import apply_window_icon, configure_main_window
 from gui.startup_coordinator import DeferredStartupCoordinator
 from gui.status_bar_builder import build_status_bar
 from gui.status_bar_coordinator import StatusBarCoordinator, StatusBarOwner
-from gui.tab_lifecycle import TAB_ORDER, TabBuildContext, attach_tabs, build_tab, create_tab_frames
-from gui.tabs.infographics_support import (
+from gui.tab_lifecycle import TAB_ORDER, attach_tabs, build_tab, create_tab_frames
+from gui.tabs.analytics_tab import AnalyticsTabBindings
+from gui.tabs.budget_tab import BudgetTabBindings
+from gui.tabs.dashboard_tab import DashboardTabBindings
+from gui.tabs.debts_tab import DebtsTabBindings
+from gui.tabs.distribution_tab import DistributionTabBindings
+from gui.tabs.infographics.refresh import (
     handle_chart_filter_change,
     refresh_owner_infographics,
     scroll_owner_legend_canvas,
 )
+from gui.tabs.mandatory_tab import MandatoryTabBindings
+from gui.tabs.operations_tab import OperationsTabBindings
+from gui.tabs.reports_tab import ReportsFrame
+from gui.tabs.settings_tab import SettingsTabBindings
 from gui.ui_helpers import show_error, show_info
 from gui.ui_text import app_title, get_import_formats, get_tab_titles
 from gui.ui_theme import (
@@ -81,16 +90,18 @@ class FinancialApp(tk.Tk):
     _record_id_to_repo_index: dict[str, int]
     _record_id_to_domain_id: dict[str, int]
     _record_id_to_description: dict[str, str]
+    _infographics_records_cache: list[object] | None
     _chart_refresh_suspended: bool
     _built_tabs: set[str]
-    _analytics_bindings: Any | None
-    _dashboard_bindings: Any | None
-    _budget_bindings: Any | None
-    _debt_bindings: Any | None
-    _distribution_bindings: Any | None
-    _operations_bindings: Any | None
-    _reports_tab: Any | None
-    _settings_bindings: Any | None
+    _analytics_bindings: AnalyticsTabBindings | None
+    _dashboard_bindings: DashboardTabBindings | None
+    _budget_bindings: BudgetTabBindings | None
+    _mandatory_bindings: MandatoryTabBindings | None
+    _debt_bindings: DebtsTabBindings | None
+    _distribution_bindings: DistributionTabBindings | None
+    _operations_bindings: OperationsTabBindings | None
+    _reports_tab: ReportsFrame | None
+    _settings_bindings: SettingsTabBindings | None
     _after_jobs: dict[str, str]
     _online_var: tk.BooleanVar | None
     _currency_status_label: ttk.Label | None
@@ -113,6 +124,7 @@ class FinancialApp(tk.Tk):
     refresh_operation_wallet_menu: Callable[[], None] | None
     refresh_transfer_wallet_menus: Callable[[], None] | None
     refresh_wallets: Callable[[], None] | None
+    refresh_mandatory: Callable[[], None] | None
     refresh_budgets: Callable[[], None] | None
     refresh_all: Callable[[], None] | None
     pie_month_var: tk.StringVar | None
@@ -226,6 +238,7 @@ class FinancialApp(tk.Tk):
         notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed, add="+")
         notebook.bind("<Configure>", lambda _event: self._schedule_notebook_underline(), add="+")
         self.bind("<Configure>", lambda _event: self._schedule_notebook_underline(), add="+")
+        self.bind_all("<MouseWheel>", self._on_legend_mousewheel, add="+")
 
         self._ensure_tab_built("infographics")
         self._ensure_tab_built("operations")
@@ -410,13 +423,17 @@ class FinancialApp(tk.Tk):
         show_owner_records_tooltip(self, event)
 
     def _refresh_charts(self, records: list[Any] | None = None) -> None:
-        refresh_owner_infographics(self, records=records)
+        refresh_owner_infographics(
+            self,
+            records=records,
+            load_fresh=records is None,
+        )
 
     def _ensure_tab_built(self, tab_key: str) -> None:
         ensure_tab_built(
             self._built_tabs,
             tab_key,
-            build_tab_for_key=lambda key: build_tab(cast(TabBuildContext, self), key),
+            build_tab_for_key=lambda key: build_tab(self, key),
         )
 
     def _on_tab_changed(self, _event: tk.Event) -> None:

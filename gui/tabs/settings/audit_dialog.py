@@ -10,15 +10,6 @@ from gui.ui_helpers import center_dialog
 from gui.ui_theme import get_palette
 
 
-def safe_destroy(widget) -> None:
-    if widget is None:
-        return
-    try:
-        widget.destroy()
-    except tk.TclError:
-        return
-
-
 def _format_audit_finding(finding: AuditFinding, *, passed: bool = False) -> str:
     suffix = f" — {finding.detail}" if finding.detail else ""
     prefix = "✔ " if passed else ""

@@ -2,7 +2,7 @@
 
 Graphical application for personal financial accounting with multicurrency support, import/export, tags, budgets, debts, assets, and goals.
 
-The current `v2.0.0-beta.3` build continues the `2.0.0` stabilization line: SQLite stores normalized values as `amount_base` / `limit_base` in `base_currency`, `display_currency` controls presentation only, first-run currency setup now goes through a dedicated wizard before the initial usable startup, `Settings` now use the same runtime currency/provider contract, exported reports are localized while staying import-safe, statement views and statement exports use newest-first ordering, and shell/runtime orchestration has already been pushed out of the main entry-point modules into narrower helpers with stricter repository capability guards.
+The current `v2.0.0-beta.4` build continues the `2.0.0` line as a focused GUI architecture and responsiveness wave: SQLite still stores normalized values as `amount_base` / `limit_base` in `base_currency`, `display_currency` remains presentation-only, first-run currency setup and the runtime currency/provider contract in `Settings` stay intact, but the GUI now uses real per-tab packages with thin compatibility shims, mandatory payments live in their own top-level `Mandatory` tab, heavy `Reports` generation/export no longer blocks the UI thread, and `Infographics` filter changes no longer reload the full records set each time.
 
 ## 🚀 Quick Start
 
@@ -94,7 +94,8 @@ The app starts a Tkinter GUI on top of SQLite runtime storage. `Infographics` an
 - `Budget` — category limits and live budget tracking
 - `Debts` — debts and loans: create, repay, write off, close, view history, track progress
 - `Distribution` — monthly net-income distribution and frozen snapshots
-- `Settings` — wallets, mandatory expenses, backup/import, audit
+- `Mandatory` — mandatory payment templates, edit/delete flows, and add-to-records actions
+- `Settings` — wallets, currency and rates, backup/import, audit
 
 ## 🏗️ Architecture Overview
 
@@ -144,6 +145,7 @@ Practical highlights in the current working tree:
 - `gui.status_bar_coordinator.StatusBarCoordinator` — online-mode toggles and recurring status refresh logic
 - `gui.tab_lifecycle` — lazy tab build and lifecycle dispatch outside the main shell class
 - `gui.shell.*` — shell-specific lifecycle/refresh/preferences/status helpers extracted from `gui.tkinter_gui`
+- `gui.tabs.*` — real tab packages, with `*_tab.py` kept as thin compatibility shims
 - `CurrencyService.get_available_display_currencies()` — whitelist-aware display switcher values instead of the full cached-rate set
 - `FinanceService.get_import_capabilities()` — a single capability model for the import pipeline instead of ad-hoc attribute probing
 - `services.import_payload_support`, `services.import_replace_support`, `services.import_execution_support`, `services.import_mandatory_support` — a split import stack instead of one oversized service body
@@ -176,7 +178,7 @@ Global shortcuts are registered through `gui.hotkeys.register_hotkeys(app)` once
 
 | Key | Scope | Action |
 | --- | --- | --- |
-| `Alt+1..8` | Global | Switch tab (1–Infographics, 2–Operations, 3–Reports, 4–Analytics, 5–Dashboard, 6–Budget, 7–Debts, 8–Distribution) |
+| `Alt+1..9` | Global | Switch tab (1–Infographics, 2–Operations, 3–Reports, 4–Analytics, 5–Dashboard, 6–Budget, 7–Debts, 8–Distribution, 9–Mandatory) |
 | `F5` | Global | Refresh data (calls refresh across all tabs) |
 | `F1` / `?` | Global | Open the hotkey help |
 | `Ctrl+I` | Operations | Set operation type to “Income” |
@@ -200,12 +202,17 @@ Global shortcuts are registered through `gui.hotkeys.register_hotkeys(app)` once
 | `Ctrl+P` | Debts | Pay the selected debt |
 | `Ctrl+W` | Debts | Write off the selected debt |
 | `Del` | Debts | Delete the selected debt |
+| `Enter` | Mandatory | Add a new mandatory payment |
+| `F2` | Mandatory | Edit the selected mandatory payment |
+| `Del` | Mandatory | Delete the selected mandatory payment |
+| `Ctrl+Enter` | Mandatory | Add the selected mandatory payment to operations |
 
 Hotkeys work only when focus is inside the main application window (not in dialogs) and the corresponding tab is active. To prevent conflicts with text input, the following safeguards are implemented:
 
 - Keys `Del`, `F2`, `Home`, `End`, `Ctrl+Del`, `Ctrl+R`, `Ctrl+P`, `Ctrl+W` are ignored if focus is inside any input field (`Entry`, `ttk.Entry`, `ttk.Combobox`, `tk.Text`).
 - The `Enter` key is not processed when focus is in a `ttk.Combobox` or `tk.Text`, or when the operations inline editor is active.
 - All hotkeys are blocked while the operations inline editor is open (record editing mode in the operations list).
+- `Settings` remains a shell tab but does not have its own `Alt+number` shortcut because global fast switching is limited to the first nine tab slots.
 - Shortcuts tied to specific tabs (`Ctrl+I`, `Ctrl+E`, `Ctrl+G`, etc.) fire only when that tab is active.
 
 ## 🧪 Tests

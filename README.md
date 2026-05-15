@@ -2,7 +2,7 @@
 
 Графическое приложение для персонального финансового учёта с мультивалютностью, импортом/экспортом, тегами, бюджетами, долгами, активами и целями.
 
-Текущая beta-версия `v2.0.0-beta.3` продолжает stabilization-линейку `2.0.0`: значения в БД хранятся как `amount_base` / `limit_base` в `base_currency`, `display_currency` управляет только отображением в UI, first-run currency setup теперь проходит через отдельный wizard перед первым стартом, `Settings` синхронизированы с тем же runtime currency/provider contract, экспортируемые отчёты локализуются и сохраняют import-safe контракт, выписка и statement-export идут в порядке `newest first`, а shell/runtime orchestration уже вынесен из основных entry-point модулей в более узкие helpers с более строгими repository capability guards.
+Текущая beta-версия `v2.0.0-beta.4` продолжает линию `2.0.0` уже как UX- и architecture-cleanup wave: значения в БД по-прежнему хранятся как `amount_base` / `limit_base` в `base_currency`, `display_currency` остаётся UI-only, first-run currency setup и runtime currency/provider contract из `Settings` сохранены, но сам GUI теперь разложен на реальные per-tab packages с thin compatibility shims, обязательные платежи вынесены в отдельную вкладку `Mandatory`, `Reports` generation/export больше не держат тяжёлую работу на UI-потоке, а `Infographics` больше не перезагружают все записи на каждый filter-change.
 
 ## 🚀 Быстрый старт
 
@@ -95,7 +95,8 @@ python main.py
 - `Budget` — лимиты по категориям и live tracking исполнения
 - `Debts` — долги и ссуды: создание, погашение, write off, close, history, progress
 - `Distribution` — monthly net-income distribution и frozen snapshots
-- `Settings` — кошельки, mandatory expenses, backup/import, audit
+- `Mandatory` — обязательные платежи: шаблоны, редактирование, удаление и добавление в операции
+- `Settings` — кошельки, валюта и курсы, backup/import, audit
 
 ## 🏗️ Архитектурный обзор
 
@@ -145,6 +146,7 @@ python main.py
 - `gui.status_bar_coordinator.StatusBarCoordinator` — online-mode toggle и периодический status refresh
 - `gui.tab_lifecycle` — lazy tab build и lifecycle dispatch вне основного shell-класса
 - `gui.shell.*` — shell-specific lifecycle/refresh/preferences/status helpers, вынесенные из `gui.tkinter_gui`
+- `gui.tabs.*` — реальные tab packages, где `*_tab.py` оставлены как тонкие compatibility shims
 - `CurrencyService.get_available_display_currencies()` — whitelist-aware набор кодов для status-bar switcher вместо полного набора из кэша
 - `FinanceService.get_import_capabilities()` — единая capability-модель для import pipeline вместо ad-hoc проверок по атрибутам
 - `services.import_payload_support`, `services.import_replace_support`, `services.import_execution_support`, `services.import_mandatory_support` — разрезанный import stack вместо одного разросшегося service body
@@ -177,7 +179,7 @@ python main.py
 
 | Клавиша | Область | Действие |
 | --- | --- | --- |
-| `Alt+1..8` | Глобально | Переключить вкладку (1–Infographics, 2–Operations, 3–Reports, 4–Analytics, 5–Dashboard, 6–Budget, 7–Debts, 8–Distribution) |
+| `Alt+1..9` | Глобально | Переключить вкладку (1–Infographics, 2–Operations, 3–Reports, 4–Analytics, 5–Dashboard, 6–Budget, 7–Debts, 8–Distribution, 9–Mandatory) |
 | `F5` | Глобально | Обновить данные (вызывает refresh всех вкладок) |
 | `F1` / `?` | Глобально | Открыть справку по горячим клавишам |
 | `Ctrl+I` | Операции | Установить тип операции «Доход» |
@@ -201,12 +203,17 @@ python main.py
 | `Ctrl+P` | Долги | Погасить выбранный долг |
 | `Ctrl+W` | Долги | Списать выбранный долг (write off) |
 | `Del` | Долги | Удалить выбранный долг |
+| `Enter` | Mandatory | Добавить обязательный платёж |
+| `F2` | Mandatory | Редактировать выбранный обязательный платёж |
+| `Del` | Mandatory | Удалить выбранный обязательный платёж |
+| `Ctrl+Enter` | Mandatory | Добавить выбранный обязательный платёж в операции |
 
 Горячие клавиши работают только когда фокус находится в основном окне приложения (не в диалогах) и активна соответствующая вкладка. Для предотвращения конфликтов с вводом текста реализованы следующие защиты:
 
 - Клавиши `Del`, `F2`, `Home`, `End`, `Ctrl+Del`, `Ctrl+R`, `Ctrl+P`, `Ctrl+W` игнорируются, если фокус находится в любом поле ввода (`Entry`, `ttk.Entry`, `ttk.Combobox`, `tk.Text`).
 - Клавиша `Enter` не обрабатывается, когда фокус в `ttk.Combobox` или `tk.Text`, а также если активен inline-редактор операции.
 - Все горячие клавиши блокируются, когда открыт inline-редактор операции (режим редактирования записи в списке операций).
+- `Settings` остаётся доступной вкладкой shell, но не имеет отдельного `Alt+номер` shortcut, потому что глобальное быстрое переключение ограничено первыми девятью tab slots.
 - Сочетания, привязанные к конкретным вкладкам (`Ctrl+I`, `Ctrl+E`, `Ctrl+G` и др.), срабатывают только когда эта вкладка активна.
 
 ## 🧪 Тесты
