@@ -62,6 +62,22 @@ Current contract:
 
 ## 3. Key Runtime Flows
 
+### 3.0 Resource and runtime path ownership
+
+The desktop runtime now distinguishes packaged read-only resources from mutable user data through a shared path contract in `app_paths.py`.
+
+Current rules:
+
+- packaged resources such as `gui/assets/icons`, `locales`, and `db/schema.sql` resolve from the bundle resource root
+- mutable runtime files such as `finance.db`, currency config/cache, and backup output resolve from a user-scoped data directory
+- in Windows packaged mode, that mutable runtime state is expected to live under `AppData`, not inside the install tree
+- dev checkouts still resolve runtime files from the source tree unless an explicit override is provided
+
+Packaging note:
+
+- the checked-in `FinAccountingApp.spec` builds the main `PyInstaller --onedir` app bundle
+- `migrate_json_to_sqlite.py` and `migrations/migration_002_rename_amount_kzt_to_base.py` are shipped inside that bundle as raw Python utility scripts rather than separate executable tools
+
 ### 3.1 Startup
 
 - `main.py` launches the app
@@ -269,7 +285,7 @@ Core modules:
 - `gui/tabs/mandatory_tab.py`
 - `gui/tabs/mandatory/`
 
-This subsystem owns reusable mandatory-payment templates, add-to-records flows, startup auto-application, and the dedicated `Mandatory` desktop tab introduced in the `2.0.0-beta.4` GUI cleanup wave.
+This subsystem owns reusable mandatory-payment templates, add-to-records flows, startup auto-application, and the dedicated `Mandatory` desktop tab introduced during the final `2.0.0` GUI cleanup wave.
 
 ### 4.5 Distribution
 
