@@ -8,6 +8,7 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 from typing import Any
 
+from app_paths import get_exports_dir
 from domain.errors import DomainError
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
@@ -230,12 +231,24 @@ def build_operations_tab(
                 )
             )
             return
+        if not ask_confirm(
+            tr(
+                "operations.export.warning",
+                "Экспорт создаст читаемый файл с финансовыми данными. "
+                "Сохраняйте его только в доверенное место. Продолжить?",
+            ),
+            title=tr("common.confirm", "Подтверждение"),
+        ):
+            return
+        exports_dir = get_exports_dir()
+        exports_dir.mkdir(parents=True, exist_ok=True)
         filepath = filedialog.asksaveasfilename(
             defaultextension=cfg["ext"],
             filetypes=[(f"{cfg['desc']} files", f"*{cfg['ext']}"), ("All files", "*.*")],
             title=tr(
                 "operations.export.save_as", "Сохранить операции как {format}", format=cfg["desc"]
             ),
+            initialdir=str(exports_dir),
         )
         if not filepath:
             return

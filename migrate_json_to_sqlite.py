@@ -39,6 +39,7 @@ from utils.money import minor_to_money, rate_to_text, to_minor_units, to_money_f
 from utils.tag_utils import color_for_tag, normalize_tag_name, normalize_tag_names
 
 _MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+MAX_MIGRATION_JSON_SIZE = 25 * 1024 * 1024  # 25 MB
 
 
 def _resolve_schema_path(schema_path: str) -> str:
@@ -73,6 +74,14 @@ def parse_args() -> argparse.Namespace:
         help="Validate source and target connection without inserting data",
     )
     return parser.parse_args()
+
+
+def _ensure_reasonable_json_size(path: str | Path) -> None:
+    size = Path(path).stat().st_size
+    if size > MAX_MIGRATION_JSON_SIZE:
+        raise ValueError(
+            f"Source JSON is too large: {size} bytes (limit: {MAX_MIGRATION_JSON_SIZE})"
+        )
 
 
 def _require_existing_wallet(wallets: list[Wallet], wallet_id: int, owner: str) -> None:
@@ -2279,6 +2288,7 @@ def _load_source_dataset(
     list[DistributionSubitem],
     list[FrozenDistributionRow],
 ]:
+    _ensure_reasonable_json_size(json_path)
     with open(json_path, encoding="utf-8") as fp:
         raw_payload = json.load(fp)
     payload = unwrap_backup_payload(raw_payload, force=True)

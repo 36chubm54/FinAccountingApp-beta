@@ -125,6 +125,15 @@ bad-date,income,1,Salary,10,USD,500,5000
         os.unlink(path)
 
 
+def test_import_full_backup_rejects_oversized_json(monkeypatch, tmp_path):
+    path = tmp_path / "oversized_backup.json"
+    path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(backup_utils_module, "MAX_BACKUP_FILE_SIZE", 1)
+
+    with pytest.raises(BackupFormatError, match="too large"):
+        import_full_backup_from_json(str(path), force=True)
+
+
 def test_full_backup_roundtrip():
     records = [
         IncomeRecord(

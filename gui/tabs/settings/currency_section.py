@@ -37,6 +37,7 @@ def build_currency_section(
     currency_frame.grid_columnconfigure(1, weight=1)
 
     runtime_config = context.controller.get_runtime_currency_config()
+    security_diagnostics = context.controller.get_runtime_security_diagnostics()
     provider_names = context.controller.get_supported_currency_provider_names()
 
     base_currency_text = str(runtime_config.get("base_currency", "KZT") or "KZT").upper()
@@ -149,22 +150,47 @@ def build_currency_section(
     ttk.Entry(currency_frame, textvariable=exchange_api_key_var, width=24).grid(
         row=5, column=1, sticky="ew", padx=(0, pad_x), pady=pad_y
     )
+    ttk.Label(
+        currency_frame,
+        text=tr(
+            "settings.currency.api_key_storage",
+            "Хранение API key: {label}",
+            label=str(runtime_config.get("exchange_rate_api_key_storage_label", "") or ""),
+        ),
+        style="Hint.TLabel",
+    ).grid(row=6, column=0, columnspan=2, sticky="w", padx=pad_x, pady=(0, pad_y))
 
     ttk.Checkbutton(
         currency_frame,
         text=tr("settings.currency.auto_update", "Автообновление курсов"),
         variable=auto_update_var,
         style="FormField.TCheckbutton",
-    ).grid(row=6, column=0, columnspan=2, sticky="w", padx=pad_x, pady=(pad_y, 0))
+    ).grid(row=7, column=0, columnspan=2, sticky="w", padx=pad_x, pady=(pad_y, 0))
 
     ttk.Label(
         currency_frame,
         text=tr("settings.currency.update_interval", "Интервал обновления (мин):"),
         style="FormField.TLabel",
-    ).grid(row=7, column=0, sticky="w", padx=pad_x, pady=(pad_y, 0))
+    ).grid(row=8, column=0, sticky="w", padx=pad_x, pady=(pad_y, 0))
     ttk.Entry(currency_frame, textvariable=update_interval_var, width=24).grid(
-        row=7, column=1, sticky="ew", padx=(0, pad_x), pady=pad_y
+        row=8, column=1, sticky="ew", padx=(0, pad_x), pady=pad_y
     )
+    ttk.Label(
+        currency_frame,
+        text=tr(
+            "settings.currency.security_diag",
+            "Данные: {data_dir} | Режим: {mode}",
+            data_dir=str(security_diagnostics.get("user_data_root", "") or ""),
+            mode=(
+                tr("settings.currency.mode.packaged", "packaged")
+                if bool(security_diagnostics.get("packaged_mode", False))
+                else tr("settings.currency.mode.source", "source")
+            ),
+        ),
+        style="Hint.TLabel",
+        wraplength=520,
+        justify="left",
+    ).grid(row=9, column=0, columnspan=2, sticky="w", padx=pad_x, pady=(0, pad_y))
 
     def _refresh_provider_choices(*_args: object) -> None:
         available = context.controller.get_supported_currency_provider_names()
@@ -225,7 +251,7 @@ def build_currency_section(
     _refresh_provider_choices()
 
     buttons = ttk.Frame(currency_frame)
-    buttons.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(PAD_SM, 0))
+    buttons.grid(row=10, column=0, columnspan=2, sticky="ew", pady=(PAD_SM, 0))
     buttons.grid_columnconfigure(0, weight=1)
     ttk.Button(
         buttons,

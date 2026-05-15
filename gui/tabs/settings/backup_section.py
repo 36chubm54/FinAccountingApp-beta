@@ -6,6 +6,7 @@ from collections.abc import Callable
 from tkinter import filedialog, ttk
 from typing import Any
 
+from app_paths import get_backups_dir
 from domain.import_policy import ImportPolicy
 from domain.import_result import ImportResult
 from gui.helpers import open_in_file_manager
@@ -40,10 +41,13 @@ def build_backup_section(
             refresh_mandatory()
 
     def import_backup() -> None:
+        backup_dir = get_backups_dir()
+        backup_dir.mkdir(parents=True, exist_ok=True)
         filepath = filedialog.askopenfilename(
             defaultextension=".json",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
             title=tr("settings.backup.import.title", "Импорт полной копии"),
+            initialdir=str(backup_dir),
         )
         if not filepath:
             return
@@ -53,7 +57,8 @@ def build_backup_section(
             tr(
                 "settings.backup.import.confirm",
                 "Это заменит все кошельки, записи, переводы, обязательные расходы, "
-                "бюджеты и данные распределения. Продолжить?",
+                "бюджеты и данные распределения.\n\n"
+                "Импортируйте только резервные копии из доверенного источника. Продолжить?",
             ),
         ):
             return
@@ -128,10 +133,23 @@ def build_backup_section(
         run_import(False)
 
     def export_backup() -> None:
+        if not messagebox_module.askyesno(
+            tr("common.confirm", "Подтверждение"),
+            tr(
+                "settings.backup.export.warning",
+                "Резервная копия будет сохранена как читаемый JSON-файл с финансовыми данными. "
+                "Храните его только в доверенном месте. Продолжить?",
+            ),
+        ):
+            return
+
+        backup_dir = get_backups_dir()
+        backup_dir.mkdir(parents=True, exist_ok=True)
         filepath = filedialog.asksaveasfilename(
             defaultextension=".json",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
             title=tr("settings.backup.export.title", "Экспорт полной копии"),
+            initialdir=str(backup_dir),
         )
         if not filepath:
             return
