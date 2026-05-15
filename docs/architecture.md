@@ -88,9 +88,9 @@ This remains the practical runtime path even after the recent contract cleanup:
 
 Examples:
 
-- operations and transfers are initiated from `gui/tabs/operations_tab.py`
-- debts/loans are initiated from `gui/tabs/debts_tab.py`
-- assets/goals are initiated from `gui/tabs/dashboard_tab.py`
+- operations and transfers are initiated through the public shim `gui/tabs/operations_tab.py`, with the real implementation living under `gui/tabs/operations/`
+- debts/loans are initiated through `gui/tabs/debts_tab.py`, backed by `gui/tabs/debts/`
+- assets/goals are initiated through `gui/tabs/dashboard_tab.py`, backed by `gui/tabs/dashboard/`
 - theme/language preference changes are initiated from the app shell and persisted via `app.preferences_service`
 
 ### 3.3 Reports and Analytics
@@ -103,7 +103,8 @@ There are three main read-only analytics layers:
 
 Report UI uses:
 
-- `gui/tabs/reports_tab.py`
+- `gui/tabs/reports_tab.py` as the public compatibility shim
+- `gui/tabs/reports/` as the real package owner for report UI/layout/render/build logic
 - `gui/tabs/reports_controller.py`
 - `services/report_service.py`
 
@@ -207,6 +208,7 @@ Core modules:
 - `domain/budget.py`
 - `services/budget_service.py`
 - `gui/tabs/budget_tab.py`
+- `gui/tabs/budget/`
 
 Budgets are date-ranged limits with live execution tracking.
 
@@ -224,21 +226,35 @@ Core modules:
 - `domain/debt.py`
 - `services/debt_service.py`
 - `gui/tabs/debts_tab.py`
+- `gui/tabs/debts/`
 - `utils/debt_report_utils.py`
 
 This subsystem links debt payments to cashflow records and affects net worth and report exports.
 
-### 4.4 Distribution
+### 4.4 Mandatory Expenses
+
+Core modules:
+
+- `domain/records.py`
+- `app/use_cases_mandatory.py`
+- `services/import_mandatory_support.py`
+- `gui/tabs/mandatory_tab.py`
+- `gui/tabs/mandatory/`
+
+This subsystem owns reusable mandatory-payment templates, add-to-records flows, startup auto-application, and the dedicated `Mandatory` desktop tab introduced in the `2.0.0-beta.4` GUI cleanup wave.
+
+### 4.5 Distribution
 
 Core modules:
 
 - `domain/distribution.py`
 - `services/distribution_service.py`
 - `gui/tabs/distribution_tab.py`
+- `gui/tabs/distribution/`
 
 This subsystem calculates monthly net-income allocation and supports frozen snapshot rows.
 
-### 4.5 Assets / Goals / Dashboard
+### 4.6 Assets / Goals / Dashboard
 
 Core modules:
 
@@ -249,10 +265,11 @@ Core modules:
 - `services/goal_service.py`
 - `services/dashboard_service.py`
 - `gui/tabs/dashboard_tab.py`
+- `gui/tabs/dashboard/`
 
 This subsystem adds a strategic wealth-management layer above the transactional ledger.
 
-### 4.6 Audit
+### 4.7 Audit
 
 Core modules:
 
@@ -262,7 +279,7 @@ Core modules:
 
 Audit is intentionally read-only and validates runtime integrity without mutating data.
 
-### 4.7 Import / Backup Reliability
+### 4.8 Import / Backup Reliability
 
 Core modules:
 
@@ -288,7 +305,7 @@ This subsystem is responsible for:
 - corruption quarantine and save-failure handling for JSON repositories
 - startup export discipline for SQLite, especially on OneDrive-managed paths
 
-### 4.8 Runtime UI Preferences
+### 4.9 Runtime UI Preferences
 
 Core modules:
 
@@ -322,7 +339,7 @@ Tag-heavy UI also lives close to this layer:
 - analytics tag coverage mode
 - tag-aware report filters
 
-### 4.9 Desktop Shell Layout
+### 4.10 Desktop Shell Layout
 
 Core modules:
 
@@ -333,9 +350,10 @@ Core modules:
 - `gui/startup_coordinator.py`
 - `gui/status_bar_coordinator.py`
 - `gui/tab_lifecycle.py`
-- `gui/tabs/operations_tab.py`
-- `gui/tabs/debts_tab.py`
-- `gui/tabs/settings_tab.py`
+- `gui/tabs/operations/`
+- `gui/tabs/debts/`
+- `gui/tabs/mandatory/`
+- `gui/tabs/settings/`
 
 This subsystem is responsible for:
 
@@ -349,19 +367,21 @@ This subsystem is responsible for:
 Current implementation note:
 
 - `gui/tkinter_gui.py` is now treated as a composition shell, while `gui/shell/*` owns most shell-specific lifecycle, status, notebook, refresh, preferences, records, and startup orchestration
+- major tab implementations now live under dedicated `gui/tabs/<tab_name>/` packages, while top-level `gui/tabs/*_tab.py` files remain thin compatibility shims for tab lifecycle imports and tests
 - keep new feature details out of `gui/tkinter_gui.py`: tab-specific and shell-policy behavior should continue to land in `gui/tabs/*` or `gui/shell/*`
 
-### 4.10 Hotkeys
+### 4.11 Hotkeys
 
 Core modules:
 
 - `gui/hotkeys.py`
 - `gui/tkinter_gui.py`
-- `gui/tabs/operations_tab.py`
-- `gui/tabs/reports_tab.py`
-- `gui/tabs/analytics_tab.py`
-- `gui/tabs/budget_tab.py`
-- `gui/tabs/debts_tab.py`
+- `gui/tabs/operations/`
+- `gui/tabs/reports/`
+- `gui/tabs/analytics/`
+- `gui/tabs/budget/`
+- `gui/tabs/debts/`
+- `gui/tabs/mandatory/`
 
 `gui.hotkeys` is the single registration point for application-wide shortcuts. `register_hotkeys(app)` binds the global sequences once per `FinancialApp` instance, while handlers resolve the active tab and the latest tab binding objects at event time.
 
@@ -372,7 +392,7 @@ Important design rules:
 - destructive or input-conflicting shortcuts also check current focus and skip when focus is inside `Entry`, `Combobox`, or `Text`
 - the design is compatible with lazy tab build and `_reset_tab_bindings()` because handlers read current `app._*_bindings` references on each keypress
 
-### 4.11 Currency Provider System
+### 4.12 Currency Provider System
 
 Core modules:
 
