@@ -1,0 +1,56 @@
+name: Windows Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install .[pdf,build]
+
+      - name: Run pytest
+        run: pytest -q --tb=short
+
+      - name: Run pyright
+        run: npx -y pyright
+
+      - name: Build Windows bundle
+        run: pyinstaller --noconfirm FinAccountingApp.spec
+
+      - name: Archive Windows bundle
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Compress-Archive -Path dist\FinAccountingApp\* -DestinationPath artifacts\FinAccountingApp-windows.zip -Force
+
+      - name: Upload Windows bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FinAccountingApp-windows
+          path: artifacts/FinAccountingApp-windows.zip
+          if-no-files-found: error
