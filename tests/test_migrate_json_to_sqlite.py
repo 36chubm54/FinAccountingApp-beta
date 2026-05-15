@@ -14,7 +14,7 @@ from domain.tags import Tag
 from domain.transfers import Transfer
 from domain.wallets import Wallet
 from infrastructure.repositories import JsonFileRecordRepository
-from migrate_json_to_sqlite import run_dry_run, run_migration
+from migrate_json_to_sqlite import _detect_project_root, run_dry_run, run_migration
 from storage.sqlite_storage import SQLiteStorage
 from utils.backup_utils import export_full_backup_to_json
 
@@ -23,6 +23,17 @@ def _query_one(storage: SQLiteStorage, sql: str):
     row = storage.query_one(sql)
     assert row is not None
     return row
+
+
+def test_detect_project_root_uses_parent_for_bundled_tools_layout(tmp_path: Path) -> None:
+    bundle_root = tmp_path / "_internal"
+    tools_dir = bundle_root / "tools"
+    (bundle_root / "domain").mkdir(parents=True)
+    (bundle_root / "db").mkdir()
+    (bundle_root / "db" / "schema.sql").write_text("-- schema", encoding="utf-8")
+    tools_dir.mkdir()
+
+    assert _detect_project_root(tools_dir) == bundle_root.resolve()
 
 
 def _build_json_fixture(json_path: str) -> None:

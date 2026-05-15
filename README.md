@@ -2,7 +2,7 @@
 
 Графическое приложение для персонального финансового учёта с мультивалютностью, импортом/экспортом, тегами, бюджетами, долгами, активами и целями.
 
-Текущая beta-версия `v2.0.0-beta.4` продолжает линию `2.0.0` уже как UX- и architecture-cleanup wave: значения в БД по-прежнему хранятся как `amount_base` / `limit_base` в `base_currency`, `display_currency` остаётся UI-only, first-run currency setup и runtime currency/provider contract из `Settings` сохранены, но сам GUI теперь разложен на реальные per-tab packages с thin compatibility shims, обязательные платежи вынесены в отдельную вкладку `Mandatory`, `Reports` generation/export больше не держат тяжёлую работу на UI-потоке, а `Infographics` больше не перезагружают все записи на каждый filter-change.
+Текущий релиз `v2.0.0` завершает линию `2.0.0-beta` после currency/storage migration, runtime contract cleanup, GUI architecture cleanup и Windows packaging-prep wave: значения в БД хранятся как `amount_base` / `limit_base` в `base_currency`, `display_currency` остаётся UI-only, first-run currency setup и runtime currency/provider contract в `Settings` стабилизированы, GUI разложен на per-tab packages с thin compatibility shims, обязательные платежи живут в отдельной вкладке `Mandatory`, тяжёлые `Reports` generation/export больше не блокируют UI, `Infographics` больше не перезагружают весь набор записей на каждый filter-change, а packaged Windows build теперь держит mutable runtime state в `AppData` вместо install-tree.
 
 ## 🚀 Быстрый старт
 
@@ -46,6 +46,13 @@ python main.py
 ```
 
 Приложение запускает Tkinter GUI поверх SQLite runtime-storage. Вкладки `Infographics` и `Operations` строятся сразу, остальные вкладки достраиваются лениво, а post-startup maintenance и тяжёлые refresh-проходы выполняются после первого показа окна.
+
+### Windows build (`PyInstaller --onedir`)
+
+- Основной Windows bundle собирается через checked-in [FinAccountingApp.spec](C:/Users/swar4/OneDrive/Документы/Финансовый%20учёт/Проект%20ФУ/FinAccountingApp-dev/FinAccountingApp.spec)
+- Bundled read-only resources включают `gui/assets/icons`, `locales`, `db/schema.sql`
+- В packaged режиме mutable runtime files (`finance.db`, currency config/cache, backups) создаются в user-scoped `AppData`, а не внутри install directory
+- Migration utilities [migrate_json_to_sqlite.py](C:/Users/swar4/OneDrive/Документы/Финансовый%20учёт/Проект%20ФУ/FinAccountingApp-dev/migrate_json_to_sqlite.py) и [migration_002_rename_amount_kzt_to_base.py](C:/Users/swar4/OneDrive/Документы/Финансовый%20учёт/Проект%20ФУ/FinAccountingApp-dev/migrations/migration_002_rename_amount_kzt_to_base.py) входят в bundle как raw Python scripts, а не как отдельные `.exe`
 
 ## ✨ Основные возможности
 

@@ -7,7 +7,7 @@ This project adheres to Semantic Versioning.
 
 ---
 
-## [2.0.0-beta.4] - 2026-05-15
+## [2.0.0] - 2026-05-15
 
 ### Changed
 
@@ -15,6 +15,7 @@ This project adheres to Semantic Versioning.
 - Finished the shell and tab lifecycle cleanup so lazy build, rebuild, hotkeys, and refresh orchestration now flow through narrower shell adapters instead of a single oversized GUI entry path
 - Promoted mandatory expenses into a dedicated top-level `Mandatory` tab while keeping the rest of the settings/runtime preferences flow focused on wallets, currency/rates, backup, and audit
 - Aligned the tab architecture across `operations`, `reports`, `analytics`, `dashboard`, `budget`, `debts`, `distribution`, `mandatory`, `settings`, and `infographics`
+- Prepared the Windows `PyInstaller --onedir` build layout: bundled resources are now resolved through a shared app-path contract, packaged mutable runtime state moves to user-scoped `AppData`, and the migration utilities remain available inside the bundle as raw Python scripts
 
 ### Fixed
 
@@ -31,7 +32,7 @@ This project adheres to Semantic Versioning.
 
 ### Testing
 
-- Full GUI cleanup gate is green: targeted GUI regressions pass, `pyright` passes project-wide, and release-facing docs are synchronized with the `2.0.0-beta.4` architecture/runtime state
+- Full GUI cleanup gate is green: targeted GUI regressions pass, `pyright` passes project-wide, and release-facing docs are synchronized with the `2.0.0` architecture/runtime state
 
 ---
 

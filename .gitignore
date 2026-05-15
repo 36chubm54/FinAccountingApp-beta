@@ -6,6 +6,8 @@ tests/_tmp/
 .pytest_tmp/
 .obsidian/
 .vscode/
+build/
+dist/
 
 # Icons
 *.png
@@ -22,6 +24,7 @@ tests/_tmp/
 *.xlsx
 *.pdf
 *.json
+!pyrightconfig.json
 
 # Database files
 *.db

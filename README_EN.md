@@ -2,7 +2,7 @@
 
 Graphical application for personal financial accounting with multicurrency support, import/export, tags, budgets, debts, assets, and goals.
 
-The current `v2.0.0-beta.4` build continues the `2.0.0` line as a focused GUI architecture and responsiveness wave: SQLite still stores normalized values as `amount_base` / `limit_base` in `base_currency`, `display_currency` remains presentation-only, first-run currency setup and the runtime currency/provider contract in `Settings` stay intact, but the GUI now uses real per-tab packages with thin compatibility shims, mandatory payments live in their own top-level `Mandatory` tab, heavy `Reports` generation/export no longer blocks the UI thread, and `Infographics` filter changes no longer reload the full records set each time.
+The current `v2.0.0` release completes the `2.0.0-beta` line after the currency/storage migration, runtime contract cleanup, GUI architecture cleanup, and Windows packaging-prep wave: normalized values are stored as `amount_base` / `limit_base` in `base_currency`, `display_currency` remains presentation-only, first-run currency setup and the runtime currency/provider contract in `Settings` are stabilized, the GUI is organized into per-tab packages with thin compatibility shims, mandatory payments live in a dedicated `Mandatory` tab, heavy `Reports` generation/export no longer blocks the UI thread, `Infographics` no longer reload the full record set on every filter change, and the packaged Windows build now keeps mutable runtime state in `AppData` instead of the install tree.
 
 ## 🚀 Quick Start
 
@@ -47,6 +47,13 @@ python main.py
 
 The app starts a Tkinter GUI on top of SQLite runtime storage. `Infographics` and `Operations` are built eagerly, the remaining tabs are built lazily, and post-startup maintenance plus heavier refresh passes run after the first window paint.
 
+### Windows build (`PyInstaller --onedir`)
+
+- The main Windows bundle is built from the checked-in [FinAccountingApp.spec](C:/Users/swar4/OneDrive/Документы/Финансовый%20учёт/Проект%20ФУ/FinAccountingApp-dev/FinAccountingApp.spec)
+- Bundled read-only resources include `gui/assets/icons`, `locales`, and `db/schema.sql`
+- In packaged mode, mutable runtime files (`finance.db`, currency config/cache, backups) are created in user-scoped `AppData` instead of the install directory
+- Migration utilities [migrate_json_to_sqlite.py](C:/Users/swar4/OneDrive/Документы/Финансовый%20учёт/Проект%20ФУ/FinAccountingApp-dev/migrate_json_to_sqlite.py) and [migration_002_rename_amount_kzt_to_base.py](C:/Users/swar4/OneDrive/Документы/Финансовый%20учёт/Проект%20ФУ/FinAccountingApp-dev/migrations/migration_002_rename_amount_kzt_to_base.py) are included in the bundle as raw Python scripts, not as separate `.exe` tools
+
 ## ✨ Core Features
 
 - Track income, expenses, mandatory payments, and wallet-to-wallet transfers
@@ -71,6 +78,7 @@ The app starts a Tkinter GUI on top of SQLite runtime storage. `Infographics` an
 - Safer persistence behavior: corrupt JSON quarantine, `.error` copies on save failure, atomic backup/export paths
 - Patch-level stabilization on top of `v1.15.0`: safer import/runtime flows, GUI coordinator split, and tighter rollback/durability guarantees
 - Inline editing now distinguishes operation-currency amounts from persisted base-value equivalents instead of treating everything as implicit `KZT`
+- Bulk `JSON` restore preserves top-level `tags` even without current bindings to operations
 
 ## 💱 Multicurrency Model
 

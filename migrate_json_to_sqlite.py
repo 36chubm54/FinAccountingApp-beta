@@ -1,4 +1,5 @@
 from __future__ import annotations
+# ruff: noqa: E402, I001
 
 import argparse
 import json
@@ -7,6 +8,20 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+
+SCRIPT_ROOT = Path(__file__).resolve().parent
+
+
+def _detect_project_root(script_root: Path) -> Path:
+    for candidate in (script_root, script_root.parent):
+        if (candidate / "domain").is_dir() and (candidate / "db" / "schema.sql").exists():
+            return candidate.resolve()
+    return script_root.resolve()
+
+
+PROJECT_ROOT = _detect_project_root(SCRIPT_ROOT)
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from domain.asset import Asset, AssetCategory, AssetSnapshot
 from domain.budget import Budget
@@ -23,7 +38,6 @@ from utils.backup_utils import unwrap_backup_payload
 from utils.money import minor_to_money, rate_to_text, to_minor_units, to_money_float, to_rate_float
 from utils.tag_utils import color_for_tag, normalize_tag_name, normalize_tag_names
 
-PROJECT_ROOT = Path(__file__).resolve().parent
 _MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
@@ -31,7 +45,7 @@ def _resolve_schema_path(schema_path: str) -> str:
     candidate = Path(schema_path)
     if candidate.is_absolute():
         return str(candidate)
-    return str((Path(__file__).resolve().parent / candidate).resolve())
+    return str((PROJECT_ROOT / candidate).resolve())
 
 
 def parse_args() -> argparse.Namespace:
