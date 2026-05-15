@@ -12,6 +12,11 @@ on:
 permissions:
   contents: write
 
+env:
+  WINDOWS_SIGN_CERT_BASE64: ${{ secrets.WINDOWS_SIGN_CERT_BASE64 }}
+  WINDOWS_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGN_CERT_PASSWORD }}
+  WINDOWS_SIGN_TIMESTAMP_URL: http://timestamp.digicert.com
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -28,7 +33,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
 
       - name: Install Python dependencies
         run: |
@@ -52,6 +57,20 @@ jobs:
       - name: Build Windows bundle
         run: pyinstaller --noconfirm FinAccountingApp.spec
 
+      - name: Sign Windows executable
+        if: startsWith(github.ref, 'refs/tags/v') && env.WINDOWS_SIGN_CERT_BASE64 != '' && env.WINDOWS_SIGN_CERT_PASSWORD != ''
+        shell: pwsh
+        run: |
+          $certPath = Join-Path $PWD "windows-signing-cert.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_SIGN_CERT_BASE64))
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signtool) {
+            throw "signtool.exe not found"
+          }
+          & $signtool sign /fd SHA256 /f $certPath /p $env:WINDOWS_SIGN_CERT_PASSWORD /tr $env:WINDOWS_SIGN_TIMESTAMP_URL /td SHA256 "dist\FinAccountingApp\FinAccountingApp.exe"
+
       - name: Install Inno Setup
         if: startsWith(github.ref, 'refs/tags/v')
         run: choco install innosetup --no-progress -y
@@ -65,6 +84,26 @@ jobs:
             throw "Inno Setup compiler not found at $iscc"
           }
           & $iscc "FinAccountingApp.iss"
+
+      - name: Sign Windows installer
+        if: startsWith(github.ref, 'refs/tags/v') && env.WINDOWS_SIGN_CERT_BASE64 != '' && env.WINDOWS_SIGN_CERT_PASSWORD != ''
+        shell: pwsh
+        run: |
+          $certPath = Join-Path $PWD "windows-signing-cert.pfx"
+          if (-not (Test-Path $certPath)) {
+            [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_SIGN_CERT_BASE64))
+          }
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signtool) {
+            throw "signtool.exe not found"
+          }
+          $installer = Get-ChildItem "installer_dist\FinAccountingApp-*-setup.exe" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $installer) {
+            throw "Installer executable not found"
+          }
+          & $signtool sign /fd SHA256 /f $certPath /p $env:WINDOWS_SIGN_CERT_PASSWORD /tr $env:WINDOWS_SIGN_TIMESTAMP_URL /td SHA256 $installer
 
       - name: Archive Windows bundle
         shell: pwsh
