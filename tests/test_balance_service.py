@@ -408,6 +408,33 @@ def test_get_cashflow_excludes_transfer_category_records(tmp_path: Path) -> None
         repo.close()
 
 
+def test_get_cashflow_keeps_regular_category_named_transfer(tmp_path: Path) -> None:
+    repo = _build_repo(
+        tmp_path,
+        wallets=[_wallet(1, initial_balance=0.0)],
+        records=[
+            _record(1, record_type="income", date="2026-03-01", wallet_id=1, amount_base=1000.0),
+            _record(
+                2,
+                record_type="expense",
+                date="2026-03-12",
+                wallet_id=1,
+                amount_base=250.0,
+                category="Transfer",
+            ),
+        ],
+        name="balance_transfer_category.db",
+    )
+    try:
+        svc = BalanceService(repo)
+        result = svc.get_cashflow("2026-03-01", "2026-03-31")
+        assert result.income == 1000.0
+        assert result.expenses == 250.0
+        assert result.cashflow == 750.0
+    finally:
+        repo.close()
+
+
 def test_get_income_filters_by_date_range(tmp_path: Path) -> None:
     repo = _build_repo(
         tmp_path,
