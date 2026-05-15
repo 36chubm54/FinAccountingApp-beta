@@ -333,6 +333,7 @@ class CurrencyService:
             raise ValueError("Unsupported fallback provider")
         if normalized_primary == normalized_fallback:
             raise ValueError("Primary and fallback providers must be different")
+        validated_display = self._validate_display_currency(normalized_display)
 
         provider_mode_changed = (
             normalized_mode
@@ -360,7 +361,7 @@ class CurrencyService:
         self.save_config_payload(next_config)
         self._config = next_config
         self._aggregator = self._build_default_aggregator(config=self._config)
-        self.set_display_currency(normalized_display)
+        self._display_currency = validated_display
         if self._use_online and provider_settings_changed:
             refreshed = self.refresh_rates()
             if not refreshed:
@@ -369,12 +370,16 @@ class CurrencyService:
                 )
 
     def set_display_currency(self, code: str) -> None:
+        normalized = self._validate_display_currency(code)
+        self._display_currency = normalized
+
+    def _validate_display_currency(self, code: str) -> str:
         normalized = (code or "").strip().upper()
         if not normalized:
             raise ValueError("Display currency is required")
         if normalized != self.base_currency and normalized not in self.get_all_rates():
             raise ValueError(f"Unsupported currency: {code}")
-        self._display_currency = normalized
+        return normalized
 
     def to_display(self, amount_base: float) -> float:
         if self.display_currency == self.base_currency:

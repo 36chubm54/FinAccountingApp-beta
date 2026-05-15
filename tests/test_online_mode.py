@@ -643,3 +643,37 @@ def test_update_runtime_currency_config_does_not_mutate_runtime_when_save_fails(
     assert svc._config == previous_config
     assert svc.display_currency == previous_display
     assert svc._aggregator is previous_aggregator
+
+
+def test_update_runtime_currency_config_rejects_unsupported_current_display_without_saving(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(CurrencyService, "CONFIG_FILE", tmp_path / "currency_config.json")
+    svc = CurrencyService(rates={"USD": 500.0}, base="KZT")
+    previous_config = dict(svc._config)
+    previous_display = svc.display_currency
+    previous_aggregator = svc._aggregator
+    save_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        svc,
+        "save_config_payload",
+        lambda payload: save_calls.append(dict(payload)),
+    )
+
+    with pytest.raises(ValueError, match="Unsupported currency: EUR"):
+        svc.update_runtime_currency_config(
+            display_currency="EUR",
+            provider_mode="commercial",
+            primary_provider="nbk",
+            fallback_provider="exchange_rate",
+            exchange_rate_api_key="new-key",
+            auto_update=False,
+            update_interval_minutes=15,
+        )
+
+    assert save_calls == []
+    assert svc._config == previous_config
+    assert svc.display_currency == previous_display
+    assert svc._aggregator is previous_aggregator
