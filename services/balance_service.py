@@ -91,7 +91,7 @@ class BalanceService:
     def get_cashflow(self, start_date: str, end_date: str) -> CashflowResult:
         """
         Income, expenses, and net cashflow for [start_date, end_date].
-        Transfer records (category = 'Transfer') are excluded to avoid double-counting.
+        Transfer-linked records are excluded to avoid double-counting.
         """
         income = self._sum_by_type("income", start_date, end_date)
         expenses = self._sum_by_type("expense", start_date, end_date)
@@ -152,7 +152,7 @@ class BalanceService:
     def _sum_by_type(self, record_type: str, start_date: str, end_date: str) -> float:
         """
         SUM of amount_base for a given type in [start_date, end_date].
-        Transfer records (category = 'Transfer') are excluded.
+        Transfer-linked records are excluded.
         For 'expense', also includes mandatory_expense type.
         """
         if record_type == "expense":
@@ -164,7 +164,7 @@ class BalanceService:
                 ), 0.0)
                 FROM records
                 WHERE type IN ('expense', 'mandatory_expense')
-                  AND category != 'Transfer'
+                  AND transfer_id IS NULL
                   AND date >= ? AND date <= ?
             """
             row = self._repo.query_one(sql, (str(start_date), str(end_date)))
@@ -177,7 +177,7 @@ class BalanceService:
                 ), 0.0)
                 FROM records
                 WHERE type = ?
-                  AND category != 'Transfer'
+                  AND transfer_id IS NULL
                   AND date >= ? AND date <= ?
             """
             row = self._repo.query_one(
