@@ -9,6 +9,9 @@ on:
       - "v*"
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -49,6 +52,20 @@ jobs:
       - name: Build Windows bundle
         run: pyinstaller --noconfirm FinAccountingApp.spec
 
+      - name: Install Inno Setup
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Windows installer
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            throw "Inno Setup compiler not found at $iscc"
+          }
+          & $iscc "FinAccountingApp.iss"
+
       - name: Archive Windows bundle
         shell: pwsh
         run: |
@@ -61,3 +78,19 @@ jobs:
           name: FinAccountingApp-windows
           path: artifacts/FinAccountingApp-windows.zip
           if-no-files-found: error
+
+      - name: Upload Windows installer artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: FinAccountingApp-installer
+          path: installer_dist/FinAccountingApp-*-setup.exe
+          if-no-files-found: error
+
+      - name: Attach Windows assets to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/FinAccountingApp-windows.zip
+            installer_dist/FinAccountingApp-*-setup.exe
