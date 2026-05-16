@@ -65,6 +65,8 @@ class CurrencyService:
         "auto_update": True,
         "update_interval_minutes": 60,
     }
+    API_KEY_SOURCE_FIELD = "_exchange_rate_api_key_source"
+    API_KEY_PERSISTED_FIELD = "_exchange_rate_api_key_persisted_value"
     SUPPORTED_SETUP_CURRENCIES = ("KZT", "USD", "EUR", "RUB")
     SUPPORTED_PROVIDER_MODES = ("personal", "commercial")
 
@@ -183,22 +185,40 @@ class CurrencyService:
         )
         if env_api_key:
             resolved_api_key = env_api_key
-            if legacy_api_key:
-                config_needs_rewrite = True
+            config[cls.API_KEY_SOURCE_FIELD] = "environment"
+            config[cls.API_KEY_PERSISTED_FIELD] = secure_api_key or legacy_api_key
+            if legacy_api_key and not secure_api_key:
+                try:
+                    set_exchange_rate_api_key(legacy_api_key)
+                    config_needs_rewrite = True
+                except SecretStorageUnavailableError:
+                    logger.warning(
+                        "Secure API key storage is unavailable; "
+                        "keeping legacy config key under environment override"
+                    )
         elif secure_api_key:
             resolved_api_key = secure_api_key
+            config[cls.API_KEY_SOURCE_FIELD] = "secure_storage"
+            config[cls.API_KEY_PERSISTED_FIELD] = secure_api_key
             if legacy_api_key:
                 config_needs_rewrite = True
         elif legacy_api_key:
             try:
                 set_exchange_rate_api_key(legacy_api_key)
                 resolved_api_key = legacy_api_key
+                config[cls.API_KEY_SOURCE_FIELD] = "secure_storage"
+                config[cls.API_KEY_PERSISTED_FIELD] = legacy_api_key
                 config_needs_rewrite = True
             except SecretStorageUnavailableError:
                 logger.warning(
                     "Secure API key storage is unavailable; falling back to legacy config key"
                 )
                 resolved_api_key = legacy_api_key
+                config[cls.API_KEY_SOURCE_FIELD] = "legacy_config"
+                config[cls.API_KEY_PERSISTED_FIELD] = legacy_api_key
+        else:
+            config[cls.API_KEY_SOURCE_FIELD] = "none"
+            config[cls.API_KEY_PERSISTED_FIELD] = ""
         config["exchange_rate_api_key"] = resolved_api_key
         if config_needs_rewrite:
             try:
@@ -228,6 +248,8 @@ class CurrencyService:
         normalized.pop("_exchange_rate_api_key_source", None)
         normalized.pop("_exchange_rate_api_key_secure", None)
         normalized.pop("_exchange_rate_api_key_label", None)
+        normalized.pop(cls.API_KEY_SOURCE_FIELD, None)
+        normalized.pop(cls.API_KEY_PERSISTED_FIELD, None)
         temp_path: str | None = None
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -265,18 +287,25 @@ class CurrencyService:
         normalized = dict(cls.DEFAULT_CONFIG)
         normalized.update(dict(payload))
         desired_key = cls._normalized_secret(normalized.get("exchange_rate_api_key", ""))
+        key_source = str(normalized.get(cls.API_KEY_SOURCE_FIELD, "") or "").strip().lower()
+        persisted_key = cls._normalized_secret(normalized.get(cls.API_KEY_PERSISTED_FIELD, ""))
+        env_key = cls._normalized_secret(os.environ.get(cls.EXCHANGE_RATE_API_KEY_ENV, ""))
         secure_key_before = get_exchange_rate_api_key()
         storage_status = get_secret_storage_status()
         secure_storage_changed = False
-        persist_plaintext_api_key = bool(desired_key) and not storage_status.available
+        key_to_persist = desired_key
+        if key_source == "environment" and desired_key == env_key:
+            key_to_persist = secure_key_before or persisted_key
+        normalized["exchange_rate_api_key"] = key_to_persist
+        persist_plaintext_api_key = bool(key_to_persist) and not storage_status.available
 
-        if desired_key != secure_key_before and not persist_plaintext_api_key:
-            if not desired_key:
+        if key_to_persist != secure_key_before and not persist_plaintext_api_key:
+            if not key_to_persist:
                 if secure_key_before:
                     delete_exchange_rate_api_key()
                     secure_storage_changed = True
             else:
-                set_exchange_rate_api_key(desired_key)
+                set_exchange_rate_api_key(key_to_persist)
                 secure_storage_changed = True
 
         try:
