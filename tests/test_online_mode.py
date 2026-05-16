@@ -727,6 +727,22 @@ def test_load_config_migrates_plaintext_api_key_into_secure_storage(
     assert persisted["exchange_rate_api_key"] == ""
 
 
+def test_load_config_prefers_environment_override_over_secure_storage(
+    monkeypatch, tmp_path: Path, stub_secret_storage
+) -> None:
+    config_path = tmp_path / "currency_config.json"
+    config_path.write_text('{"exchange_rate_api_key": ""}', encoding="utf-8")
+    monkeypatch.setattr(CurrencyService, "CONFIG_FILE", config_path)
+    stub_secret_storage["api_key"] = "secure-key"
+    monkeypatch.setenv(CurrencyService.EXCHANGE_RATE_API_KEY_ENV, "env-key")
+
+    svc = CurrencyService()
+
+    assert svc._config["exchange_rate_api_key"] == "env-key"
+    diagnostics = svc.get_runtime_security_diagnostics()
+    assert diagnostics["api_key_storage"] == "environment"
+
+
 def test_update_runtime_currency_config_rejects_new_api_key_when_secure_storage_unavailable(
     monkeypatch,
     tmp_path: Path,
@@ -757,6 +773,42 @@ def test_update_runtime_currency_config_rejects_new_api_key_when_secure_storage_
         )
 
     assert svc._config == previous_config
+
+
+def test_update_runtime_currency_config_allows_existing_legacy_key_without_secure_storage(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "currency_config.json"
+    monkeypatch.setattr(CurrencyService, "CONFIG_FILE", config_path)
+    monkeypatch.setattr(
+        app_services,
+        "get_secret_storage_status",
+        lambda: SimpleNamespace(
+            available=False,
+            backend_name="",
+            backend_label="Secure OS secret storage is unavailable",
+        ),
+    )
+    monkeypatch.setattr(app_services, "get_exchange_rate_api_key", lambda: "")
+    svc = CurrencyService(rates={"USD": 500.0}, base="KZT")
+    svc._config["exchange_rate_api_key"] = "legacy-key"
+
+    svc.update_runtime_currency_config(
+        display_currency="USD",
+        provider_mode="personal",
+        primary_provider="nbk",
+        fallback_provider="exchange_rate",
+        exchange_rate_api_key="legacy-key",
+        auto_update=False,
+        update_interval_minutes=15,
+    )
+
+    assert svc._config["exchange_rate_api_key"] == "legacy-key"
+    assert svc._config["auto_update"] is False
+    assert svc._config["update_interval_minutes"] == 15
+    persisted = json.loads(config_path.read_text(encoding="utf-8"))
+    assert persisted["exchange_rate_api_key"] == "legacy-key"
 
 
 def test_runtime_security_diagnostics_report_storage_mode(stub_secret_storage) -> None:

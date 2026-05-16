@@ -12,11 +12,6 @@ on:
 permissions:
   contents: write
 
-env:
-  WINDOWS_SIGN_CERT_BASE64: ${{ secrets.WINDOWS_SIGN_CERT_BASE64 }}
-  WINDOWS_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGN_CERT_PASSWORD }}
-  WINDOWS_SIGN_TIMESTAMP_URL: http://timestamp.digicert.com
-
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -58,8 +53,12 @@ jobs:
         run: pyinstaller --noconfirm FinAccountingApp.spec
 
       - name: Sign Windows executable
-        if: startsWith(github.ref, 'refs/tags/v') && env.WINDOWS_SIGN_CERT_BASE64 != '' && env.WINDOWS_SIGN_CERT_PASSWORD != ''
+        if: startsWith(github.ref, 'refs/tags/v') && secrets.WINDOWS_SIGN_CERT_BASE64 != '' && secrets.WINDOWS_SIGN_CERT_PASSWORD != ''
         shell: pwsh
+        env:
+          WINDOWS_SIGN_CERT_BASE64: ${{ secrets.WINDOWS_SIGN_CERT_BASE64 }}
+          WINDOWS_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGN_CERT_PASSWORD }}
+          WINDOWS_SIGN_TIMESTAMP_URL: http://timestamp.digicert.com
         run: |
           $certPath = Join-Path $PWD "windows-signing-cert.pfx"
           [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_SIGN_CERT_BASE64))
@@ -70,6 +69,7 @@ jobs:
             throw "signtool.exe not found"
           }
           & $signtool sign /fd SHA256 /f $certPath /p $env:WINDOWS_SIGN_CERT_PASSWORD /tr $env:WINDOWS_SIGN_TIMESTAMP_URL /td SHA256 "dist\FinAccountingApp\FinAccountingApp.exe"
+          Remove-Item $certPath -Force
 
       - name: Install Inno Setup
         if: startsWith(github.ref, 'refs/tags/v')
@@ -86,8 +86,12 @@ jobs:
           & $iscc "FinAccountingApp.iss"
 
       - name: Sign Windows installer
-        if: startsWith(github.ref, 'refs/tags/v') && env.WINDOWS_SIGN_CERT_BASE64 != '' && env.WINDOWS_SIGN_CERT_PASSWORD != ''
+        if: startsWith(github.ref, 'refs/tags/v') && secrets.WINDOWS_SIGN_CERT_BASE64 != '' && secrets.WINDOWS_SIGN_CERT_PASSWORD != ''
         shell: pwsh
+        env:
+          WINDOWS_SIGN_CERT_BASE64: ${{ secrets.WINDOWS_SIGN_CERT_BASE64 }}
+          WINDOWS_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGN_CERT_PASSWORD }}
+          WINDOWS_SIGN_TIMESTAMP_URL: http://timestamp.digicert.com
         run: |
           $certPath = Join-Path $PWD "windows-signing-cert.pfx"
           if (-not (Test-Path $certPath)) {
@@ -104,6 +108,7 @@ jobs:
             throw "Installer executable not found"
           }
           & $signtool sign /fd SHA256 /f $certPath /p $env:WINDOWS_SIGN_CERT_PASSWORD /tr $env:WINDOWS_SIGN_TIMESTAMP_URL /td SHA256 $installer
+          Remove-Item $certPath -Force
 
       - name: Archive Windows bundle
         shell: pwsh

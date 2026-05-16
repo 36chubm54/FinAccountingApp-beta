@@ -107,22 +107,22 @@ class CurrencyService:
 
     @classmethod
     def _build_api_key_status(cls, config: Mapping[str, object]) -> dict[str, object]:
-        secure_key = get_exchange_rate_api_key()
         env_key = cls._normalized_secret(os.environ.get(cls.EXCHANGE_RATE_API_KEY_ENV, ""))
+        secure_key = get_exchange_rate_api_key()
         current_key = cls._normalized_secret(config.get("exchange_rate_api_key", ""))
         storage = get_secret_storage_status()
-        if secure_key:
-            return {
-                "source": "secure_storage",
-                "label": str(storage.backend_label),
-                "is_secure": True,
-                "configured": True,
-            }
         if env_key:
             return {
                 "source": "environment",
                 "label": "Environment variable override",
                 "is_secure": False,
+                "configured": True,
+            }
+        if secure_key:
+            return {
+                "source": "secure_storage",
+                "label": str(storage.backend_label),
+                "is_secure": True,
                 "configured": True,
             }
         if current_key:
@@ -176,30 +176,29 @@ class CurrencyService:
         secure_api_key = get_exchange_rate_api_key()
         config_needs_rewrite = False
         resolved_api_key = ""
-        if secure_api_key:
+        env_api_key = (
+            cls._normalized_secret(os.environ.get(cls.EXCHANGE_RATE_API_KEY_ENV, ""))
+            if use_env_override
+            else ""
+        )
+        if env_api_key:
+            resolved_api_key = env_api_key
+            if legacy_api_key:
+                config_needs_rewrite = True
+        elif secure_api_key:
             resolved_api_key = secure_api_key
             if legacy_api_key:
                 config_needs_rewrite = True
-        else:
-            env_api_key = (
-                cls._normalized_secret(os.environ.get(cls.EXCHANGE_RATE_API_KEY_ENV, ""))
-                if use_env_override
-                else ""
-            )
-            if env_api_key:
-                resolved_api_key = env_api_key
-                if legacy_api_key:
-                    config_needs_rewrite = True
-            elif legacy_api_key:
-                try:
-                    set_exchange_rate_api_key(legacy_api_key)
-                    resolved_api_key = legacy_api_key
-                    config_needs_rewrite = True
-                except SecretStorageUnavailableError:
-                    logger.warning(
-                        "Secure API key storage is unavailable; falling back to legacy config key"
-                    )
-                    resolved_api_key = legacy_api_key
+        elif legacy_api_key:
+            try:
+                set_exchange_rate_api_key(legacy_api_key)
+                resolved_api_key = legacy_api_key
+                config_needs_rewrite = True
+            except SecretStorageUnavailableError:
+                logger.warning(
+                    "Secure API key storage is unavailable; falling back to legacy config key"
+                )
+                resolved_api_key = legacy_api_key
         config["exchange_rate_api_key"] = resolved_api_key
         if config_needs_rewrite:
             try:
@@ -211,10 +210,21 @@ class CurrencyService:
         return config
 
     @classmethod
-    def _write_config_file(cls, payload: Mapping[str, object], target: Path) -> None:
+    def _write_config_file(
+        cls,
+        payload: Mapping[str, object],
+        target: Path,
+        *,
+        persist_plaintext_api_key: bool = False,
+    ) -> None:
         normalized = dict(cls.DEFAULT_CONFIG)
         normalized.update(dict(payload))
-        normalized["exchange_rate_api_key"] = ""
+        if persist_plaintext_api_key:
+            normalized["exchange_rate_api_key"] = cls._normalized_secret(
+                normalized.get("exchange_rate_api_key", "")
+            )
+        else:
+            normalized["exchange_rate_api_key"] = ""
         normalized.pop("_exchange_rate_api_key_source", None)
         normalized.pop("_exchange_rate_api_key_secure", None)
         normalized.pop("_exchange_rate_api_key_label", None)
@@ -256,22 +266,25 @@ class CurrencyService:
         normalized.update(dict(payload))
         desired_key = cls._normalized_secret(normalized.get("exchange_rate_api_key", ""))
         secure_key_before = get_exchange_rate_api_key()
-        env_key = cls._normalized_secret(os.environ.get(cls.EXCHANGE_RATE_API_KEY_ENV, ""))
+        storage_status = get_secret_storage_status()
         secure_storage_changed = False
+        persist_plaintext_api_key = bool(desired_key) and not storage_status.available
 
-        if desired_key != secure_key_before:
+        if desired_key != secure_key_before and not persist_plaintext_api_key:
             if not desired_key:
                 if secure_key_before:
                     delete_exchange_rate_api_key()
                     secure_storage_changed = True
-            elif desired_key == env_key and not secure_key_before:
-                pass
             else:
                 set_exchange_rate_api_key(desired_key)
                 secure_storage_changed = True
 
         try:
-            cls._write_config_file(normalized, target)
+            cls._write_config_file(
+                normalized,
+                target,
+                persist_plaintext_api_key=persist_plaintext_api_key,
+            )
         except OSError:
             if secure_storage_changed:
                 try:
@@ -388,13 +401,19 @@ class CurrencyService:
         raise ValueError("Update interval must be a positive integer")
 
     @classmethod
-    def ensure_api_key_storage_available_for_value(cls, value: object) -> None:
+    def ensure_api_key_storage_available_for_value(
+        cls,
+        value: object,
+        *,
+        current_value: object = "",
+    ) -> None:
         desired_key = cls._normalized_secret(value)
         if not desired_key:
             return
         secure_key = get_exchange_rate_api_key()
         env_key = cls._normalized_secret(os.environ.get(cls.EXCHANGE_RATE_API_KEY_ENV, ""))
-        if desired_key == secure_key or desired_key == env_key:
+        existing_value = cls._normalized_secret(current_value)
+        if desired_key == secure_key or desired_key == env_key or desired_key == existing_value:
             return
         status = get_secret_storage_status()
         if not status.available:
@@ -461,7 +480,10 @@ class CurrencyService:
             raise ValueError("Display currency is not supported for the selected base currency")
         if normalized_mode not in self.SUPPORTED_PROVIDER_MODES:
             raise ValueError("Unsupported provider mode")
-        self.ensure_api_key_storage_available_for_value(normalized_key)
+        self.ensure_api_key_storage_available_for_value(
+            normalized_key,
+            current_value=self._config.get("exchange_rate_api_key", ""),
+        )
 
         next_config = dict(self._config)
         next_config["display_currency"] = normalized_display

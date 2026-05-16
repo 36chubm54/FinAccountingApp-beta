@@ -134,6 +134,23 @@ def test_import_full_backup_rejects_oversized_json(monkeypatch, tmp_path):
         import_full_backup_from_json(str(path), force=True)
 
 
+def test_import_full_backup_accepts_json_at_exact_size_limit(monkeypatch, tmp_path):
+    path = tmp_path / "limit_backup.json"
+    export_full_backup_to_json(
+        str(path),
+        wallets=[
+            Wallet(id=1, name="Main wallet", currency="KZT", initial_balance=0.0, system=True)
+        ],
+        records=[],
+        mandatory_expenses=[],
+    )
+    monkeypatch.setattr(backup_utils_module, "MAX_BACKUP_FILE_SIZE", path.stat().st_size)
+
+    result = import_full_backup_from_json(str(path), force=True)
+
+    assert result.wallets
+
+
 def test_full_backup_roundtrip():
     records = [
         IncomeRecord(

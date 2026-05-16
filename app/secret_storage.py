@@ -16,6 +16,7 @@ try:
     KeyringError = keyring_errors.KeyringError
     NoKeyringError = keyring_errors.NoKeyringError
 except ModuleNotFoundError:  # pragma: no cover - exercised through runtime fallback
+
     class KeyringError(Exception):
         pass
 
@@ -48,6 +49,24 @@ def _keyring_backend() -> object | None:
         return None
 
 
+def _backend_is_available(backend: object) -> bool:
+    backend_name = type(backend).__name__
+    backend_module = type(backend).__module__
+    backend_name_lower = backend_name.lower()
+    backend_module_lower = backend_module.lower()
+    if (
+        backend_module_lower.startswith("keyring.backends.fail")
+        or "failkeyring" in backend_name_lower
+    ):
+        return False
+
+    priority = getattr(backend, "priority", None)
+    if isinstance(priority, (int, float)) and priority <= 0:
+        return False
+
+    return True
+
+
 def get_secret_storage_status() -> SecretStorageStatus:
     backend = _keyring_backend()
     if backend is None:
@@ -59,7 +78,7 @@ def get_secret_storage_status() -> SecretStorageStatus:
 
     backend_name = type(backend).__name__
     backend_module = type(backend).__module__
-    if "fail" in backend_module.lower():
+    if not _backend_is_available(backend):
         return SecretStorageStatus(
             available=False,
             backend_name=backend_name,

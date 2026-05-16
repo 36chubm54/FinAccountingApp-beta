@@ -54,6 +54,17 @@ def test_load_source_dataset_rejects_oversized_json(monkeypatch, tmp_path: Path)
         raise AssertionError("Expected oversized migration JSON to be rejected")
 
 
+def test_load_source_dataset_accepts_json_at_exact_size_limit(monkeypatch, tmp_path: Path) -> None:
+    json_path = tmp_path / "limit.json"
+    _build_json_fixture(str(json_path))
+    monkeypatch.setattr("migrate_json_to_sqlite.MAX_MIGRATION_JSON_SIZE", json_path.stat().st_size)
+
+    wallets, records, *_ = _load_source_dataset(str(json_path))
+
+    assert wallets
+    assert records
+
+
 def _build_json_fixture(json_path: str) -> None:
     repo = JsonFileRecordRepository(json_path)
     wallets = [

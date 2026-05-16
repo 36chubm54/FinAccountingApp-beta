@@ -214,6 +214,15 @@ class ReportsFrame(ttk.Frame):
 
         drill_category = (self._group_drill_category or "").strip()
         export_category_only = bool(self.group_var.get()) and bool(drill_category)
+        if not ask_confirm(
+            tr(
+                "reports.export.warning",
+                "Экспорт создаст читаемый файл с финансовыми данными. "
+                "Сохраняйте его только в доверенное место. Продолжить?",
+            ),
+            title=tr("common.confirm", "Подтверждение"),
+        ):
+            return
 
         if fmt == "csv":
             exports_dir = get_exports_dir()
@@ -243,15 +252,6 @@ class ReportsFrame(ttk.Frame):
                 initialdir=str(exports_dir),
             )
         if not filepath:
-            return
-        if not ask_confirm(
-            tr(
-                "reports.export.warning",
-                "Экспорт создаст читаемый файл с финансовыми данными. "
-                "Сохраняйте его только в доверенное место. Продолжить?",
-            ),
-            title=tr("common.confirm", "Подтверждение"),
-        ):
             return
         self._set_reports_busy(True)
 
