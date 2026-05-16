@@ -7,10 +7,11 @@ import os
 import tkinter as tk
 from tkinter import filedialog, ttk
 
+from app_paths import get_exports_dir
 from gui.helpers import open_in_file_manager
 from gui.i18n import tr
 from gui.logging_utils import log_ui_error
-from gui.ui_helpers import show_error, show_info
+from gui.ui_helpers import ask_confirm, show_error, show_info
 from services.report_service import ReportFilters, build_category_group_rows
 from utils.csv_utils import report_to_csv
 
@@ -213,24 +214,42 @@ class ReportsFrame(ttk.Frame):
 
         drill_category = (self._group_drill_category or "").strip()
         export_category_only = bool(self.group_var.get()) and bool(drill_category)
+        if not ask_confirm(
+            tr(
+                "reports.export.warning",
+                "Экспорт создаст читаемый файл с финансовыми данными. "
+                "Сохраняйте его только в доверенное место. Продолжить?",
+            ),
+            title=tr("common.confirm", "Подтверждение"),
+        ):
+            return
 
         if fmt == "csv":
+            exports_dir = get_exports_dir()
+            exports_dir.mkdir(parents=True, exist_ok=True)
             filepath = filedialog.asksaveasfilename(
                 defaultextension=".csv",
                 filetypes=[("CSV", "*.csv")],
                 title=tr("reports.export.save_csv", "Сохранить CSV"),
+                initialdir=str(exports_dir),
             )
         elif fmt == "xlsx":
+            exports_dir = get_exports_dir()
+            exports_dir.mkdir(parents=True, exist_ok=True)
             filepath = filedialog.asksaveasfilename(
                 defaultextension=".xlsx",
                 filetypes=[("Excel", "*.xlsx")],
                 title=tr("reports.export.save_xlsx", "Сохранить XLSX"),
+                initialdir=str(exports_dir),
             )
         else:
+            exports_dir = get_exports_dir()
+            exports_dir.mkdir(parents=True, exist_ok=True)
             filepath = filedialog.asksaveasfilename(
                 defaultextension=".pdf",
                 filetypes=[("PDF", "*.pdf")],
                 title=tr("reports.export.save_pdf", "Сохранить PDF"),
+                initialdir=str(exports_dir),
             )
         if not filepath:
             return

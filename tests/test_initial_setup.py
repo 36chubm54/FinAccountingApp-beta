@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
 
+import app.services as app_services
 import bootstrap as bootstrap_module
 from app.services import CurrencyService
 from bootstrap import bootstrap_repository
@@ -19,6 +21,33 @@ from gui.initial_setup import (
 )
 from infrastructure.currency_providers import BaseRateProvider, CurrencyProviderRegistry
 from infrastructure.sqlite_repository import SQLiteRecordRepository
+
+
+@pytest.fixture(autouse=True)
+def stub_secret_storage(monkeypatch):
+    state = {"api_key": ""}
+    monkeypatch.delenv(CurrencyService.EXCHANGE_RATE_API_KEY_ENV, raising=False)
+    monkeypatch.setattr(app_services, "get_exchange_rate_api_key", lambda: state["api_key"])
+    monkeypatch.setattr(
+        app_services,
+        "set_exchange_rate_api_key",
+        lambda value: state.__setitem__("api_key", str(value or "").strip()),
+    )
+    monkeypatch.setattr(
+        app_services,
+        "delete_exchange_rate_api_key",
+        lambda: state.__setitem__("api_key", ""),
+    )
+    monkeypatch.setattr(
+        app_services,
+        "get_secret_storage_status",
+        lambda: SimpleNamespace(
+            available=True,
+            backend_name="WinVaultKeyring",
+            backend_label="Windows Credential Manager",
+        ),
+    )
+    return state
 
 
 def test_should_run_initial_setup_when_sqlite_is_missing(tmp_path: Path) -> None:

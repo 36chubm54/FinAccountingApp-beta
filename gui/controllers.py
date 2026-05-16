@@ -248,6 +248,9 @@ class FinancialController:
     def get_supported_currency_provider_names(self) -> list[str]:
         return self._currency.get_supported_provider_names()
 
+    def get_runtime_security_diagnostics(self) -> dict[str, object]:
+        return self._currency.get_runtime_security_diagnostics()
+
     def set_display_currency(self, code: str) -> None:
         self._currency.set_display_currency(code)
 

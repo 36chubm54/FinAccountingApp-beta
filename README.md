@@ -8,7 +8,15 @@
 
 Графическое приложение для персонального финансового учёта с мультивалютностью, импортом/экспортом, тегами, бюджетами, долгами, активами и целями.
 
-Текущий релиз `v2.0.0` завершает линию `2.0.0-beta` после currency/storage migration, runtime contract cleanup, GUI architecture cleanup и Windows packaging-prep wave: значения в БД хранятся как `amount_base` / `limit_base` в `base_currency`, `display_currency` остаётся UI-only, first-run currency setup и runtime currency/provider contract в `Settings` стабилизированы, GUI разложен на per-tab packages с thin compatibility shims, обязательные платежи живут в отдельной вкладке `Mandatory`, тяжёлые `Reports` generation/export больше не блокируют UI, `Infographics` больше не перезагружают весь набор записей на каждый filter-change, а packaged Windows build теперь держит mutable runtime state в `AppData` вместо install-tree.
+Текущий релиз `v2.0.1` продолжает stable-линию `v2.0.0` как personal-security hardening patch: базовая архитектура с `amount_base` / `limit_base`, `base_currency`, per-tab GUI packages и Windows installer сохраняется, а поверх неё усилены локальное хранение секретов, import/backup trust boundaries и release-security posture для packaged Windows builds.
+
+В актуальном runtime-контракте:
+
+- `exchange_rate_api_key` больше не должен жить в plaintext `currency_config.json` и по умолчанию уходит в OS-backed secure storage
+- env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` остаётся runtime override поверх secure storage
+- mutable runtime state по-прежнему живёт в user-scoped `AppData`, а не рядом с установленным приложением
+- backup/export файлы остаются plaintext financial data, и это теперь явно отражено в UX и документации
+- Windows release workflow подготовлен к optional code signing, но без сертификата installer и bundle остаются unsigned
 
 ## 🚀 Быстрый старт
 
@@ -59,6 +67,7 @@ python main.py
 - Bundled read-only resources включают `gui/assets/icons`, `locales`, `db/schema.sql`
 - В packaged режиме mutable runtime files (`finance.db`, currency config/cache, backups) создаются в user-scoped `AppData`, а не внутри install directory
 - Migration utilities [migrate_json_to_sqlite.py](C:/Users/swar4/OneDrive/Документы/Финансовый%20учёт/Проект%20ФУ/FinAccountingApp-dev/migrate_json_to_sqlite.py) и [migration_002_rename_amount_kzt_to_base.py](C:/Users/swar4/OneDrive/Документы/Финансовый%20учёт/Проект%20ФУ/FinAccountingApp-dev/migrations/migration_002_rename_amount_kzt_to_base.py) входят в bundle как raw Python scripts, а не как отдельные `.exe`
+- GitHub Actions release workflow может опционально подписывать `FinAccountingApp.exe` и installer, если в repository secrets настроен code-signing certificate; без сертификата build остаётся unsigned
 
 ## ✨ Основные возможности
 
@@ -94,6 +103,7 @@ python main.py
 - `base_currency` выбирается только при первом запуске через setup wizard, затем источником истины остаётся SQLite `schema_meta`
 - По умолчанию селектор отображения ограничен whitelist-ом `KZT` / `USD` / `EUR` / `RUB`, даже если кэш курсов содержит больше кодов
 - `Settings -> Валюта и курсы` позволяет менять `display_currency`, provider mode, primary/fallback provider, `exchange_rate_api_key`, `auto_update` и `update_interval_minutes`, но не post-startup `base_currency`
+- `exchange_rate_api_key` больше не должен жить в `currency_config.json`: в Windows packaged/runtime flow он переносится в secure OS storage, env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` остаётся override-путём, а аварийный plaintext fallback допустим только когда secure storage недоступен
 - `auto_update` больше не является декоративным флагом: при включённом online mode курсы обновляются автоматически по `update_interval_minutes`
 - Экспортируемые отчёты локализуются по текущему языку UI, а колонки базовых сумм явно показывают код базы, например `Сумма (KZT)`
 - Локализованные report `CSV` / `XLSX` exports остаются import-safe для generic import pipeline приложения
@@ -304,7 +314,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 ## 💱 Поддерживаемые валюты
 
 - По умолчанию UI-селектор отображения использует `KZT`, `USD`, `EUR`, `RUB`
-- Базовая валюта в текущем beta-конфиге по умолчанию — `KZT`
+- Базовая валюта в текущем runtime-конфиге по умолчанию — `KZT`
 - Provider chain может загружать более широкий набор курсов, если это разрешено конфигом и текущим online-provider
 
 Курсы обновляются через `CurrencyService` и ordered provider chain:
@@ -316,7 +326,20 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 
 Полезные config points:
 
+- `currency_config.json` — `provider_mode`, `fallback_provider`, `commercial_fallback_provider`, `display_currency_whitelist`, `auto_update`, `update_interval_minutes`
 - env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` — runtime override для `exchange_rate_api_key`
+
+## 🔐 Security Notes
+
+- Runtime data (`finance.db`, `currency_config.json`, `currency_rates.json`, backups, exports) хранится в user-scoped `AppData`, а не рядом с `.exe`
+- `exchange_rate_api_key` должен храниться в secure OS-backed storage; `currency_config.json` больше не рассматривается как место для plaintext secrets
+- SQLite база, JSON backups и exported reports по-прежнему не шифруются at rest: это читаемые файлы с финансовыми данными
+- Uninstall удаляет установленные файлы и ярлыки, но не удаляет пользовательские данные в `AppData`
+- Для personal Windows use рекомендуется:
+  - `BitLocker`
+  - пароль на Windows-учётной записи
+  - использование приложения только на доверенной машине
+  - импорт только из доверенных backup/export файлов
 
 ## 📄 Лицензия
 

@@ -14,7 +14,12 @@ from domain.tags import Tag
 from domain.transfers import Transfer
 from domain.wallets import Wallet
 from infrastructure.repositories import JsonFileRecordRepository
-from migrate_json_to_sqlite import _detect_project_root, run_dry_run, run_migration
+from migrate_json_to_sqlite import (
+    _detect_project_root,
+    _load_source_dataset,
+    run_dry_run,
+    run_migration,
+)
 from storage.sqlite_storage import SQLiteStorage
 from utils.backup_utils import export_full_backup_to_json
 
@@ -34,6 +39,30 @@ def test_detect_project_root_uses_parent_for_bundled_tools_layout(tmp_path: Path
     tools_dir.mkdir()
 
     assert _detect_project_root(tools_dir) == bundle_root.resolve()
+
+
+def test_load_source_dataset_rejects_oversized_json(monkeypatch, tmp_path: Path) -> None:
+    json_path = tmp_path / "oversized.json"
+    json_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr("migrate_json_to_sqlite.MAX_MIGRATION_JSON_SIZE", 1)
+
+    try:
+        _load_source_dataset(str(json_path))
+    except ValueError as exc:
+        assert "too large" in str(exc)
+    else:  # pragma: no cover - assertion fallback
+        raise AssertionError("Expected oversized migration JSON to be rejected")
+
+
+def test_load_source_dataset_accepts_json_at_exact_size_limit(monkeypatch, tmp_path: Path) -> None:
+    json_path = tmp_path / "limit.json"
+    _build_json_fixture(str(json_path))
+    monkeypatch.setattr("migrate_json_to_sqlite.MAX_MIGRATION_JSON_SIZE", json_path.stat().st_size)
+
+    wallets, records, *_ = _load_source_dataset(str(json_path))
+
+    assert wallets
+    assert records
 
 
 def _build_json_fixture(json_path: str) -> None:

@@ -188,6 +188,10 @@ def validate_initial_setup_selection(
         raise ValueError("Unsupported display currency")
     if provider_mode not in SETUP_PROVIDER_MODES:
         raise ValueError("Unsupported provider mode")
+    try:
+        CurrencyService.ensure_api_key_storage_available_for_value(exchange_rate_api_key)
+    except RuntimeError as exc:
+        raise ValueError(str(exc)) from exc
 
     default_rates = CurrencyService.default_rates_for_base(base_currency)
     if display_currency != base_currency and display_currency not in default_rates:

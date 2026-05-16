@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from tkinter import filedialog, ttk
 from typing import Any
 
+from app_paths import get_exports_dir
 from domain.import_result import ImportResult
 from gui.helpers import open_in_file_manager
 from gui.i18n import tr
@@ -380,10 +381,22 @@ def build_mandatory_section(
                 tr("mandatory.export.empty", "Нет обязательных расходов для экспорта."),
             )
             return
+        if not messagebox_module.askyesno(
+            tr("common.confirm", "Подтверждение"),
+            tr(
+                "mandatory.export.warning",
+                "Экспорт создаст читаемый файл с финансовыми данными. "
+                "Сохраняйте его только в доверенное место. Продолжить?",
+            ),
+        ):
+            return
 
+        exports_dir = get_exports_dir()
+        exports_dir.mkdir(parents=True, exist_ok=True)
         filepath = filedialog.asksaveasfilename(
             defaultextension=f".{fmt.lower()}",
             title=tr("mandatory.export.save", "Сохранить обязательные расходы"),
+            initialdir=str(exports_dir),
         )
         if not filepath:
             return

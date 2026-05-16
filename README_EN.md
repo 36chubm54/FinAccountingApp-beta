@@ -8,7 +8,15 @@
 
 Graphical application for personal financial accounting with multicurrency support, import/export, tags, budgets, debts, assets, and goals.
 
-The current `v2.0.0` release completes the `2.0.0-beta` line after the currency/storage migration, runtime contract cleanup, GUI architecture cleanup, and Windows packaging-prep wave: normalized values are stored as `amount_base` / `limit_base` in `base_currency`, `display_currency` remains presentation-only, first-run currency setup and the runtime currency/provider contract in `Settings` are stabilized, the GUI is organized into per-tab packages with thin compatibility shims, mandatory payments live in a dedicated `Mandatory` tab, heavy `Reports` generation/export no longer blocks the UI thread, `Infographics` no longer reload the full record set on every filter change, and the packaged Windows build now keeps mutable runtime state in `AppData` instead of the install tree.
+The current `v2.0.1` release continues the stable `v2.0.0` line as a personal-security hardening patch: the normalized `amount_base` / `limit_base` architecture, `base_currency` runtime model, per-tab GUI packages, and Windows installer remain intact, while local secret handling, import/backup trust boundaries, and the packaged Windows security posture are tightened on top of that baseline.
+
+In the current runtime contract:
+
+- `exchange_rate_api_key` should no longer live in plaintext `currency_config.json` and is persisted through OS-backed secure storage by default
+- env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` remains a runtime override over secure storage
+- mutable runtime state still lives in user-scoped `AppData`, not beside the installed application
+- backup/export files remain plaintext financial data, and that is now reflected explicitly in the UX and docs
+- the Windows release workflow is prepared for optional code signing, but without a certificate the installer and bundle remain unsigned
 
 ## 🚀 Quick Start
 
@@ -59,6 +67,7 @@ The app starts a Tkinter GUI on top of SQLite runtime storage. `Infographics` an
 - Bundled read-only resources include `gui/assets/icons`, `locales`, and `db/schema.sql`
 - In packaged mode, mutable runtime files (`finance.db`, currency config/cache, backups) are created in user-scoped `AppData` instead of the install directory
 - Migration utilities [migrate_json_to_sqlite.py](C:/Users/swar4/OneDrive/Документы/Финансовый%20учёт/Проект%20ФУ/FinAccountingApp-dev/migrate_json_to_sqlite.py) and [migration_002_rename_amount_kzt_to_base.py](C:/Users/swar4/OneDrive/Документы/Финансовый%20учёт/Проект%20ФУ/FinAccountingApp-dev/migrations/migration_002_rename_amount_kzt_to_base.py) are included in the bundle as raw Python scripts, not as separate `.exe` tools
+- The GitHub Actions release workflow can optionally sign `FinAccountingApp.exe` and the installer when a code-signing certificate is configured in repository secrets; without a certificate, the build remains unsigned
 
 ## ✨ Core Features
 
@@ -94,6 +103,7 @@ The app starts a Tkinter GUI on top of SQLite runtime storage. `Infographics` an
 - `base_currency` is chosen only during first-run setup, then SQLite `schema_meta` remains the source of truth
 - By default, the display selector is limited to the whitelist `KZT` / `USD` / `EUR` / `RUB`, even if cached rates contain more currency codes
 - `Settings -> Currency and rates` can update `display_currency`, provider mode, primary/fallback provider, `exchange_rate_api_key`, `auto_update`, and `update_interval_minutes`, but not post-startup `base_currency`
+- `exchange_rate_api_key` is no longer expected to live in `currency_config.json`: in the Windows packaged/runtime flow it is migrated into secure OS storage, env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` remains an override path, and a plaintext fallback is only tolerated when secure storage is unavailable
 - `auto_update` is now active behavior instead of passive metadata: when online mode is enabled, rates refresh automatically according to `update_interval_minutes`
 - Exported reports are localized to the current UI language, and base-amount columns explicitly show the real base code, for example `Amount (KZT)`
 - Localized report `CSV` / `XLSX` exports remain import-safe for the app's generic import pipeline
@@ -304,7 +314,7 @@ The detailed layer map, runtime flows, and module guide now live in `docs/archit
 ## 💱 Supported Currencies
 
 - By default, the UI display selector uses `KZT`, `USD`, `EUR`, and `RUB`
-- In the current beta config, the default base currency is `KZT`
+- In the current runtime config, the default base currency is `KZT`
 - The provider chain can load a wider set of rates when allowed by config and the active online provider
 
 Rates are provided through `CurrencyService` and an ordered provider chain:
@@ -316,8 +326,20 @@ Rates are provided through `CurrencyService` and an ordered provider chain:
 
 Useful configuration points:
 
-- `currency_config.json` — `provider_mode`, `fallback_provider`, `commercial_fallback_provider`, `display_currency_whitelist`, `auto_update`, `update_interval_minutes`
+- `currency_config.json` — `provider_mode`, `fallback_provider`, `commercial_fallback_provider`, `display_currency_whitelist`, `auto_update`, `update_interval_minutes` without a plaintext `exchange_rate_api_key`
 - env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` — runtime override for `exchange_rate_api_key`
+
+## 🔐 Security Notes
+
+- Runtime data (`finance.db`, `currency_config.json`, `currency_rates.json`, backups, exports) lives in user-scoped `AppData`, not beside the executable
+- `exchange_rate_api_key` is expected to live in secure OS-backed storage; `currency_config.json` is no longer treated as a plaintext secret store
+- The SQLite database, JSON backups, and exported reports are still not encrypted at rest: they remain readable financial-data files
+- Uninstall removes installed files and shortcuts, but does not remove user data from `AppData`
+- For personal Windows use, the recommended host protections are:
+  - `BitLocker`
+  - a password-protected Windows account
+  - trusted-machine-only usage
+  - importing only trusted backup/export files
 
 ## 📄 License
 

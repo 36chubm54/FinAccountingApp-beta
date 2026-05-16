@@ -7,6 +7,24 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [2.0.1] - 2026-05-16
+
+### Security
+
+- Moved `exchange_rate_api_key` persistence out of `currency_config.json` and into secure OS-backed secret storage, while keeping env-var override support
+- Restored honest `env -> secure storage -> legacy fallback` precedence for the ExchangeRate API key and prevented legacy fallback mode from turning currency settings into a save dead end
+- Fixed API-key persistence edge cases so environment overrides no longer erase stored keys and no longer become persisted credentials during unrelated settings saves
+- Added runtime security diagnostics for API-key storage mode, user-data location, and packaged-vs-source execution mode
+- Added plaintext-data warnings to backup/export flows and defaulted backup/report/operations export dialogs to user-writable `AppData` directories
+- Added size guardrails to low-level backup JSON parsing and the standalone JSON->SQLite migration utility
+- Tightened secure-storage backend detection, added exact-limit regressions for import size guardrails, and aligned the `Reports` export warning flow with the other export surfaces
+- Prepared the Windows release workflow for optional code signing of both `FinAccountingApp.exe` and the installer when certificate secrets are available
+- Narrowed signing-secret exposure in CI to the signing steps only and cleaned up the temporary `.pfx`
+
+### Docs
+
+- Documented the current security posture explicitly: `AppData` runtime state, plaintext backup/export files, uninstall behavior, and recommended host protections such as `BitLocker`
+
 ## [2.0.0] - 2026-05-15
 
 ### Changed

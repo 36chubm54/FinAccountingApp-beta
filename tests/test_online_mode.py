@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -66,6 +67,33 @@ class FakeResponse:
         if self._payload is None:
             raise ValueError("No JSON payload")
         return self._payload
+
+
+@pytest.fixture(autouse=True)
+def stub_secret_storage(monkeypatch):
+    state = {"api_key": ""}
+    monkeypatch.delenv(CurrencyService.EXCHANGE_RATE_API_KEY_ENV, raising=False)
+    monkeypatch.setattr(app_services, "get_exchange_rate_api_key", lambda: state["api_key"])
+    monkeypatch.setattr(
+        app_services,
+        "set_exchange_rate_api_key",
+        lambda value: state.__setitem__("api_key", str(value or "").strip()),
+    )
+    monkeypatch.setattr(
+        app_services,
+        "delete_exchange_rate_api_key",
+        lambda: state.__setitem__("api_key", ""),
+    )
+    monkeypatch.setattr(
+        app_services,
+        "get_secret_storage_status",
+        lambda: SimpleNamespace(
+            available=True,
+            backend_name="WinVaultKeyring",
+            backend_label="Windows Credential Manager",
+        ),
+    )
+    return state
 
 
 @pytest.fixture
@@ -504,7 +532,9 @@ def test_get_supported_provider_names_excludes_cbr_for_unsupported_base() -> Non
     assert "static" in supported
 
 
-def test_update_runtime_currency_config_persists_and_rebuilds(monkeypatch, tmp_path: Path) -> None:
+def test_update_runtime_currency_config_persists_and_rebuilds(
+    monkeypatch, tmp_path: Path, stub_secret_storage
+) -> None:
     config_path = tmp_path / "currency_config.json"
     monkeypatch.setattr(CurrencyService, "CONFIG_FILE", config_path)
     svc = CurrencyService(rates={"USD": 500.0, "EUR": 590.0}, base="KZT")
@@ -521,6 +551,7 @@ def test_update_runtime_currency_config_persists_and_rebuilds(monkeypatch, tmp_p
     )
 
     saved = CurrencyService.load_config_payload(config_file=config_path, use_env_override=False)
+    persisted = json.loads(config_path.read_text(encoding="utf-8"))
     assert svc.display_currency == "USD"
     assert svc._config["provider_mode"] == "commercial"
     assert svc._config["commercial_fallback_provider"] == "exchange_rate"
@@ -531,8 +562,10 @@ def test_update_runtime_currency_config_persists_and_rebuilds(monkeypatch, tmp_p
     assert saved["fallback_provider"] == "exchange_rate"
     assert saved["commercial_fallback_provider"] == "exchange_rate"
     assert saved["exchange_rate_api_key"] == "test-key"
+    assert persisted["exchange_rate_api_key"] == ""
     assert saved["auto_update"] is False
     assert saved["update_interval_minutes"] == 15
+    assert stub_secret_storage["api_key"] == "test-key"
 
 
 def test_update_runtime_currency_config_preserves_inactive_mode_fallback(
@@ -677,3 +710,163 @@ def test_update_runtime_currency_config_rejects_unsupported_current_display_with
     assert svc._config == previous_config
     assert svc.display_currency == previous_display
     assert svc._aggregator is previous_aggregator
+
+
+def test_load_config_migrates_plaintext_api_key_into_secure_storage(
+    monkeypatch, tmp_path: Path, stub_secret_storage
+) -> None:
+    config_path = tmp_path / "currency_config.json"
+    config_path.write_text('{"exchange_rate_api_key": "legacy-key"}', encoding="utf-8")
+    monkeypatch.setattr(CurrencyService, "CONFIG_FILE", config_path)
+
+    svc = CurrencyService()
+
+    assert svc._config["exchange_rate_api_key"] == "legacy-key"
+    assert stub_secret_storage["api_key"] == "legacy-key"
+    persisted = json.loads(config_path.read_text(encoding="utf-8"))
+    assert persisted["exchange_rate_api_key"] == ""
+
+
+def test_load_config_prefers_environment_override_over_secure_storage(
+    monkeypatch, tmp_path: Path, stub_secret_storage
+) -> None:
+    config_path = tmp_path / "currency_config.json"
+    config_path.write_text('{"exchange_rate_api_key": ""}', encoding="utf-8")
+    monkeypatch.setattr(CurrencyService, "CONFIG_FILE", config_path)
+    stub_secret_storage["api_key"] = "secure-key"
+    monkeypatch.setenv(CurrencyService.EXCHANGE_RATE_API_KEY_ENV, "env-key")
+
+    svc = CurrencyService()
+
+    assert svc._config["exchange_rate_api_key"] == "env-key"
+    diagnostics = svc.get_runtime_security_diagnostics()
+    assert diagnostics["api_key_storage"] == "environment"
+
+
+def test_load_config_preserves_legacy_key_under_environment_override(
+    monkeypatch, tmp_path: Path, stub_secret_storage
+) -> None:
+    config_path = tmp_path / "currency_config.json"
+    config_path.write_text('{"exchange_rate_api_key": "legacy-key"}', encoding="utf-8")
+    monkeypatch.setattr(CurrencyService, "CONFIG_FILE", config_path)
+    monkeypatch.setenv(CurrencyService.EXCHANGE_RATE_API_KEY_ENV, "env-key")
+
+    svc = CurrencyService()
+
+    assert svc._config["exchange_rate_api_key"] == "env-key"
+    assert stub_secret_storage["api_key"] == "legacy-key"
+    persisted = json.loads(config_path.read_text(encoding="utf-8"))
+    assert persisted["exchange_rate_api_key"] == ""
+
+
+def test_update_runtime_currency_config_rejects_new_api_key_when_secure_storage_unavailable(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(CurrencyService, "CONFIG_FILE", tmp_path / "currency_config.json")
+    monkeypatch.setattr(
+        app_services,
+        "get_secret_storage_status",
+        lambda: SimpleNamespace(
+            available=False,
+            backend_name="",
+            backend_label="Secure OS secret storage is unavailable",
+        ),
+    )
+    monkeypatch.setattr(app_services, "get_exchange_rate_api_key", lambda: "")
+    svc = CurrencyService(rates={"USD": 500.0}, base="KZT")
+    previous_config = dict(svc._config)
+
+    with pytest.raises(RuntimeError, match="Secure API key storage is unavailable"):
+        svc.update_runtime_currency_config(
+            display_currency="USD",
+            provider_mode="personal",
+            primary_provider="nbk",
+            fallback_provider="exchange_rate",
+            exchange_rate_api_key="new-secret",
+            auto_update=True,
+            update_interval_minutes=60,
+        )
+
+    assert svc._config == previous_config
+
+
+def test_update_runtime_currency_config_allows_existing_legacy_key_without_secure_storage(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "currency_config.json"
+    monkeypatch.setattr(CurrencyService, "CONFIG_FILE", config_path)
+    monkeypatch.setattr(
+        app_services,
+        "get_secret_storage_status",
+        lambda: SimpleNamespace(
+            available=False,
+            backend_name="",
+            backend_label="Secure OS secret storage is unavailable",
+        ),
+    )
+    monkeypatch.setattr(app_services, "get_exchange_rate_api_key", lambda: "")
+    svc = CurrencyService(rates={"USD": 500.0}, base="KZT")
+    svc._config["exchange_rate_api_key"] = "legacy-key"
+
+    svc.update_runtime_currency_config(
+        display_currency="USD",
+        provider_mode="personal",
+        primary_provider="nbk",
+        fallback_provider="exchange_rate",
+        exchange_rate_api_key="legacy-key",
+        auto_update=False,
+        update_interval_minutes=15,
+    )
+
+    assert svc._config["exchange_rate_api_key"] == "legacy-key"
+    assert svc._config["auto_update"] is False
+    assert svc._config["update_interval_minutes"] == 15
+    persisted = json.loads(config_path.read_text(encoding="utf-8"))
+    assert persisted["exchange_rate_api_key"] == "legacy-key"
+
+
+def test_update_runtime_currency_config_does_not_persist_environment_override(
+    monkeypatch, tmp_path: Path, stub_secret_storage
+) -> None:
+    config_path = tmp_path / "currency_config.json"
+    config_path.write_text('{"exchange_rate_api_key": ""}', encoding="utf-8")
+    monkeypatch.setattr(CurrencyService, "CONFIG_FILE", config_path)
+    monkeypatch.setenv(CurrencyService.EXCHANGE_RATE_API_KEY_ENV, "env-key")
+    monkeypatch.setattr(
+        app_services,
+        "get_secret_storage_status",
+        lambda: SimpleNamespace(
+            available=False,
+            backend_name="",
+            backend_label="Secure OS secret storage is unavailable",
+        ),
+    )
+    monkeypatch.setattr(app_services, "get_exchange_rate_api_key", lambda: "")
+
+    svc = CurrencyService(rates={"USD": 500.0}, base="KZT")
+    assert svc._config["exchange_rate_api_key"] == "env-key"
+
+    svc.update_runtime_currency_config(
+        display_currency="USD",
+        provider_mode="personal",
+        primary_provider="nbk",
+        fallback_provider="exchange_rate",
+        exchange_rate_api_key="env-key",
+        auto_update=False,
+        update_interval_minutes=15,
+    )
+
+    persisted = json.loads(config_path.read_text(encoding="utf-8"))
+    assert persisted["exchange_rate_api_key"] == ""
+    assert stub_secret_storage["api_key"] == ""
+
+
+def test_runtime_security_diagnostics_report_storage_mode(stub_secret_storage) -> None:
+    svc = CurrencyService(rates={"USD": 500.0}, base="KZT")
+    diagnostics = svc.get_runtime_security_diagnostics()
+
+    assert diagnostics["api_key_storage"] == "none"
+    assert diagnostics["api_key_storage_label"] == "Windows Credential Manager"
+    assert diagnostics["user_data_root"]

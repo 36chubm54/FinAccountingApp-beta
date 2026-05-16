@@ -20,6 +20,10 @@ def get_source_root() -> Path:
     return _SOURCE_ROOT
 
 
+def is_frozen_mode() -> bool:
+    return _is_frozen_mode()
+
+
 def get_resource_root() -> Path:
     override = str(os.environ.get("FIN_ACCOUNTING_RESOURCE_ROOT", "") or "").strip()
     if override:
@@ -77,6 +81,10 @@ def get_currency_rates_path() -> Path:
 
 def get_backups_dir() -> Path:
     return get_user_data_root() / "backups"
+
+
+def get_exports_dir() -> Path:
+    return get_user_data_root() / "exports"
 
 
 def get_locales_dir() -> Path:

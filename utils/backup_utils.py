@@ -27,6 +27,7 @@ from version import __version__
 
 logger = logging.getLogger(__name__)
 SYSTEM_WALLET_ID = 1
+MAX_BACKUP_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
 
 
 @dataclass(frozen=True)
@@ -546,6 +547,11 @@ def import_full_backup_from_json(
     """
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"JSON file not found: {filepath}")
+    file_size = os.path.getsize(filepath)
+    if file_size > MAX_BACKUP_FILE_SIZE:
+        raise BackupFormatError(
+            f"Backup JSON is too large: {file_size} bytes (limit: {MAX_BACKUP_FILE_SIZE})"
+        )
 
     try:
         with open(filepath, encoding="utf-8") as fp:
