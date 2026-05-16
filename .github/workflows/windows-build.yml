@@ -52,8 +52,23 @@ jobs:
       - name: Build Windows bundle
         run: pyinstaller --noconfirm FinAccountingApp.spec
 
+      - name: Detect signing availability
+        id: signing
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          WINDOWS_SIGN_CERT_BASE64: ${{ secrets.WINDOWS_SIGN_CERT_BASE64 }}
+          WINDOWS_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGN_CERT_PASSWORD }}
+        run: |
+          if ($env:WINDOWS_SIGN_CERT_BASE64 -and $env:WINDOWS_SIGN_CERT_PASSWORD) {
+            "enabled=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+          else {
+            "enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+
       - name: Sign Windows executable
-        if: startsWith(github.ref, 'refs/tags/v') && secrets.WINDOWS_SIGN_CERT_BASE64 != '' && secrets.WINDOWS_SIGN_CERT_PASSWORD != ''
+        if: startsWith(github.ref, 'refs/tags/v') && steps.signing.outputs.enabled == 'true'
         shell: pwsh
         env:
           WINDOWS_SIGN_CERT_BASE64: ${{ secrets.WINDOWS_SIGN_CERT_BASE64 }}
@@ -86,7 +101,7 @@ jobs:
           & $iscc "FinAccountingApp.iss"
 
       - name: Sign Windows installer
-        if: startsWith(github.ref, 'refs/tags/v') && secrets.WINDOWS_SIGN_CERT_BASE64 != '' && secrets.WINDOWS_SIGN_CERT_PASSWORD != ''
+        if: startsWith(github.ref, 'refs/tags/v') && steps.signing.outputs.enabled == 'true'
         shell: pwsh
         env:
           WINDOWS_SIGN_CERT_BASE64: ${{ secrets.WINDOWS_SIGN_CERT_BASE64 }}
