@@ -1,5 +1,11 @@
 # FinAccountingApp
 
+[![Release](https://img.shields.io/github/v/release/36chubm54/FinAccountingApp?display_name=tag)](https://github.com/36chubm54/FinAccountingApp/releases)
+[![Windows Build](https://img.shields.io/github/actions/workflow/status/36chubm54/FinAccountingApp/windows-build.yml?branch=main&label=windows%20build)](https://github.com/36chubm54/FinAccountingApp/actions/workflows/windows-build.yml)
+[![License](https://img.shields.io/github/license/36chubm54/FinAccountingApp)](https://github.com/36chubm54/FinAccountingApp/blob/main/LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
+[![README RU](https://img.shields.io/badge/README-Русский-blue)](README.md)
+
 Graphical application for personal financial accounting with multicurrency support, import/export, tags, budgets, debts, assets, and goals.
 
 The current `v2.0.1` release continues the stable `v2.0.0` line as a personal-security hardening patch: the normalized `amount_base` / `limit_base` architecture, `base_currency` runtime model, per-tab GUI packages, and Windows installer remain intact, while local secret handling, import/backup trust boundaries, and the packaged Windows security posture are tightened on top of that baseline.

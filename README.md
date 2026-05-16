@@ -1,5 +1,11 @@
 # FinAccountingApp
 
+[![Release](https://img.shields.io/github/v/release/36chubm54/FinAccountingApp?display_name=tag)](https://github.com/36chubm54/FinAccountingApp/releases)
+[![Windows Build](https://img.shields.io/github/actions/workflow/status/36chubm54/FinAccountingApp/windows-build.yml?branch=main&label=windows%20build)](https://github.com/36chubm54/FinAccountingApp/actions/workflows/windows-build.yml)
+[![License](https://img.shields.io/github/license/36chubm54/FinAccountingApp)](https://github.com/36chubm54/FinAccountingApp/blob/main/LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
+[![README EN](https://img.shields.io/badge/README-English-blue)](README_EN.md)
+
 Графическое приложение для персонального финансового учёта с мультивалютностью, импортом/экспортом, тегами, бюджетами, долгами, активами и целями.
 
 Текущий релиз `v2.0.1` продолжает stable-линию `v2.0.0` как personal-security hardening patch: базовая архитектура с `amount_base` / `limit_base`, `base_currency`, per-tab GUI packages и Windows installer сохраняется, а поверх неё усилены локальное хранение секретов, import/backup trust boundaries и release-security posture для packaged Windows builds.
@@ -320,7 +326,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 
 Полезные config points:
 
-- `currency_config.json` — `provider_mode`, `fallback_provider`, `commercial_fallback_provider`, `display_currency_whitelist`, `auto_update`, `update_interval_minutes` без plaintext `exchange_rate_api_key`
+- `currency_config.json` — `provider_mode`, `fallback_provider`, `commercial_fallback_provider`, `display_currency_whitelist`, `auto_update`, `update_interval_minutes`
 - env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` — runtime override для `exchange_rate_api_key`
 
 ## 🔐 Security Notes
