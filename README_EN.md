@@ -1,5 +1,11 @@
 # FinAccountingApp
 
+[![Release](https://img.shields.io/github/v/release/36chubm54/FinAccountingApp?display_name=tag)](https://github.com/36chubm54/FinAccountingApp/releases)
+[![Windows Build](https://img.shields.io/github/actions/workflow/status/36chubm54/FinAccountingApp/windows-build.yml?branch=main&label=windows%20build)](https://github.com/36chubm54/FinAccountingApp/actions/workflows/windows-build.yml)
+[![License](https://img.shields.io/github/license/36chubm54/FinAccountingApp)](https://github.com/36chubm54/FinAccountingApp/blob/main/LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
+[![README RU](https://img.shields.io/badge/README-Русский-blue)](README.md)
+
 Graphical application for personal financial accounting with multicurrency support, import/export, tags, budgets, debts, assets, and goals.
 
 The current `v2.0.0` release completes the `2.0.0-beta` line after the currency/storage migration, runtime contract cleanup, GUI architecture cleanup, and Windows packaging-prep wave: normalized values are stored as `amount_base` / `limit_base` in `base_currency`, `display_currency` remains presentation-only, first-run currency setup and the runtime currency/provider contract in `Settings` are stabilized, the GUI is organized into per-tab packages with thin compatibility shims, mandatory payments live in a dedicated `Mandatory` tab, heavy `Reports` generation/export no longer blocks the UI thread, `Infographics` no longer reload the full record set on every filter change, and the packaged Windows build now keeps mutable runtime state in `AppData` instead of the install tree.

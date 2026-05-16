@@ -1,5 +1,11 @@
 # FinAccountingApp
 
+[![Release](https://img.shields.io/github/v/release/36chubm54/FinAccountingApp?display_name=tag)](https://github.com/36chubm54/FinAccountingApp/releases)
+[![Windows Build](https://img.shields.io/github/actions/workflow/status/36chubm54/FinAccountingApp/windows-build.yml?branch=main&label=windows%20build)](https://github.com/36chubm54/FinAccountingApp/actions/workflows/windows-build.yml)
+[![License](https://img.shields.io/github/license/36chubm54/FinAccountingApp)](https://github.com/36chubm54/FinAccountingApp/blob/main/LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
+[![README EN](https://img.shields.io/badge/README-English-blue)](README_EN.md)
+
 Графическое приложение для персонального финансового учёта с мультивалютностью, импортом/экспортом, тегами, бюджетами, долгами, активами и целями.
 
 Текущий релиз `v2.0.0` завершает линию `2.0.0-beta` после currency/storage migration, runtime contract cleanup, GUI architecture cleanup и Windows packaging-prep wave: значения в БД хранятся как `amount_base` / `limit_base` в `base_currency`, `display_currency` остаётся UI-only, first-run currency setup и runtime currency/provider contract в `Settings` стабилизированы, GUI разложен на per-tab packages с thin compatibility shims, обязательные платежи живут в отдельной вкладке `Mandatory`, тяжёлые `Reports` generation/export больше не блокируют UI, `Infographics` больше не перезагружают весь набор записей на каждый filter-change, а packaged Windows build теперь держит mutable runtime state в `AppData` вместо install-tree.
@@ -310,7 +316,6 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 
 Полезные config points:
 
-- `currency_config.json` — `provider_mode`, `fallback_provider`, `commercial_fallback_provider`, `display_currency_whitelist`, `auto_update`, `update_interval_minutes`
 - env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` — runtime override для `exchange_rate_api_key`
 
 ## 📄 Лицензия
