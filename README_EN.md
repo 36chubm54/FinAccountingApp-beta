@@ -2,7 +2,14 @@
 
 Graphical application for personal financial accounting with multicurrency support, import/export, tags, budgets, debts, assets, and goals.
 
-The current `v2.0.0` release completes the `2.0.0-beta` line after the currency/storage migration, runtime contract cleanup, GUI architecture cleanup, and Windows packaging-prep wave: normalized values are stored as `amount_base` / `limit_base` in `base_currency`, `display_currency` remains presentation-only, first-run currency setup and the runtime currency/provider contract in `Settings` are stabilized, the GUI is organized into per-tab packages with thin compatibility shims, mandatory payments live in a dedicated `Mandatory` tab, heavy `Reports` generation/export no longer blocks the UI thread, `Infographics` no longer reload the full record set on every filter change, and the packaged Windows build now keeps mutable runtime state in `AppData` instead of the install tree.
+The current `v2.0.1` release continues the stable `v2.0.0` line as a personal-security hardening patch: the normalized `amount_base` / `limit_base` architecture, `base_currency` runtime model, per-tab GUI packages, and Windows installer remain intact, while local secret handling, import/backup trust boundaries, and the packaged Windows security posture are tightened on top of that baseline.
+
+In the current runtime contract:
+
+- `exchange_rate_api_key` should no longer live in plaintext `currency_config.json` and is persisted through OS-backed secure storage by default
+- mutable runtime state still lives in user-scoped `AppData`, not beside the installed application
+- backup/export files remain plaintext financial data, and that is now reflected explicitly in the UX and docs
+- the Windows release workflow is prepared for optional code signing, but without a certificate the installer and bundle remain unsigned
 
 ## 🚀 Quick Start
 

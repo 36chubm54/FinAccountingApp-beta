@@ -7,7 +7,7 @@ This project adheres to Semantic Versioning.
 
 ---
 
-## [2.0.1] - 2026-05-16
+## [2.0.1] - 2026-05-17
 
 ### Security
 

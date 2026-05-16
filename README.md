@@ -2,7 +2,14 @@
 
 Графическое приложение для персонального финансового учёта с мультивалютностью, импортом/экспортом, тегами, бюджетами, долгами, активами и целями.
 
-Текущий релиз `v2.0.0` завершает линию `2.0.0-beta` после currency/storage migration, runtime contract cleanup, GUI architecture cleanup и Windows packaging-prep wave: значения в БД хранятся как `amount_base` / `limit_base` в `base_currency`, `display_currency` остаётся UI-only, first-run currency setup и runtime currency/provider contract в `Settings` стабилизированы, GUI разложен на per-tab packages с thin compatibility shims, обязательные платежи живут в отдельной вкладке `Mandatory`, тяжёлые `Reports` generation/export больше не блокируют UI, `Infographics` больше не перезагружают весь набор записей на каждый filter-change, а packaged Windows build теперь держит mutable runtime state в `AppData` вместо install-tree.
+Текущий релиз `v2.0.1` продолжает stable-линию `v2.0.0` как personal-security hardening patch: базовая архитектура с `amount_base` / `limit_base`, `base_currency`, per-tab GUI packages и Windows installer сохраняется, а поверх неё усилены локальное хранение секретов, import/backup trust boundaries и release-security posture для packaged Windows builds.
+
+В актуальном runtime-контракте:
+
+- `exchange_rate_api_key` больше не должен жить в plaintext `currency_config.json` и по умолчанию уходит в OS-backed secure storage
+- mutable runtime state по-прежнему живёт в user-scoped `AppData`, а не рядом с установленным приложением
+- backup/export файлы остаются plaintext financial data, и это теперь явно отражено в UX и документации
+- Windows release workflow подготовлен к optional code signing, но без сертификата installer и bundle остаются unsigned
 
 ## 🚀 Быстрый старт
 
