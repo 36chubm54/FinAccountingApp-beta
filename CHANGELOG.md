@@ -26,6 +26,8 @@ This project adheres to Semantic Versioning.
 - Fixed updater source-mode storage so installer downloads no longer land in the repository checkout
 - Fixed the modal updater dialog so download status text advances through real stages instead of staying forever on the initial preparing message
 - Added an explicit installer-file existence guard before process launch handoff
+- Improved Windows shell registration metadata so the installed app and installer expose cleaner product/version identity to Start Menu and Windows Search
+- Removed manual Windows version-resource syncing by generating bundled EXE metadata from `version.py` and letting the installer read its version from the built executable
 
 ### Testing
 
