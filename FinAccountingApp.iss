@@ -19,7 +19,6 @@ AppVerName={#MyAppName} {#MyAppVersion}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppComments=Uninstall removes installed files and shortcuts only; user data remains in AppData.
-AppUserModelID=36chubm54.FinAccountingApp
 DefaultDirName={autopf}\{#MyAppInternalName}
 UsePreviousAppDir=no
 UsePreviousLanguage=no
