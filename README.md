@@ -2,19 +2,20 @@
 
 [![Release](https://img.shields.io/github/v/release/36chubm54/FinAccountingApp?display_name=tag)](https://github.com/36chubm54/FinAccountingApp/releases)
 [![Windows Build](https://img.shields.io/github/actions/workflow/status/36chubm54/FinAccountingApp/windows-build.yml?branch=main&label=windows%20build)](https://github.com/36chubm54/FinAccountingApp/actions/workflows/windows-build.yml)
+[![Linux Build](https://img.shields.io/github/actions/workflow/status/36chubm54/FinAccountingApp/linux-build.yml?branch=main&label=linux%20build)](https://github.com/36chubm54/FinAccountingApp/actions/workflows/linux-build.yml)
 [![License](https://img.shields.io/github/license/36chubm54/FinAccountingApp)](https://github.com/36chubm54/FinAccountingApp/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![README EN](https://img.shields.io/badge/README-English-blue)](README_EN.md)
 
 Графическое приложение для персонального финансового учёта с мультивалютностью, импортом/экспортом, тегами, бюджетами, долгами, активами и целями.
 
-Текущий релиз `v2.1.0` развивает стабильную Windows desktop-линию вокруг встроенного updater flow. Поверх уже закреплённой архитектуры с `amount_base` / `limit_base`, `base_currency`, per-tab GUI packages и Windows installer приложение теперь умеет проверять GitHub Releases из `Settings`, скачивать новый installer в user-scoped cache и передавать обновление штатному установщику без ручного поиска release asset'ов.
+Текущий релиз `v2.2.0` расширяет desktop-линию до первого Linux-пакета на базе `PyInstaller --onedir` и `AppImage`, не ломая уже существующий Windows installer / updater flow. Поверх архитектуры с `amount_base` / `limit_base`, `base_currency`, per-tab GUI packages и platform-aware runtime paths приложение теперь собирает отдельный Linux bundle, публикует `FinAccountingApp-linux.AppImage` и держит mutable user data вне install tree как на Windows, так и на Linux.
 
 В актуальном runtime-контракте:
 
 - `exchange_rate_api_key` больше не должен жить в plaintext `currency_config.json` и по умолчанию уходит в OS-backed secure storage
 - env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` остаётся runtime override поверх secure storage
-- mutable runtime state по-прежнему живёт в user-scoped `AppData`, а не рядом с установленным приложением
+- packaged mutable runtime state хранится в user-scoped platform data directory: `AppData` на Windows и `XDG_DATA_HOME` / `~/.local/share/FinAccountingApp` на Linux
 - Windows updater скачивает installer в отдельный `updates` cache внутри `AppData` и не пишет payload в install tree
 - backup/export файлы остаются plaintext financial data, и это теперь явно отражено в UX и документации
 - Windows release workflow подготовлен к optional code signing, но без сертификата installer и bundle остаются unsigned
@@ -70,6 +71,14 @@ python main.py
 - Migration utilities `migrate_json_to_sqlite.py` и `migration_002_rename_amount_kzt_to_base.py` входят в bundle как raw Python scripts, а не как отдельные `.exe`
 - GitHub Actions release workflow может опционально подписывать `FinAccountingApp.exe` и installer, если в repository secrets настроен code-signing certificate; без сертификата build остаётся unsigned
 
+### Linux build (`PyInstaller --onedir` + `AppImage`)
+
+- Первый Linux-артефакт собирается через `FinAccountingApp.linux.spec`, а затем упаковывается в `FinAccountingApp-linux.AppImage`
+- Текущий Linux-пакет совместим только с `X11`; `Wayland`-native поддержка в этой волне не заявляется
+- Linux packaged runtime по-прежнему разделяет bundle resources и mutable user data: база, конфиг валют, backups, exports и updates больше не должны попадать рядом с AppImage
+- User data для packaged Linux builds размещаются в `XDG_DATA_HOME/FinAccountingApp` или `~/.local/share/FinAccountingApp`
+- Только packaged Linux builds используют manual-update policy в этой волне: встроенный updater не выполняет скачивание/установку и вместо этого ведёт на ручное скачивание нового AppImage из GitHub Releases
+
 ## ✨ Основные возможности
 
 - Учёт доходов, расходов, обязательных платежей и переводов между кошельками
@@ -105,8 +114,8 @@ python main.py
 - `base_currency` выбирается только при первом запуске через setup wizard, затем источником истины остаётся SQLite `schema_meta`
 - По умолчанию селектор отображения ограничен whitelist-ом `KZT` / `USD` / `EUR` / `RUB`, даже если кэш курсов содержит больше кодов
 - `Settings -> Валюта и курсы` позволяет менять `display_currency`, provider mode, primary/fallback provider, `exchange_rate_api_key`, `auto_update` и `update_interval_minutes`, но не post-startup `base_currency`
-- `Settings -> Обновление приложения` в Windows умеет проверять последний GitHub Release, скачивать `setup.exe` в `AppData\updates` и предлагать install handoff через штатный installer
-- `exchange_rate_api_key` больше не должен жить в `currency_config.json`: в Windows packaged/runtime flow он переносится в secure OS storage, env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` остаётся override-путём, а аварийный plaintext fallback допустим только когда secure storage недоступен
+- `Settings -> Обновление приложения` в Windows умеет проверять последний GitHub Release, скачивать `setup.exe` в `AppData\updates` и предлагать install handoff через штатный installer; на packaged Linux builds эта секция пока ведёт только на ручное скачивание нового AppImage
+- `exchange_rate_api_key` больше не должен жить в `currency_config.json`: в packaged/runtime flow он переносится в secure OS storage там, где платформа это поддерживает, env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` остаётся override-путём, а аварийный plaintext fallback допустим только когда secure storage недоступен
 - `auto_update` больше не является декоративным флагом: при включённом online mode курсы обновляются автоматически по `update_interval_minutes`
 - Экспортируемые отчёты локализуются по текущему языку UI, а колонки базовых сумм явно показывают код базы, например `Сумма (KZT)`
 - Локализованные report `CSV` / `XLSX` exports остаются import-safe для generic import pipeline приложения
@@ -174,7 +183,7 @@ python main.py
 - `gui.tab_lifecycle` — lazy tab build и lifecycle dispatch вне основного shell-класса
 - `gui.shell.*` — shell-specific lifecycle/refresh/preferences/status helpers, вынесенные из `gui.tkinter_gui`
 - `gui.tabs.*` — реальные tab packages, где `*_tab.py` оставлены как тонкие compatibility shims
-- `gui.tabs.settings.update_section` — Windows-only updater card, modal download progress dialog и installer handoff prompts
+- `gui.tabs.settings.update_section` — updater/update-section UI с Windows installer download flow и Linux manual-release fallback
 - `CurrencyService.get_available_display_currencies()` — whitelist-aware набор кодов для status-bar switcher вместо полного набора из кэша
 - `FinanceService.get_import_capabilities()` — единая capability-модель для import pipeline вместо ad-hoc проверок по атрибутам
 - `services.import_payload_support`, `services.import_replace_support`, `services.import_execution_support`, `services.import_mandatory_support` — разрезанный import stack вместо одного разросшегося service body
@@ -336,14 +345,14 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 
 ## 🔐 Security Notes
 
-- Runtime data (`finance.db`, `currency_config.json`, `currency_rates.json`, backups, exports) хранится в user-scoped `AppData`, а не рядом с `.exe`
-- Downloads встроенного updater'а тоже живут в отдельном `AppData\updates` cache, а не рядом с исходниками или установленным bundle
+- Runtime data (`finance.db`, `currency_config.json`, `currency_rates.json`, backups, exports) хранятся в user-scoped platform data directory: `AppData` на Windows и `XDG_DATA_HOME` / `~/.local/share/FinAccountingApp` на Linux
+- Downloads встроенного updater'а на Windows живут в отдельном `AppData\updates` cache, а не рядом с исходниками или установленным bundle; на Linux встроенная установка обновлений пока не используется
 - `exchange_rate_api_key` должен храниться в secure OS-backed storage; `currency_config.json` больше не рассматривается как место для plaintext secrets
 - SQLite база, JSON backups и exported reports по-прежнему не шифруются at rest: это читаемые файлы с финансовыми данными
-- Uninstall удаляет установленные файлы и ярлыки, но не удаляет пользовательские данные в `AppData`
-- Для personal Windows use рекомендуется:
-  - `BitLocker`
-  - пароль на Windows-учётной записи
+- Uninstall/remove bundle не удаляет пользовательские данные из platform data directory
+- Для персонального использования рекомендуется:
+  - full-disk encryption (`BitLocker`, `LUKS`, `FileVault` или аналог)
+  - пароль на системной учётной записи
   - использование приложения только на доверенной машине
   - импорт только из доверенных backup/export файлов
 
