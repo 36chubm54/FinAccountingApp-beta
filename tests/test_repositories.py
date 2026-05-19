@@ -145,10 +145,13 @@ class TestJsonFileRecordRepository:
         self.repo.save(IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"))
         original_payload = json.loads(Path(self.temp_file.name).read_text(encoding="utf-8"))
 
+        class _LockedPermissionError(PermissionError):
+            def __init__(self) -> None:
+                super().__init__("file is locked")
+                self.winerror = 32
+
         def _locked_replace(_src, _dst):
-            error = PermissionError("file is locked")
-            error.winerror = 32
-            raise error
+            raise _LockedPermissionError()
 
         with (
             patch.object(repositories_module.os, "replace", side_effect=_locked_replace),
