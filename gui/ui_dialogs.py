@@ -61,7 +61,12 @@ def _play_system_sound(kind: str) -> None:
             return
         except ImportError:
             pass  # falls back to tkinter.bell
-    tk.Tk().bell()
+    default_root = tk._get_default_root()  # type: ignore[attr-defined]
+    if default_root is not None:
+        try:
+            default_root.bell()
+        except tk.TclError:
+            pass
 
 
 def _get_icon_for_kind(kind: str) -> tuple[str, str]:
