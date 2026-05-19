@@ -7,6 +7,24 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [2.2.0] - 2026-05-19
+
+### Added
+
+- Added a first Linux packaging path based on `PyInstaller --onedir` plus AppImage wrapping
+- Added a dedicated Linux GitHub Actions workflow that smoke-builds AppImage packages on PRs and publishes `FinAccountingApp-linux.AppImage` on tags
+
+### Changed
+
+- Packaged runtime data is now platform-aware: Windows builds keep user-scoped `AppData`, while packaged Linux builds use `XDG_DATA_HOME` or `~/.local/share/FinAccountingApp`
+- Linux packaged builds keep the in-app updater disabled for install/download actions and now point users to manual AppImage updates from GitHub Releases instead
+- Clarified that this manual-update policy applies to packaged Linux builds specifically, not to every non-Windows runtime
+- Documented that the current Linux AppImage target is compatible with `X11` only; native `Wayland` support is not claimed yet
+
+### Docs
+
+- Synced `README.md`, `README_EN.md`, and `docs/architecture.md` with the `v2.2.0` Linux/AppImage packaging flow, platform-aware runtime paths, Linux manual-update policy, and `X11`-only package note
+
 ## [2.1.0] - 2026-05-18
 
 ### Added

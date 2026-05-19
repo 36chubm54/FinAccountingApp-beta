@@ -2,19 +2,20 @@
 
 [![Release](https://img.shields.io/github/v/release/36chubm54/FinAccountingApp?display_name=tag)](https://github.com/36chubm54/FinAccountingApp/releases)
 [![Windows Build](https://img.shields.io/github/actions/workflow/status/36chubm54/FinAccountingApp/windows-build.yml?branch=main&label=windows%20build)](https://github.com/36chubm54/FinAccountingApp/actions/workflows/windows-build.yml)
+[![Linux Build](https://img.shields.io/github/actions/workflow/status/36chubm54/FinAccountingApp/linux-build.yml?branch=main&label=linux%20build)](https://github.com/36chubm54/FinAccountingApp/actions/workflows/linux-build.yml)
 [![License](https://img.shields.io/github/license/36chubm54/FinAccountingApp)](https://github.com/36chubm54/FinAccountingApp/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![README RU](https://img.shields.io/badge/README-Русский-blue)](README.md)
 
 Graphical application for personal financial accounting with multicurrency support, import/export, tags, budgets, debts, assets, and goals.
 
-The current `v2.1.0` release extends the stable Windows desktop line around an in-app updater flow. On top of the existing `amount_base` / `limit_base` architecture, `base_currency` runtime model, per-tab GUI packages, and Windows installer, the app can now check GitHub Releases from `Settings`, download the next installer into a user-scoped cache, and hand off the update to the normal installer flow without manually hunting for release assets.
+The current `v2.2.0` release expands the desktop line with a first Linux package built around `PyInstaller --onedir` and `AppImage` without regressing the existing Windows installer / updater flow. On top of the existing `amount_base` / `limit_base` architecture, `base_currency` runtime model, per-tab GUI packages, and platform-aware runtime paths, the app now produces a dedicated Linux bundle, publishes `FinAccountingApp-linux.AppImage`, and keeps mutable user data outside the install tree on both Windows and Linux.
 
 In the current runtime contract:
 
 - `exchange_rate_api_key` should no longer live in plaintext `currency_config.json` and is persisted through OS-backed secure storage by default
 - env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` remains a runtime override over secure storage
-- mutable runtime state still lives in user-scoped `AppData`, not beside the installed application
+- packaged mutable runtime state lives in a user-scoped platform data directory: `AppData` on Windows and `XDG_DATA_HOME` / `~/.local/share/FinAccountingApp` on Linux
 - the Windows updater downloads installers into a dedicated `updates` cache under `AppData` instead of writing into the install tree
 - backup/export files remain plaintext financial data, and that is now reflected explicitly in the UX and docs
 - the Windows release workflow is prepared for optional code signing, but without a certificate the installer and bundle remain unsigned
@@ -70,6 +71,14 @@ The app starts a Tkinter GUI on top of SQLite runtime storage. `Infographics` an
 - Migration utilities `migrate_json_to_sqlite.py` and `migration_002_rename_amount_kzt_to_base.py` are included in the bundle as raw Python scripts, not as separate `.exe` tools
 - The GitHub Actions release workflow can optionally sign `FinAccountingApp.exe` and the installer when a code-signing certificate is configured in repository secrets; without a certificate, the build remains unsigned
 
+### Linux build (`PyInstaller --onedir` + `AppImage`)
+
+- The first Linux artifact is built through `FinAccountingApp.linux.spec` and then wrapped as `FinAccountingApp-linux.AppImage`
+- The current Linux package is compatible with `X11` only; native `Wayland` support is not claimed in this release wave
+- Packaged Linux runtime keeps the same read-only resources vs mutable user-data split as Windows builds: the database, currency config, backups, exports, and updates are no longer expected to live beside the AppImage
+- User data for packaged Linux builds resolve to `XDG_DATA_HOME/FinAccountingApp` or `~/.local/share/FinAccountingApp`
+- Only packaged Linux builds use the manual-update policy in this release wave: in-app updater actions stay disabled and the supported path is manually downloading a newer AppImage from GitHub Releases
+
 ## ✨ Core Features
 
 - Track income, expenses, mandatory payments, and wallet-to-wallet transfers
@@ -105,8 +114,8 @@ The app starts a Tkinter GUI on top of SQLite runtime storage. `Infographics` an
 - `base_currency` is chosen only during first-run setup, then SQLite `schema_meta` remains the source of truth
 - By default, the display selector is limited to the whitelist `KZT` / `USD` / `EUR` / `RUB`, even if cached rates contain more currency codes
 - `Settings -> Currency and rates` can update `display_currency`, provider mode, primary/fallback provider, `exchange_rate_api_key`, `auto_update`, and `update_interval_minutes`, but not post-startup `base_currency`
-- `Settings -> Application updates` on Windows can check the latest GitHub Release, download `setup.exe` into `AppData\\updates`, and offer install handoff through the normal installer
-- `exchange_rate_api_key` is no longer expected to live in `currency_config.json`: in the Windows packaged/runtime flow it is migrated into secure OS storage, env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` remains an override path, and a plaintext fallback is only tolerated when secure storage is unavailable
+- `Settings -> Application updates` on Windows can check the latest GitHub Release, download `setup.exe` into `AppData\\updates`, and offer install handoff through the normal installer; on packaged Linux builds the same section currently routes users to manual AppImage updates
+- `exchange_rate_api_key` is no longer expected to live in `currency_config.json`: in packaged/runtime flows it is migrated into secure OS storage where the platform supports it, env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` remains an override path, and a plaintext fallback is only tolerated when secure storage is unavailable
 - `auto_update` is now active behavior instead of passive metadata: when online mode is enabled, rates refresh automatically according to `update_interval_minutes`
 - Exported reports are localized to the current UI language, and base-amount columns explicitly show the real base code, for example `Amount (KZT)`
 - Localized report `CSV` / `XLSX` exports remain import-safe for the app's generic import pipeline
@@ -174,7 +183,7 @@ Practical highlights in the current working tree:
 - `gui.tab_lifecycle` — lazy tab build and lifecycle dispatch outside the main shell class
 - `gui.shell.*` — shell-specific lifecycle/refresh/preferences/status helpers extracted from `gui.tkinter_gui`
 - `gui.tabs.*` — real tab packages, with `*_tab.py` kept as thin compatibility shims
-- `gui.tabs.settings.update_section` — Windows-only updater card, modal download progress dialog, and installer handoff prompts
+- `gui.tabs.settings.update_section` — updater-section UI with a Windows installer download flow and a Linux manual-release fallback
 - `CurrencyService.get_available_display_currencies()` — whitelist-aware display switcher values instead of the full cached-rate set
 - `FinanceService.get_import_capabilities()` — a single capability model for the import pipeline instead of ad-hoc attribute probing
 - `services.import_payload_support`, `services.import_replace_support`, `services.import_execution_support`, `services.import_mandatory_support` — a split import stack instead of one oversized service body
@@ -336,14 +345,14 @@ Useful configuration points:
 
 ## 🔐 Security Notes
 
-- Runtime data (`finance.db`, `currency_config.json`, `currency_rates.json`, backups, exports) lives in user-scoped `AppData`, not beside the executable
-- In-app updater downloads also live in a dedicated `AppData\\updates` cache instead of the source checkout or installed bundle
+- Runtime data (`finance.db`, `currency_config.json`, `currency_rates.json`, backups, exports) lives in a user-scoped platform data directory: `AppData` on Windows and `XDG_DATA_HOME` / `~/.local/share/FinAccountingApp` on Linux
+- In-app updater downloads on Windows also live in a dedicated `AppData\\updates` cache instead of the source checkout or installed bundle; Linux currently does not perform in-app AppImage installs
 - `exchange_rate_api_key` is expected to live in secure OS-backed storage; `currency_config.json` is no longer treated as a plaintext secret store
 - The SQLite database, JSON backups, and exported reports are still not encrypted at rest: they remain readable financial-data files
-- Uninstall removes installed files and shortcuts, but does not remove user data from `AppData`
-- For personal Windows use, the recommended host protections are:
-  - `BitLocker`
-  - a password-protected Windows account
+- Uninstalling or removing the bundle does not remove user data from the platform data directory
+- For personal use, the recommended host protections are:
+  - full-disk encryption (`BitLocker`, `LUKS`, `FileVault`, or equivalent)
+  - a password-protected system account
   - trusted-machine-only usage
   - importing only trusted backup/export files
 

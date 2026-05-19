@@ -51,17 +51,30 @@ def _play_system_sound(kind: str) -> None:
         try:
             import winsound
 
+            icon_hand = int(getattr(winsound, "MB_ICONHAND", 0x10))
+            icon_exclamation = int(getattr(winsound, "MB_ICONEXCLAMATION", 0x30))
+            icon_asterisk = int(getattr(winsound, "MB_ICONASTERISK", 0x40))
+            ok_flag = int(getattr(winsound, "MB_OK", 0x0))
+            message_beep = getattr(winsound, "MessageBeep", None)
+            if not callable(message_beep):
+                raise AttributeError("winsound.MessageBeep is unavailable")
+
             sound_map = {
-                "error": winsound.MB_ICONHAND,
-                "warning": winsound.MB_ICONEXCLAMATION,
-                "info": winsound.MB_ICONASTERISK,
+                "error": icon_hand,
+                "warning": icon_exclamation,
+                "info": icon_asterisk,
             }
-            sound_constant = sound_map.get(kind, winsound.MB_OK)
-            winsound.MessageBeep(sound_constant)
+            sound_constant = sound_map.get(kind, ok_flag)
+            message_beep(sound_constant)
             return
-        except ImportError:
+        except (AttributeError, ImportError):
             pass  # falls back to tkinter.bell
-    tk.Tk().bell()
+    default_root = tk._get_default_root()  # type: ignore[attr-defined]
+    if default_root is not None:
+        try:
+            default_root.bell()
+        except tk.TclError:
+            pass
 
 
 def _get_icon_for_kind(kind: str) -> tuple[str, str]:

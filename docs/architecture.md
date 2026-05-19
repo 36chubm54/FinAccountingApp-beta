@@ -73,18 +73,22 @@ Current rules:
 - packaged resources such as `gui/assets/icons`, `locales`, and `db/schema.sql` resolve from the bundle resource root
 - mutable runtime files such as `finance.db`, currency config/cache, and backup output resolve from a user-scoped data directory
 - in Windows packaged mode, that mutable runtime state is expected to live under `AppData`, not inside the install tree
+- in Linux packaged mode, mutable runtime state is expected to live under `XDG_DATA_HOME` or `~/.local/share/FinAccountingApp`, not inside the AppImage mount or extracted bundle
 - dev checkouts still resolve runtime files from the source tree unless an explicit override is provided
 - updater downloads are treated separately from the general source-tree dev contract and resolve to a dedicated Windows `AppData\updates` cache even in source mode
 
 Packaging note:
 
 - the checked-in `FinAccountingApp.spec` builds the main `PyInstaller --onedir` app bundle
+- `FinAccountingApp.linux.spec` builds the Linux `PyInstaller --onedir` bundle that is then wrapped into `FinAccountingApp-linux.AppImage`
+- the current Linux package target is `X11`; native `Wayland` compatibility is not part of this packaging contract yet
 - `migrate_json_to_sqlite.py` and `migrations/migration_002_rename_amount_kzt_to_base.py` are shipped inside that bundle as raw Python utility scripts rather than separate executable tools
 - the Windows release workflow can optionally sign `FinAccountingApp.exe` and the installer if certificate secrets are configured; otherwise the release remains unsigned
+- the Linux release workflow smoke-builds the AppImage path on PRs and publishes `FinAccountingApp-linux.AppImage` on tagged releases
 
 ### 3.0.1 Application update flow
 
-The desktop app now has a Windows-only updater surface in `Settings`.
+The desktop app now has a Windows-first updater surface in `Settings`.
 
 Current flow:
 
@@ -99,6 +103,7 @@ Design rules:
 - the running app only checks and downloads; it does not patch binaries in place
 - the installer remains the only component that performs the actual application update
 - source-mode updater runs are supported for testing, but they still target the packaged Windows install flow rather than the source checkout itself
+- packaged Linux builds currently expose the Linux manual-update path only: the UI may open the GitHub Releases page, but it does not download or install AppImage updates in-app yet
 
 ### 3.1 Startup
 
@@ -216,10 +221,10 @@ Important details:
 
 Current practical security model:
 
-- runtime data lives in user-scoped `AppData`, separate from the installed binaries
+- runtime data lives in a user-scoped platform data directory, separate from the installed binaries
 - SQLite data, JSON backups, and exported reports remain plaintext files at rest
-- uninstall removes installed files and shortcuts, but not user data in `AppData`
-- recommended host protections are OS-level (`BitLocker`, Windows account password, trusted-machine-only use), not custom application crypto
+- uninstall removes installed files or bundles, but not user data in the platform data directory
+- recommended host protections are OS-level (full-disk encryption, account password, trusted-machine-only use), not custom application crypto
 
 ### Repository compatibility notes
 
