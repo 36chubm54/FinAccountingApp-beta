@@ -1,16 +1,22 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
+import importlib.util
 import re
 import runpy
 
-from packaging.pyinstaller.common_spec import (
-    build_common_datas,
-    build_common_hiddenimports,
-)
-
 
 ROOT = Path(SPECPATH).resolve()
+COMMON_SPEC_FILE = ROOT / "packaging" / "pyinstaller" / "common_spec.py"
+COMMON_SPEC_SPEC = importlib.util.spec_from_file_location(
+    "finaccounting_common_spec", str(COMMON_SPEC_FILE)
+)
+if COMMON_SPEC_SPEC is None or COMMON_SPEC_SPEC.loader is None:
+    raise ImportError(f"Unable to load PyInstaller helper module: {COMMON_SPEC_FILE}")
+COMMON_SPEC_MODULE = importlib.util.module_from_spec(COMMON_SPEC_SPEC)
+COMMON_SPEC_SPEC.loader.exec_module(COMMON_SPEC_MODULE)
+build_common_datas = COMMON_SPEC_MODULE.build_common_datas
+build_common_hiddenimports = COMMON_SPEC_MODULE.build_common_hiddenimports
 ICON_FILE = ROOT / "gui" / "assets" / "icons" / "app.ico"
 DATAS = build_common_datas(ROOT)
 HIDDEN_IMPORTS = build_common_hiddenimports()
