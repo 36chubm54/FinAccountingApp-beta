@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
 import queue
+import sys
 import tkinter as tk
 import webbrowser
 from tkinter import ttk
@@ -50,6 +50,7 @@ def build_update_section(
     packaged_mode = bool(security_diagnostics.get("packaged_mode", False))
     current_version = str(context.controller.get_app_version() or "").strip() or "unknown"
     release_page_url = str(context.controller.get_app_release_page_url() or "").strip()
+    is_packaged_linux = packaged_mode and sys.platform.startswith("linux")
     latest_release_holder: dict[str, AppUpdateReleaseInfo | None] = {"value": None}
     update_flow_state = {"active": False}
     status_var = tk.StringVar(
@@ -70,7 +71,7 @@ def build_update_section(
                 "Для Linux packaged builds встроенная установка обновлений пока недоступна. "
                 "Скачайте новый AppImage со страницы релизов GitHub.",
             )
-            if packaged_mode and os.name != "nt"
+            if is_packaged_linux
             else tr(
                 "settings.updates.unsupported",
                 "Обновление из приложения доступно только на Windows.",

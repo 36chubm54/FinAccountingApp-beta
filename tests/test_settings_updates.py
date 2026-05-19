@@ -321,7 +321,7 @@ def test_settings_tab_enables_release_page_for_packaged_linux_manual_updates() -
         parent = tk.Frame(root)
         parent.pack()
 
-        with patch("gui.tabs.settings.update_section.os.name", "posix"):
+        with patch("gui.tabs.settings.update_section.sys.platform", "linux"):
             build_settings_tab(
                 parent,
                 context,
@@ -335,6 +335,34 @@ def test_settings_tab_enables_release_page_for_packaged_linux_manual_updates() -
         state = getattr(release_buttons[0], "state", None)
         assert callable(state)
         assert "disabled" not in str(state())
+    finally:
+        root.destroy()
+
+
+def test_settings_tab_keeps_release_page_disabled_for_packaged_non_linux_updates() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        controller = _Controller(supported=False, packaged_mode=True)
+        launches: list[str] = []
+        context = _build_context(controller, launches)
+        parent = tk.Frame(root)
+        parent.pack()
+
+        with patch("gui.tabs.settings.update_section.sys.platform", "darwin"):
+            build_settings_tab(
+                parent,
+                context,
+                messagebox_module=SimpleNamespace(),
+                wallet_manager_dialog=lambda *args, **kwargs: None,
+            )
+        root.update_idletasks()
+
+        release_buttons = _find_buttons(parent, "Страница релиза")
+        assert release_buttons
+        state = getattr(release_buttons[0], "state", None)
+        assert callable(state)
+        assert "disabled" in str(state())
     finally:
         root.destroy()
 
