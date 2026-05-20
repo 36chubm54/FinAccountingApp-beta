@@ -62,3 +62,5 @@ def test_write_rendered_nfpm_config_replaces_placeholders(tmp_path: Path) -> Non
     assert "${PACKAGE_VERSION}" not in content
     assert rootfs.as_posix() in content
     assert f"version: {module.read_version()}" in content
+    assert "postinstall: packaging/linux/postinstall.sh" in content
+    assert "postremove: packaging/linux/postremove.sh" in content
