@@ -560,6 +560,64 @@ def test_settings_tab_currency_section_saves_runtime_config(tmp_path: Path) -> N
         repo.close()
 
 
+def test_settings_tab_attaches_linux_popup_support_to_currency_combos(tmp_path: Path) -> None:
+    db_path = tmp_path / "settings_currency_wayland.db"
+    config_path = tmp_path / "currency_config.json"
+    repo = SQLiteRecordRepository(str(db_path), schema_path=_schema_path())
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        with patch.object(CurrencyService, "CONFIG_FILE", config_path):
+            controller = FinancialController(repo, CurrencyService(use_online=False))
+            parent = tk.Frame(root)
+            parent.pack()
+            context = cast(
+                SettingsTabContext,
+                type(
+                    "Ctx",
+                    (),
+                    {
+                        "controller": controller,
+                        "repository": repo,
+                        "refresh_operation_wallet_menu": None,
+                        "refresh_transfer_wallet_menus": None,
+                        "refresh_wallets": None,
+                        "_refresh_list": lambda self: None,
+                        "_refresh_charts": lambda self: None,
+                        "_refresh_budgets": lambda self: None,
+                        "_refresh_all": lambda self: None,
+                        "_run_background": lambda self, task, **kwargs: kwargs.get(
+                            "on_success", lambda *_: None
+                        )(task()),
+                    },
+                )(),
+            )
+
+            with patch(
+                "gui.tabs.settings.currency_section.enable_wayland_combobox_support",
+                wraps=lambda widget: setattr(widget, "_compat_attached", True),
+            ) as wrapped:
+                build_settings_tab(parent, context)
+
+            assert wrapped.call_count >= 4
+
+            attached_combos: list[ttk.Combobox] = []
+
+            def _walk(node: tk.Misc) -> None:
+                for child in node.winfo_children():
+                    if isinstance(child, ttk.Combobox) and getattr(
+                        child, "_compat_attached", False
+                    ):
+                        attached_combos.append(child)
+                    _walk(child)
+
+            _walk(parent)
+            assert attached_combos
+    finally:
+        root.destroy()
+        repo.close()
+
+
 def test_settings_tab_wallet_opener_invokes_wallet_manager(tmp_path: Path) -> None:
     db_path = tmp_path / "settings_wallet_opener.db"
     repo = SQLiteRecordRepository(str(db_path), schema_path=_schema_path())

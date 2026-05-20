@@ -1,22 +1,21 @@
 from __future__ import annotations
+# ruff: noqa: E402, I001
 
 import argparse
 import os
 import sys
 import time
 import tkinter as tk
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from tkinter import filedialog
-from tkinter import ttk
-from typing import Callable
+from tkinter import filedialog, ttk
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from gui.combobox_compat import (
-    GuiDisplayRuntime,
     WaylandComboboxPopup,
     detect_gui_display_runtime,
     enable_wayland_combobox_support,
@@ -33,13 +32,14 @@ class ComboScenario:
 
 
 class ComboboxDebuggerApp:
-    def __init__(self, *, mode: str, bind_down: bool) -> None:
+    def __init__(self, *, mode: str, bind_down: bool, auto_self_test: bool = False) -> None:
         self.root = tk.Tk()
         self.root.title("Wayland Combobox Debugger")
         self.root.geometry("1180x860")
         self.root.minsize(980, 720)
         self.mode_var = tk.StringVar(value=mode)
         self.bind_down_var = tk.BooleanVar(value=bind_down)
+        self.auto_self_test = auto_self_test
         self.runtime = detect_gui_display_runtime()
         self.manager_by_widget: dict[ttk.Combobox, WaylandComboboxPopup] = {}
         self.runtime_text: tk.Text | None = None
@@ -114,15 +114,21 @@ class ComboboxDebuggerApp:
             sticky="w",
             padx=(8, 0),
         )
-        ttk.Button(controls, text="Export log", command=self.export_log).grid(
+        ttk.Button(controls, text="Run self-test", command=self.run_self_test).grid(
             row=0,
             column=7,
             sticky="w",
             padx=(8, 0),
         )
-        ttk.Button(controls, text="Clear log", command=self.clear_log).grid(
+        ttk.Button(controls, text="Export log", command=self.export_log).grid(
             row=0,
             column=8,
+            sticky="w",
+            padx=(8, 0),
+        )
+        ttk.Button(controls, text="Clear log", command=self.clear_log).grid(
+            row=0,
+            column=9,
             sticky="e",
         )
 
@@ -152,6 +158,8 @@ class ComboboxDebuggerApp:
         bottom.add(log_frame, weight=4)
 
         self.rebuild_samples()
+        if self.auto_self_test:
+            self.root.after(250, self.run_self_test)
 
     def _refresh_runtime_text(self) -> None:
         runtime_text = self.runtime_text
@@ -479,6 +487,37 @@ class ComboboxDebuggerApp:
         self._bind_widget_events("modal.dialog", dialog)
         self.log("open_modal_dialog", widget=dialog)
 
+    def run_self_test(self) -> None:
+        self.log(
+            "self_test.start",
+            detail=f"mode={self.mode_var.get()} bind_down={self.bind_down_var.get()}",
+        )
+        for combo, manager in list(self.manager_by_widget.items()):
+            try:
+                combo.focus_set()
+                self.root.update()
+                self.log("self_test.focus_combo", widget=combo)
+                manager.open_popup()
+                self.root.update()
+                if manager.listbox is not None and manager.listbox.size() > 1:
+                    manager._move_selection(1)
+                    self.root.update()
+                    self.log("self_test.move_selection", widget=combo, detail="delta=1")
+                    manager._select_active()
+                    self.root.update()
+                    self.log(
+                        "self_test.select_active", widget=combo, detail=f"value={combo.get()!r}"
+                    )
+                manager.open_popup()
+                self.root.update()
+                self.log("self_test.reopen_popup", widget=combo)
+                manager.close_popup()
+                self.root.update()
+                self.log("self_test.close_popup", widget=combo)
+            except tk.TclError as exc:
+                self.log("self_test.error", widget=combo, detail=str(exc))
+        self.log("self_test.done")
+
     def run(self) -> None:
         self.root.mainloop()
 
@@ -489,19 +528,28 @@ def parse_args() -> argparse.Namespace:
         "--mode",
         choices=("auto", "native", "compat"),
         default="auto",
-        help="choose whether sample comboboxes use native ttk, forced compat popup, or runtime auto mode",
+        help="choose whether sample comboboxes use native ttk, forced compat popup, or runtime auto mode",  # noqa: E501
     )
     parser.add_argument(
         "--no-bind-down",
         action="store_true",
         help="disable plain Down key popup handling in compat mode",
     )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="run an automatic compat-popup smoke cycle after the window opens",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    app = ComboboxDebuggerApp(mode=args.mode, bind_down=not args.no_bind_down)
+    app = ComboboxDebuggerApp(
+        mode=args.mode,
+        bind_down=not args.no_bind_down,
+        auto_self_test=args.self_test,
+    )
     app.run()
     return 0
 
