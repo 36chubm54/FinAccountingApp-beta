@@ -259,7 +259,7 @@ class WaylandComboboxPopup:
         owner.update_idletasks()
         root_x = self.widget.winfo_rootx() - owner.winfo_rootx()
         root_y = self.widget.winfo_rooty() - owner.winfo_rooty()
-        width = max(self.widget.winfo_width(), 220)
+        width = max(int(self.widget.winfo_width()), 1)
         owner_width = owner.winfo_width()
         owner_height = owner.winfo_height()
         pos_x = min(max(root_x, 0), max(owner_width - width, 0))
@@ -391,7 +391,8 @@ class WaylandComboboxPopup:
         scrollbar: ttk.Scrollbar | None = None
         for value in self.values:
             listbox.insert(tk.END, value)
-        visible_rows = min(max(len(self.values), 4), 10)
+        visible_rows = min(max(len(self.values), 1), 10)
+        listbox.configure(height=visible_rows)
         if len(self.values) > visible_rows:
             scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=listbox.yview)
             scrollbar.grid(row=0, column=1, sticky="ns")
@@ -406,7 +407,8 @@ class WaylandComboboxPopup:
         self.scrollbar = scrollbar
         self._opening_popup = True
 
-        pos_x, pos_y, width, height = self._popup_placement(height=visible_rows * 24)
+        popup.update_idletasks()
+        pos_x, pos_y, width, height = self._popup_placement(height=popup.winfo_reqheight())
         popup.place(x=pos_x, y=pos_y, width=width, height=height)
         popup.lift()
         listbox.focus_set()

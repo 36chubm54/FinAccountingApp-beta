@@ -251,3 +251,64 @@ def test_wayland_popup_supports_normal_combobox_arrow_click_only() -> None:
         assert manager.popup is not None
     finally:
         root.destroy()
+
+
+def test_wayland_popup_width_matches_combobox_width() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        combo = ttk.Combobox(root, values=["RU", "EN"], state="readonly", width=4)
+        combo.pack()
+        root.update_idletasks()
+
+        manager = enable_wayland_combobox_support(combo, runtime=_native_wayland_runtime())
+        assert manager is not None
+
+        manager.open_popup()
+        root.update()
+
+        assert manager.popup is not None
+        assert manager.popup.winfo_width() == combo.winfo_width()
+    finally:
+        root.destroy()
+
+
+def test_wayland_popup_height_tracks_item_count() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        short_combo = ttk.Combobox(root, values=["RU", "EN"], state="readonly", width=8)
+        long_combo = ttk.Combobox(
+            root,
+            values=["One", "Two", "Three", "Four", "Five", "Six"],
+            state="readonly",
+            width=8,
+        )
+        short_combo.pack()
+        long_combo.pack()
+        root.update_idletasks()
+
+        short_manager = enable_wayland_combobox_support(
+            short_combo, runtime=_native_wayland_runtime()
+        )
+        long_manager = enable_wayland_combobox_support(
+            long_combo, runtime=_native_wayland_runtime()
+        )
+        assert short_manager is not None
+        assert long_manager is not None
+
+        short_manager.open_popup()
+        root.update()
+        assert short_manager.popup is not None
+        short_height = short_manager.popup.winfo_height()
+        short_manager.close_popup()
+        root.update()
+
+        long_manager.open_popup()
+        root.update()
+        assert long_manager.popup is not None
+        long_height = long_manager.popup.winfo_height()
+
+        assert short_height < long_height
+    finally:
+        root.destroy()
