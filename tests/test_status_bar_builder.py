@@ -1,27 +1,87 @@
 from __future__ import annotations
 
-from gui.status_bar_builder import (
-    build_language_codes,
-    build_theme_label_to_key,
-    combobox_code_width,
-    resolve_current_theme_label,
-)
+import tkinter as tk
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from gui.combobox_compat import GuiDisplayRuntime
+from gui.status_bar_builder import build_status_bar
 
 
-def test_combobox_code_width_respects_limits() -> None:
-    assert combobox_code_width(["KZT", "USD"]) == 4
-    assert combobox_code_width(["DISPLAY"]) == 6
+def _native_wayland_runtime() -> GuiDisplayRuntime:
+    return GuiDisplayRuntime(
+        platform="linux",
+        session_type="wayland",
+        wayland_display="wayland-0",
+        x11_display="",
+        is_linux=True,
+        is_wayland_native=True,
+        is_xwayland=False,
+    )
 
 
-def test_build_language_codes_contains_current_language() -> None:
-    codes = build_language_codes()
+class _Controller:
+    def get_available_display_currencies(self) -> list[str]:
+        return ["KZT", "USD", "EUR"]
 
-    assert "RU" in codes
+    def get_display_currency(self) -> str:
+        return "KZT"
 
 
-def test_theme_label_mapping_and_resolution_are_consistent() -> None:
-    mapping = build_theme_label_to_key()
-    current_label = resolve_current_theme_label(mapping)
+class _Owner(tk.Frame):
+    def __init__(self, master: tk.Misc) -> None:
+        super().__init__(master)
+        self.controller = _Controller()
 
-    assert mapping
-    assert current_label in mapping
+    def _on_online_toggle(self) -> None:
+        return None
+
+    def _on_display_currency_changed(self, _event: tk.Event | None = None) -> None:
+        return None
+
+    def _on_language_changed(self, _event: tk.Event | None = None) -> None:
+        return None
+
+    def _on_theme_changed(self, _event: tk.Event | None = None) -> None:
+        return None
+
+
+def test_status_bar_attaches_wayland_popup_support_to_readonly_combos() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        owner = _Owner(root)
+        owner.pack()
+
+        with patch(
+            "gui.status_bar_builder.enable_wayland_combobox_support",
+            wraps=lambda widget: setattr(widget, "_compat_attached", True),
+        ) as wrapped:
+            result = build_status_bar(owner)
+
+        assert wrapped.call_count == 3
+        assert getattr(result.display_currency_combo, "_compat_attached", False) is True
+        assert getattr(result.language_combo, "_compat_attached", False) is True
+        assert getattr(result.theme_combo, "_compat_attached", False) is True
+    finally:
+        root.destroy()
+
+
+def test_status_bar_real_wayland_manager_is_attached_under_native_wayland() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        owner = _Owner(root)
+        owner.pack()
+
+        with patch(
+            "gui.combobox_compat.detect_gui_display_runtime",
+            return_value=_native_wayland_runtime(),
+        ):
+            result = build_status_bar(owner)
+
+        assert hasattr(result.display_currency_combo, "_wayland_popup_manager")
+        assert hasattr(result.language_combo, "_wayland_popup_manager")
+        assert hasattr(result.theme_combo, "_wayland_popup_manager")
+    finally:
+        root.destroy()

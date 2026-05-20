@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from tkinter import ttk
 from typing import Any, Protocol, cast
 
+from gui.combobox_compat import enable_wayland_combobox_support
 from gui.i18n import tr
 from gui.ui_theme import PAD_SM, PAD_XS
 
@@ -135,6 +136,7 @@ def _build_wallet_selector(
         wallet_menu.grid(row=row_index + 1, column=0, sticky="ew", padx=PAD_SM, pady=(0, PAD_XS))
     else:
         wallet_menu.grid(row=row_index, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
+    enable_wayland_combobox_support(wallet_menu, bind_down=False)
     wallet_map = _wallet_map(controller)
     wallet_labels = list(wallet_map.keys()) or [""]
     wallet_menu["values"] = wallet_labels
@@ -228,6 +230,7 @@ def build_add_mandatory_panel(
         wallet_menu["values"] = wallet_labels
         wallet_var.set(wallet_labels[0])
         wallet_menu.grid(row=2, column=1, columnspan=3, sticky="ew", padx=PAD_SM, pady=PAD_XS)
+        enable_wayland_combobox_support(wallet_menu, bind_down=False)
 
         form_label(3, tr("mandatory.field.category", "Категория"))
         category_entry = ttk.Entry(panel)
@@ -247,6 +250,7 @@ def build_add_mandatory_panel(
             state="readonly",
         )
         period_combo.grid(row=5, column=1, columnspan=3, sticky="ew", padx=PAD_SM, pady=PAD_XS)
+        enable_wayland_combobox_support(period_combo, bind_down=False)
 
         form_label(6, tr("mandatory.field.date_optional", "Дата (необязательно):"))
         date_entry = ttk.Entry(panel)
@@ -354,6 +358,7 @@ def build_add_mandatory_panel(
         values=["daily", "weekly", "monthly", "yearly"],
         state="readonly",
     )
+    enable_wayland_combobox_support(period_combo, bind_down=False)
     current_row = _place_field(
         stacked=stacked,
         label=period_label,
@@ -423,6 +428,7 @@ def build_edit_mandatory_panel(
         values=["daily", "weekly", "monthly", "yearly"],
         state="readonly",
     )
+    enable_wayland_combobox_support(period_combo, bind_down=False)
     _grid_inline_field(
         panel,
         row_index=2,

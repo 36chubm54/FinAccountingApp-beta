@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from tkinter import ttk
 from typing import Any, Literal
 
+from gui.combobox_compat import should_style_native_linux_popdown
+
 FONT_FAMILY = "Segoe UI"
 FONT_SIZE = 10
 MICRO_FONT = (FONT_FAMILY, 9)
@@ -805,6 +807,12 @@ def enable_treeview_zebra(tree: ttk.Treeview) -> ttk.Treeview:
 
 
 def _apply_combobox_popdown_theme(root: tk.Misc, palette: ThemePalette) -> None:
+    try:
+        tk_windowingsystem = str(root.tk.call("tk", "windowingsystem")).strip().lower()
+    except tk.TclError:
+        tk_windowingsystem = ""
+    if not should_style_native_linux_popdown(tk_windowingsystem=tk_windowingsystem):
+        return
     for widget in _walk_widgets(root):
         if isinstance(widget, ttk.Combobox):
             _configure_combobox_popdown(widget, palette)

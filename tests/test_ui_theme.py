@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk
+from unittest.mock import patch
 
 from gui.ui_theme import bootstrap_ui, get_palette, get_theme, set_theme
 
@@ -28,6 +29,24 @@ def test_bootstrap_ui_supports_light_and_dark() -> None:
         dark_style = ttk.Style(root)
         assert dark_style.lookup("StatusBar.TFrame", "background")
         assert get_theme() == "dark"
+    finally:
+        root.destroy()
+        set_theme("light")
+
+
+def test_bootstrap_ui_skips_combobox_popdown_theme_under_compat_popup_policy() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        combo = ttk.Combobox(root, values=["A", "B"], state="readonly")
+        combo.pack()
+        with (
+            patch("gui.ui_theme.should_style_native_linux_popdown", return_value=False),
+            patch("gui.ui_theme._configure_combobox_popdown") as configure_mock,
+        ):
+            bootstrap_ui(root, "light")
+
+        configure_mock.assert_not_called()
     finally:
         root.destroy()
         set_theme("light")

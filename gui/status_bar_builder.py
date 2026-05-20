@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from tkinter import ttk
 from typing import Any, Protocol
 
+from gui.combobox_compat import enable_wayland_combobox_support
 from gui.hotkeys import _show_hotkey_help
 from gui.i18n import get_available_languages, get_language, tr
 from gui.ui_theme import PAD_SM, get_theme
@@ -130,6 +131,7 @@ def build_status_bar(owner: Any) -> StatusBarBuildResult:
     display_currency_combo.bind(
         "<<ComboboxSelected>>", typed_owner._on_display_currency_changed, add="+"
     )
+    enable_wayland_combobox_support(display_currency_combo)
 
     ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
         row=0, column=8, sticky="ns", pady=5, padx=(0, PAD_SM)
@@ -151,6 +153,7 @@ def build_status_bar(owner: Any) -> StatusBarBuildResult:
     )
     language_combo.grid(row=0, column=10, sticky="w", padx=(0, PAD_SM), pady=2)
     language_combo.bind("<<ComboboxSelected>>", typed_owner._on_language_changed, add="+")
+    enable_wayland_combobox_support(language_combo)
 
     ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
         row=0, column=11, sticky="ns", pady=5, padx=(0, PAD_SM)
@@ -173,6 +176,7 @@ def build_status_bar(owner: Any) -> StatusBarBuildResult:
     )
     theme_combo.grid(row=0, column=13, sticky="w", padx=(0, PAD_SM), pady=2)
     theme_combo.bind("<<ComboboxSelected>>", typed_owner._on_theme_changed, add="+")
+    enable_wayland_combobox_support(theme_combo)
 
     ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
         row=0, column=14, sticky="ns", pady=5, padx=(0, PAD_SM)

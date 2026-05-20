@@ -6,6 +6,7 @@ from tkinter import ttk
 from typing import Any
 
 from domain.errors import DomainError
+from gui.combobox_compat import enable_wayland_combobox_support
 from gui.i18n import tr
 from gui.logging_utils import log_ui_error
 from gui.tooltip import Tooltip
@@ -99,6 +100,7 @@ def build_currency_section(
         width=18,
     )
     display_currency_combo.grid(row=1, column=1, sticky="ew", padx=(0, pad_x), pady=pad_y)
+    enable_wayland_combobox_support(display_currency_combo)
 
     ttk.Label(
         currency_frame,
@@ -113,6 +115,7 @@ def build_currency_section(
         width=18,
     )
     provider_mode_combo.grid(row=2, column=1, sticky="ew", padx=(0, pad_x), pady=pad_y)
+    enable_wayland_combobox_support(provider_mode_combo)
 
     ttk.Label(
         currency_frame,
@@ -127,6 +130,7 @@ def build_currency_section(
         width=18,
     )
     primary_provider_combo.grid(row=3, column=1, sticky="ew", padx=(0, pad_x), pady=pad_y)
+    enable_wayland_combobox_support(primary_provider_combo)
 
     ttk.Label(
         currency_frame,
@@ -141,6 +145,7 @@ def build_currency_section(
         width=18,
     )
     fallback_provider_combo.grid(row=4, column=1, sticky="ew", padx=(0, pad_x), pady=pad_y)
+    enable_wayland_combobox_support(fallback_provider_combo)
 
     ttk.Label(
         currency_frame,

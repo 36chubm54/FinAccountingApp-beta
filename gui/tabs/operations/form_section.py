@@ -10,6 +10,7 @@ from tkinter import ttk
 from typing import Any
 
 from domain.errors import DomainError
+from gui.combobox_compat import enable_wayland_combobox_support
 from gui.i18n import tr
 from gui.logging_utils import log_ui_error
 from gui.tooltip import Tooltip
@@ -102,6 +103,7 @@ def build_operation_form_section(
     type_combo = ttk.Combobox(form_frame, values=type_options, state="readonly")
     type_combo.set(income_label)
     type_combo.grid(row=0, column=1, columnspan=3, sticky="ew", padx=PAD_SM, pady=PAD_XS)
+    enable_wayland_combobox_support(type_combo, bind_down=False)
 
     _form_label(1, tr("common.date", "Дата:"))
     date_entry = ttk.Entry(form_frame)
@@ -121,6 +123,7 @@ def build_operation_form_section(
     category_combo = ttk.Combobox(form_frame, state="normal")
     category_combo.insert(0, "General")
     category_combo.grid(row=4, column=1, columnspan=3, sticky="ew", padx=PAD_SM, pady=PAD_XS)
+    enable_wayland_combobox_support(category_combo, bind_down=False)
 
     _form_label(5, tr("common.description", "Описание:"))
     description_entry = ttk.Entry(form_frame)
@@ -177,6 +180,7 @@ def build_operation_form_section(
         state="readonly",
     )
     operation_wallet_menu.grid(row=7, column=1, columnspan=3, sticky="ew", padx=PAD_SM, pady=PAD_XS)
+    enable_wayland_combobox_support(operation_wallet_menu, bind_down=False)
     operation_wallet_map: dict[str, int] = {}
 
     def _set_tag_color(color: str) -> None:
@@ -416,8 +420,9 @@ def build_operation_form_section(
             return "break"
 
         for index, widget in enumerate(widgets):
-            widget.bind("<Up>", lambda _event, i=index - 1: _focus_relative(i), add="+")
-            widget.bind("<Down>", lambda _event, i=index + 1: _focus_relative(i), add="+")
+            if not isinstance(widget, ttk.Combobox):
+                widget.bind("<Up>", lambda _event, i=index - 1: _focus_relative(i), add="+")
+                widget.bind("<Down>", lambda _event, i=index + 1: _focus_relative(i), add="+")
             if isinstance(widget, ttk.Button):
                 widget.bind("<Left>", lambda _event, i=index - 1: _focus_relative(i), add="+")
                 widget.bind("<Right>", lambda _event, i=index + 1: _focus_relative(i), add="+")

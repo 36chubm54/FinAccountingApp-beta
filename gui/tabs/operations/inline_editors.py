@@ -11,6 +11,7 @@ from tkinter import ttk
 from typing import Any
 
 from domain.errors import DomainError
+from gui.combobox_compat import enable_wayland_combobox_support
 from gui.i18n import tr
 from gui.logging_utils import log_ui_error
 from gui.tooltip import Tooltip
@@ -110,6 +111,7 @@ def build_inline_editors(
             state="readonly",
         )
         from_wallet_menu.grid(row=2, column=1, sticky="ew")
+        enable_wayland_combobox_support(from_wallet_menu, bind_down=False)
         ttk.Label(
             edit_panel,
             text=tr("operations.transfer.to", "В кошелек:"),
@@ -123,6 +125,7 @@ def build_inline_editors(
             state="readonly",
         )
         to_wallet_menu.grid(row=3, column=1, sticky="ew")
+        enable_wayland_combobox_support(to_wallet_menu, bind_down=False)
         ttk.Label(
             edit_panel,
             text=tr("operations.transfer.description", "Описание:"),
@@ -325,11 +328,13 @@ def build_inline_editors(
             edit_panel, textvariable=wallet_edit_var, values=[], state="readonly"
         )
         wallet_edit_menu.grid(row=2, column=1, sticky="ew")
+        enable_wayland_combobox_support(wallet_edit_menu, bind_down=False)
         ttk.Label(
             edit_panel, text=tr("common.category", "Категория:"), style="InlineField.TLabel"
         ).grid(row=3, column=0, sticky="w")
         category_edit_combo = ttk.Combobox(edit_panel, state="normal")
         category_edit_combo.grid(row=3, column=1, sticky="ew")
+        enable_wayland_combobox_support(category_edit_combo, bind_down=False)
         ttk.Label(
             edit_panel, text=tr("common.description", "Описание:"), style="InlineField.TLabel"
         ).grid(row=4, column=0, sticky="w")
@@ -476,8 +481,9 @@ def build_inline_editors(
             return "break"
 
         def _bind_editor_navigation(widget: tk.Misc, index: int) -> None:
-            widget.bind("<Up>", lambda _event, i=index - 1: _focus_relative(i), add="+")
-            widget.bind("<Down>", lambda _event, i=index + 1: _focus_relative(i), add="+")
+            if not isinstance(widget, ttk.Combobox):
+                widget.bind("<Up>", lambda _event, i=index - 1: _focus_relative(i), add="+")
+                widget.bind("<Down>", lambda _event, i=index + 1: _focus_relative(i), add="+")
             if isinstance(widget, ttk.Button):
                 widget.bind("<Left>", lambda _event, i=index - 1: _focus_relative(i), add="+")
                 widget.bind("<Right>", lambda _event, i=index + 1: _focus_relative(i), add="+")
