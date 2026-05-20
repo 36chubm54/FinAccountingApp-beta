@@ -69,7 +69,7 @@ def build_update_section(
             else tr(
                 "settings.updates.linux_manual",
                 "Для Linux packaged builds встроенная установка обновлений пока недоступна. "
-                "Скачайте новый AppImage со страницы релизов GitHub.",
+                "Скачайте новый Linux-пакет или AppImage со страницы релизов GitHub.",
             )
             if is_packaged_linux
             else tr(
@@ -176,7 +176,18 @@ def build_update_section(
         )
 
         running = {"active": True, "indeterminate": False}
+        poll_after_id: dict[str, str | None] = {"value": None}
         progress_queue: queue.SimpleQueue[AppUpdateDownloadProgress] = queue.SimpleQueue()
+
+        def _cancel_poll() -> None:
+            after_id = poll_after_id["value"]
+            poll_after_id["value"] = None
+            if after_id is None:
+                return
+            try:
+                dialog.after_cancel(after_id)
+            except tk.TclError:
+                return
 
         def _close_guard() -> None:
             if running["active"]:
@@ -230,6 +241,9 @@ def build_update_section(
             )
 
         def _poll_progress() -> None:
+            poll_after_id["value"] = None
+            if not dialog.winfo_exists():
+                return
             while True:
                 try:
                     snapshot = progress_queue.get_nowait()
@@ -237,7 +251,7 @@ def build_update_section(
                     break
                 _apply_progress(snapshot)
             if running["active"] and dialog.winfo_exists():
-                dialog.after(100, _poll_progress)
+                poll_after_id["value"] = dialog.after(100, _poll_progress)
 
         def task():
             return context.controller.download_app_update(
@@ -248,6 +262,7 @@ def build_update_section(
         def on_success(result) -> None:
             _set_update_flow_active(False)
             running["active"] = False
+            _cancel_poll()
             if running["indeterminate"]:
                 progress.stop()
             progress_text_var.set(
@@ -301,6 +316,7 @@ def build_update_section(
         def on_error(error: BaseException) -> None:
             _set_update_flow_active(False)
             running["active"] = False
+            _cancel_poll()
             if running["indeterminate"]:
                 progress.stop()
             progress_text_var.set(
@@ -322,7 +338,7 @@ def build_update_section(
                 ),
             )
 
-        dialog.after(100, _poll_progress)
+        poll_after_id["value"] = dialog.after(100, _poll_progress)
         context._run_background(
             task,
             on_success=on_success,
@@ -427,5 +443,5 @@ def build_update_section(
         command=_open_release_page,
     )
     release_link_button.grid(row=0, column=1, sticky="ew", padx=(PAD_XS, 0))
-    if supported or not release_page_url:
+    if supported or not release_page_url or not is_packaged_linux:
         release_link_button.state(["disabled"])

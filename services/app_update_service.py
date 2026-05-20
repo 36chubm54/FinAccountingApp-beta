@@ -22,7 +22,7 @@ _INSTALLER_NAME_RE = re.compile(r"^FinAccountingApp-.+-setup\.exe$", re.IGNORECA
 _TAG_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].+)?$")
 WINDOWS_ONLY_UPDATE_MESSAGE = (
     "In-app updates are currently available only on Windows. "
-    "Packaged Linux builds should download a newer AppImage from GitHub Releases."
+    "Packaged Linux builds should download a newer Linux package or AppImage from GitHub Releases."
 )
 
 

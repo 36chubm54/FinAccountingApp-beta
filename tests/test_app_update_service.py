@@ -72,7 +72,7 @@ def test_check_for_app_update_rejects_non_windows_runtime() -> None:
     service = AppUpdateService()
     service.is_supported_environment = lambda: False  # type: ignore[method-assign]
 
-    with pytest.raises(AppUpdateNotSupportedError, match="AppImage"):
+    with pytest.raises(AppUpdateNotSupportedError, match="Linux package"):
         service.check_for_app_update()
 
 
