@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from tkinter import ttk
 from typing import cast
 
+from gui.combobox_compat import enable_wayland_combobox_support
 from gui.i18n import tr
 from gui.record_colors import KIND_TO_FOREGROUND
 from gui.tooltip import Tooltip
@@ -54,6 +55,7 @@ def build_reports_layout(owner) -> ReportsUiHandles:
     )
     category_combo = ttk.Combobox(top_filters, textvariable=owner.category_var, values=[], width=18)
     category_combo.grid(row=0, column=5, sticky="ew", padx=(6, 16))
+    enable_wayland_combobox_support(category_combo)
 
     ttk.Label(top_filters, text=tr("common.wallet", "Кошелек:")).grid(row=0, column=6, sticky="w")
     wallet_menu = ttk.Combobox(
@@ -63,6 +65,7 @@ def build_reports_layout(owner) -> ReportsUiHandles:
         state="readonly",
     )
     wallet_menu.grid(row=0, column=7, sticky="ew", padx=(6, 0))
+    enable_wayland_combobox_support(wallet_menu)
 
     middle_row = ttk.Frame(controls)
     middle_row.grid(row=1, column=0, sticky="ew", pady=(8, 0))
@@ -76,6 +79,7 @@ def build_reports_layout(owner) -> ReportsUiHandles:
     ttk.Label(tag_filters, text=tr("common.tags", "Теги:")).grid(row=0, column=0, sticky="w")
     tag_combo = ttk.Combobox(tag_filters, textvariable=owner.tag_var, values=[], width=18)
     tag_combo.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+    enable_wayland_combobox_support(tag_combo)
 
     group_frame = ttk.Frame(middle_row)
     group_frame.grid(row=0, column=1, sticky="ew", padx=(16, 16))

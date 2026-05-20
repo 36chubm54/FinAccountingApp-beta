@@ -7,6 +7,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from domain.budget import Budget, BudgetResult, BudgetStatus, PaceStatus
+from gui.combobox_compat import enable_wayland_combobox_support
 from gui.i18n import tr
 from gui.tooltip import Tooltip
 from gui.ui_helpers import (
@@ -67,6 +68,7 @@ def build_budget_tab(
     ).grid(row=0, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS)
     category_combo = ttk.Combobox(form_frame, state="normal", width=20)
     category_combo.grid(row=0, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
+    enable_wayland_combobox_support(category_combo)
 
     scope_type_var = tk.StringVar(value="category")
     ttk.Label(
@@ -82,6 +84,7 @@ def build_budget_tab(
         width=16,
     )
     scope_type_combo.grid(row=1, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
+    enable_wayland_combobox_support(scope_type_combo)
 
     ttk.Label(
         form_frame,

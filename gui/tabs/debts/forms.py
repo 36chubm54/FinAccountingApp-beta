@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import date
 from tkinter import ttk
 
+from gui.combobox_compat import enable_wayland_combobox_support
 from gui.i18n import tr
 from gui.ui_theme import PAD_LG, PAD_SM, PAD_XS, create_card_section
 
@@ -57,6 +58,7 @@ def build_create_form(left, *, on_save) -> DebtsCreateForm:
         state="readonly",
     )
     kind_combo.grid(row=0, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
+    enable_wayland_combobox_support(kind_combo, bind_down=False)
 
     ttk.Label(create_frame, text=tr("debts.contact", "Контакт:"), style="FormField.TLabel").grid(
         row=1, column=0, sticky="w", padx=PAD_SM, pady=PAD_XS
@@ -85,6 +87,7 @@ def build_create_form(left, *, on_save) -> DebtsCreateForm:
     wallet_var = tk.StringVar(value="")
     wallet_menu = ttk.Combobox(create_frame, textvariable=wallet_var, values=[], state="readonly")
     wallet_menu.grid(row=4, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
+    enable_wayland_combobox_support(wallet_menu, bind_down=False)
 
     ttk.Label(
         create_frame, text=tr("common.description", "Описание:"), style="FormField.TLabel"
@@ -167,6 +170,7 @@ def build_action_form(
         state="readonly",
     )
     action_wallet_menu.grid(row=2, column=1, sticky="ew", padx=PAD_SM, pady=PAD_XS)
+    enable_wayland_combobox_support(action_wallet_menu, bind_down=False)
 
     pay_button = ttk.Button(actions_frame, text=tr("debts.pay", "Погасить"), command=on_pay)
     pay_button.grid(row=3, column=0, sticky="ew", padx=6, pady=6)

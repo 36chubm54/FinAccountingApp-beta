@@ -14,6 +14,7 @@ from typing import Any
 from app.services import CurrencyService
 from app_paths import get_icons_dir
 from config import SQLITE_PATH
+from gui.combobox_compat import enable_wayland_combobox_support
 from gui.i18n import tr
 from gui.shell.shell_window import apply_window_icon
 from infrastructure.currency_providers import DEFAULT_PROVIDER_REGISTRY, CurrencyProviderRegistry
@@ -360,6 +361,7 @@ def run_initial_setup_wizard(
             width=28,
         )
         combo.grid(row=row, column=1, sticky="ew", pady=4)
+        enable_wayland_combobox_support(combo)
         return combo
 
     _add_label("setup.base_currency", "Базовая валюта")
