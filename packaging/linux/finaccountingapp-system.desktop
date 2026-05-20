@@ -7,3 +7,4 @@ Icon=finaccountingapp
 Terminal=false
 Categories=Office;Finance;
 StartupNotify=true
+StartupWMClass=FinAccountingApp

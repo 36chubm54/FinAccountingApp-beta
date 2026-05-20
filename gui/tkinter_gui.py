@@ -53,6 +53,7 @@ from gui.shell.shell_state import (
 from gui.shell.shell_support import resolve_import_policy
 from gui.shell.shell_tabs import apply_tab_titles, rebuild_built_tabs
 from gui.shell.shell_window import (
+    APP_LINUX_WM_CLASS,
     apply_window_icon,
     configure_main_window,
     launch_installer_and_exit,
@@ -144,7 +145,7 @@ class FinancialApp(tk.Tk):
     monthly_bar_canvas: tk.Canvas | None
 
     def __init__(self, *, initial_base_currency: str | None = None) -> None:
-        super().__init__()
+        super().__init__(className=APP_LINUX_WM_CLASS)
 
         apply_window_icon(self, icons_dir=get_icons_dir())
         configure_main_window(self)

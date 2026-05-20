@@ -29,10 +29,12 @@ def test_stage_system_package_rootfs_copies_bundle_and_assets(tmp_path: Path) ->
 
     assert (rootfs / "opt" / "FinAccountingApp" / "FinAccountingApp").is_file()
     assert (rootfs / "usr" / "bin" / "finaccountingapp").is_file()
-    assert (rootfs / "usr" / "share" / "applications" / "finaccountingapp.desktop").is_file()
+    desktop_entry = rootfs / "usr" / "share" / "applications" / "finaccountingapp.desktop"
+    assert desktop_entry.is_file()
     assert (
         rootfs / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps" / "finaccountingapp.png"
     ).is_file()
+    assert "StartupWMClass=FinAccountingApp" in desktop_entry.read_text(encoding="utf-8")
 
 
 def test_write_package_env_tracks_version_and_rootfs(tmp_path: Path) -> None:

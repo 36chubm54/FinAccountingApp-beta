@@ -9,6 +9,8 @@ from pathlib import Path
 from tkinter import TclError
 from typing import Any
 
+APP_LINUX_WM_CLASS = "FinAccountingApp"
+
 
 def enable_windows_dpi_awareness(logger: logging.Logger) -> None:
     """Enable high-DPI awareness early so Tk and native file dialogs stay sharp."""
