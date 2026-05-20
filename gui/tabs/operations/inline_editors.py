@@ -481,8 +481,9 @@ def build_inline_editors(
             return "break"
 
         def _bind_editor_navigation(widget: tk.Misc, index: int) -> None:
-            widget.bind("<Up>", lambda _event, i=index - 1: _focus_relative(i), add="+")
-            widget.bind("<Down>", lambda _event, i=index + 1: _focus_relative(i), add="+")
+            if not isinstance(widget, ttk.Combobox):
+                widget.bind("<Up>", lambda _event, i=index - 1: _focus_relative(i), add="+")
+                widget.bind("<Down>", lambda _event, i=index + 1: _focus_relative(i), add="+")
             if isinstance(widget, ttk.Button):
                 widget.bind("<Left>", lambda _event, i=index - 1: _focus_relative(i), add="+")
                 widget.bind("<Right>", lambda _event, i=index + 1: _focus_relative(i), add="+")

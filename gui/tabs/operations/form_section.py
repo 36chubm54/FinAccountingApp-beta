@@ -420,8 +420,9 @@ def build_operation_form_section(
             return "break"
 
         for index, widget in enumerate(widgets):
-            widget.bind("<Up>", lambda _event, i=index - 1: _focus_relative(i), add="+")
-            widget.bind("<Down>", lambda _event, i=index + 1: _focus_relative(i), add="+")
+            if not isinstance(widget, ttk.Combobox):
+                widget.bind("<Up>", lambda _event, i=index - 1: _focus_relative(i), add="+")
+                widget.bind("<Down>", lambda _event, i=index + 1: _focus_relative(i), add="+")
             if isinstance(widget, ttk.Button):
                 widget.bind("<Left>", lambda _event, i=index - 1: _focus_relative(i), add="+")
                 widget.bind("<Right>", lambda _event, i=index + 1: _focus_relative(i), add="+")
