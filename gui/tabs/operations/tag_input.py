@@ -327,6 +327,10 @@ def attach_tag_autocomplete(
         _show_popup(focus_listbox=True)
         return "break"
 
+    def _on_destroy(_event: tk.Event | None = None) -> None:
+        _cancel_focus_check()
+        _hide_popup()
+
     def _on_combobox_selected(_event: tk.Event | None = None) -> str:
         chosen = normalize_tag_name(combobox.get())
         if not chosen:
@@ -367,3 +371,4 @@ def attach_tag_autocomplete(
     combobox.bind("<<ComboboxSelected>>", _on_combobox_selected, add="+")
     combobox.bind("<Button-1>", _on_click, add="+")
     combobox.bind("<FocusOut>", lambda _event: _schedule_focus_check(125), add="+")
+    combobox.bind("<Destroy>", _on_destroy, add="+")

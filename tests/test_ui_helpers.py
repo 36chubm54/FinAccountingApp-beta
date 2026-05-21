@@ -54,6 +54,27 @@ def test_treeview_column_autosize_does_not_shrink_by_default() -> None:
         root.destroy()
 
 
+def test_treeview_column_autosize_cancels_pending_after_job_on_destroy() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        tree = ttk.Treeview(root, columns=("name",), show="headings")
+        tree.heading("name", text="Name")
+        tree.column("name", width=80, minwidth=80, anchor="w")
+        enable_treeview_column_autosize(tree, max_width=480)
+        tree.pack()
+
+        state = getattr(tree, "_column_autosize_state")
+        assert state is not None
+        assert tree.tk.call("after", "info")
+
+        tree.destroy()
+
+        assert not tree.tk.call("after", "info")
+    finally:
+        root.destroy()
+
+
 def test_normalize_numeric_input_handles_grouping_and_decimal_separators() -> None:
     assert normalize_numeric_input("15,000") == "15000"
     assert normalize_numeric_input("15 000") == "15000"

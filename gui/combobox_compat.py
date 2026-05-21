@@ -210,6 +210,8 @@ class WaylandComboboxPopup:
         self.values: tuple[str, ...] = ()
         self._opening_popup = False
         self._focus_check_after_id: str | None = None
+        self._finish_open_after_id: str | None = None
+        self._restore_focus_after_id: str | None = None
         self._bind_events()
 
     def _bind_events(self) -> None:
@@ -296,6 +298,26 @@ class WaylandComboboxPopup:
         except tk.TclError:
             return
 
+    def _cancel_finish_open(self) -> None:
+        after_id = self._finish_open_after_id
+        self._finish_open_after_id = None
+        if not after_id:
+            return
+        try:
+            self.widget.after_cancel(after_id)
+        except tk.TclError:
+            return
+
+    def _cancel_restore_focus(self) -> None:
+        after_id = self._restore_focus_after_id
+        self._restore_focus_after_id = None
+        if not after_id:
+            return
+        try:
+            self.widget.after_cancel(after_id)
+        except tk.TclError:
+            return
+
     def _release_focus(self) -> None:
         try:
             self.widget.focus_set()
@@ -305,6 +327,8 @@ class WaylandComboboxPopup:
     def close_popup(self, *, restore_focus: bool = True) -> None:
         popup = self.popup
         self._cancel_focus_check()
+        self._cancel_finish_open()
+        self._cancel_restore_focus()
         self.popup = None
         self.listbox = None
         self.scrollbar = None
@@ -318,7 +342,7 @@ class WaylandComboboxPopup:
         except tk.TclError:
             pass
         if restore_focus:
-            self.widget.after_idle(self._release_focus)
+            self._restore_focus_after_id = self.widget.after_idle(self._release_focus)
 
     def _select_active(self) -> str:
         listbox = self.listbox
@@ -373,6 +397,7 @@ class WaylandComboboxPopup:
         self._schedule_focus_check()
 
     def _finish_open_popup(self) -> None:
+        self._finish_open_after_id = None
         self._opening_popup = False
         if self.popup is None:
             return
@@ -430,7 +455,7 @@ class WaylandComboboxPopup:
         popup.place(x=pos_x, y=pos_y, width=width, height=height)
         popup.lift()
         listbox.focus_set()
-        popup.after_idle(self._finish_open_popup)
+        self._finish_open_after_id = popup.after_idle(self._finish_open_popup)
 
         listbox.bind("<Return>", lambda _event: self._select_active(), add="+")
         listbox.bind("<KP_Enter>", lambda _event: self._select_active(), add="+")

@@ -41,6 +41,28 @@ class _LinuxExportPopupManager:
         self.button = button
         self.owner = owner
         self.popup: ttk.Frame | None = None
+        self._focus_close_after_id: str | None = None
+        self._focus_set_after_id: str | None = None
+
+    def _cancel_focus_close(self) -> None:
+        after_id = self._focus_close_after_id
+        self._focus_close_after_id = None
+        if after_id is None:
+            return
+        try:
+            self.button.after_cancel(after_id)
+        except tk.TclError:
+            return
+
+    def _cancel_focus_set(self) -> None:
+        after_id = self._focus_set_after_id
+        self._focus_set_after_id = None
+        if after_id is None:
+            return
+        try:
+            self.button.after_cancel(after_id)
+        except tk.TclError:
+            return
 
     def _focus_within_popup(self) -> bool:
         popup = self.popup
@@ -52,9 +74,11 @@ class _LinuxExportPopupManager:
         return str(widget).startswith(str(popup))
 
     def _close_if_focus_lost(self, _event: object | None = None) -> None:
-        self.button.after_idle(self._close_if_focus_still_lost)
+        self._cancel_focus_close()
+        self._focus_close_after_id = self.button.after_idle(self._close_if_focus_still_lost)
 
     def _close_if_focus_still_lost(self) -> None:
+        self._focus_close_after_id = None
         if self.popup is None:
             return
         focus_widget = self.button.focus_displayof()
@@ -78,6 +102,8 @@ class _LinuxExportPopupManager:
 
     def close_popup(self, *, restore_focus: bool = True) -> None:
         popup = self.popup
+        self._cancel_focus_close()
+        self._cancel_focus_set()
         self.popup = None
         if popup is None:
             return
@@ -133,7 +159,7 @@ class _LinuxExportPopupManager:
         popup.bind("<FocusOut>", self._close_if_focus_lost, add="+")
         popup.bind("<Escape>", lambda _event: (self.close_popup(), "break")[1], add="+")
         if first_button is not None:
-            popup.after(0, first_button.focus_set)
+            self._focus_set_after_id = popup.after(0, first_button.focus_set)
         return "break"
 
     def bind(self) -> None:
