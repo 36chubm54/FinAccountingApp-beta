@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
-Name=FinAccountingApp
-Comment=Personal financial accounting desktop app
+Name=Ledgera
+Comment=Ledgera personal finance desktop app
 Exec=FinAccountingApp
 Icon=FinAccountingApp
 Terminal=false
 Categories=Office;Finance;
 StartupNotify=true
-StartupWMClass=FinAccountingApp
+StartupWMClass=Ledgera

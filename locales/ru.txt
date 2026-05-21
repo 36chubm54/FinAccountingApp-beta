@@ -1,5 +1,5 @@
 # App shell
-app.title=Финансовый учет
+app.title=Ledgera
 app.wait=Подождите
 app.wait_running=Дождитесь завершения текущей операции.
 app.busy.default=Выполняется операция...
@@ -17,7 +17,7 @@ app.theme.light=Светлая
 app.theme.dark=Темная
 app.autopay.title=Автоплатежи применены
 app.autopay.summary=Создано автоплатежей: {count}
-setup.title=Первоначальная настройка
+setup.title=Ledgera - первоначальная настройка
 setup.summary=Настройте базовую валюту и параметры поставщика курсов перед первым запуском.
 setup.base_currency=Базовая валюта
 setup.display_currency=Валюта отображения

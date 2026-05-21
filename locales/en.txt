@@ -1,5 +1,5 @@
 # App shell
-app.title=Financial Accounting
+app.title=Ledgera
 app.wait=Please wait
 app.wait_running=Wait until the current operation finishes.
 app.busy.default=Processing...
@@ -17,7 +17,7 @@ app.theme.light=Light
 app.theme.dark=Dark
 app.autopay.title=Auto-payments applied
 app.autopay.summary=Auto-payments created: {count}
-setup.title=Initial setup
+setup.title=Ledgera - Initial setup
 setup.summary=Configure the base currency and exchange-rate provider settings before the first launch.
 setup.base_currency=Base currency
 setup.display_currency=Display currency

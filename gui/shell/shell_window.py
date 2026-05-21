@@ -9,7 +9,7 @@ from pathlib import Path
 from tkinter import TclError
 from typing import Any
 
-APP_LINUX_WM_CLASS = "FinAccountingApp"
+APP_LINUX_WM_CLASS = "Ledgera"
 
 
 def enable_windows_dpi_awareness(logger: logging.Logger) -> None:
