@@ -78,17 +78,15 @@ def render_metainfo_xml() -> str:
         notes_xml = "          <li>Packaging and desktop metadata updated.</li>"
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>ledgera.desktop</id>
+  <id>io.github.36chubm54.Ledgera.desktop</id>
   <pkgname>{html.escape(PACKAGE_NAME)}</pkgname>
   <name>{html.escape(PRODUCT_DISPLAY_NAME)}</name>
   <summary>{html.escape(summary)}</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
-  <developer id="36chubm54">
-    <name>36chubm54</name>
-  </developer>
+  <developer_name>36chubm54</developer_name>
   <launchable type="desktop-id">ledgera.desktop</launchable>
-  <icon type="cached">{html.escape(PACKAGE_NAME)}</icon>
+  <icon type="stock">{html.escape(PACKAGE_NAME)}</icon>
   <branding>
     <color type="primary" scheme_preference="light">#0e4c7f</color>
     <color type="primary" scheme_preference="dark">#0e4c7f</color>
@@ -98,7 +96,6 @@ def render_metainfo_xml() -> str:
   </description>
   <url type="homepage">https://github.com/36chubm54/FinAccountingApp</url>
   <url type="bugtracker">https://github.com/36chubm54/FinAccountingApp/issues</url>
-  <url type="vcs-browser">https://github.com/36chubm54/FinAccountingApp</url>
   <categories>
     <category>Office</category>
     <category>Finance</category>

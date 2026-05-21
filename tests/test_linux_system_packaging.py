@@ -42,9 +42,11 @@ def test_stage_system_package_rootfs_copies_bundle_and_assets(tmp_path: Path) ->
     assert "Comment=Ledgera personal finance desktop app" in desktop_entry_content
     assert "StartupWMClass=Ledgera" in desktop_entry_content
     metainfo_content = metainfo_entry.read_text(encoding="utf-8")
+    assert "<id>io.github.36chubm54.Ledgera.desktop</id>" in metainfo_content
     assert "<pkgname>ledgera</pkgname>" in metainfo_content
     assert '<launchable type="desktop-id">ledgera.desktop</launchable>' in metainfo_content
-    assert '<icon type="cached">ledgera</icon>' in metainfo_content
+    assert "<developer_name>36chubm54</developer_name>" in metainfo_content
+    assert '<icon type="stock">ledgera</icon>' in metainfo_content
     assert "<name>Ledgera</name>" in metainfo_content
     assert "<summary>" in metainfo_content
     assert f'<release version="{module.read_version()}"' in metainfo_content
@@ -57,6 +59,7 @@ def test_render_metainfo_xml_includes_packaging_owned_metadata_and_release_notes
     summary, description_blocks, release_date, release_notes = module._load_appstream_metadata()
 
     assert "<name>Ledgera</name>" in content
+    assert "<id>io.github.36chubm54.Ledgera.desktop</id>" in content
     assert "<pkgname>ledgera</pkgname>" in content
     assert summary in content
     for block in description_blocks:
@@ -65,7 +68,8 @@ def test_render_metainfo_xml_includes_packaging_owned_metadata_and_release_notes
         assert note in content
     assert f'<release version="{module.read_version()}" date="{release_date}">' in content
     assert '<launchable type="desktop-id">ledgera.desktop</launchable>' in content
-    assert '<icon type="cached">ledgera</icon>' in content
+    assert "<developer_name>36chubm54</developer_name>" in content
+    assert '<icon type="stock">ledgera</icon>' in content
 
 
 def test_write_package_env_tracks_version_and_rootfs(tmp_path: Path) -> None:

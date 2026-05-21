@@ -1,5 +1,5 @@
 {
-  "summary": "Graphical application for personal financial accounting with multicurrency support, import/export, tags, budgets, debts, assets, and goals.",
+  "summary": "Graphical application for personal financial accounting with multicurrency support, import/export, tags, budgets, debts, assets, and goals",
   "description": [
     "Ledgera personal finance desktop app with multicurrency support, import and export flows, budgets, debts, assets, and reports.",
     "This Linux packaging wave adds native deb/rpm system packages alongside AppImage while keeping mutable user data outside the install tree and preserving the existing Windows installer and updater contract."
