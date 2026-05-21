@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
 import os
 import runpy
 import shlex
@@ -15,8 +16,7 @@ PACKAGE_NAME = "ledgera"
 ICON_SOURCE = ROOT / "gui" / "assets" / "icons" / "app.png"
 DESKTOP_SOURCE = ROOT / "packaging" / "linux" / "ledgera.desktop"
 LAUNCHER_SOURCE = ROOT / "packaging" / "linux" / "ledgera"
-README_SOURCE = ROOT / "README_EN.md"
-CHANGELOG_SOURCE = ROOT / "CHANGELOG.md"
+APPSTREAM_METADATA_SOURCE = ROOT / "packaging" / "linux" / "appstream_metadata.json"
 ENV_FILENAME = "package.env"
 NFPM_TEMPLATE_FILENAME = "nfpm.yaml"
 NFPM_RENDERED_FILENAME = "nfpm.generated.yaml"
@@ -31,67 +31,43 @@ def read_version() -> str:
     return value
 
 
-def _read_readme_intro() -> tuple[str, list[str]]:
-    lines = README_SOURCE.read_text(encoding="utf-8").splitlines()
-    intro_blocks: list[str] = []
-    current: list[str] = []
-    started = False
-    for raw_line in lines:
-        line = raw_line.strip()
-        if not started:
-            if not line or line.startswith("#") or line.startswith("[!"):
-                continue
-            started = True
-        if started and not line:
-            if current:
-                intro_blocks.append(" ".join(current).strip())
-                current = []
-            if len(intro_blocks) >= 2:
-                break
-            continue
-        if started:
-            current.append(line)
-    if current and len(intro_blocks) < 2:
-        intro_blocks.append(" ".join(current).strip())
+def _load_appstream_metadata() -> tuple[str, list[str], str, list[str]]:
+    try:
+        raw = json.loads(APPSTREAM_METADATA_SOURCE.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"AppStream metadata source not found: {APPSTREAM_METADATA_SOURCE}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("AppStream metadata source is not valid JSON.") from exc
+    if not isinstance(raw, dict):
+        raise RuntimeError("AppStream metadata source has an unexpected shape.")
 
-    summary = (
-        intro_blocks[0]
-        if intro_blocks
-        else "Ledgera personal finance desktop app with multicurrency support."
-    )
-    description_blocks = intro_blocks[:2] if intro_blocks else [summary]
-    return summary, description_blocks
+    summary = str(raw.get("summary") or "").strip()
+    if not summary:
+        raise RuntimeError("AppStream metadata summary is missing.")
 
+    description = raw.get("description")
+    if not isinstance(description, list) or not description:
+        raise RuntimeError("AppStream metadata description must be a non-empty list.")
+    description_blocks = [str(block).strip() for block in description if str(block).strip()]
+    if not description_blocks:
+        raise RuntimeError("AppStream metadata description contains no usable paragraphs.")
 
-def _extract_latest_release_notes() -> tuple[str, str, list[str]]:
-    lines = CHANGELOG_SOURCE.read_text(encoding="utf-8").splitlines()
-    version = ""
-    release_date = ""
-    notes: list[str] = []
-    in_latest = False
-    for raw_line in lines:
-        line = raw_line.strip()
-        if not in_latest:
-            if line.startswith("## ["):
-                in_latest = True
-                section = line
-                version = section.split("[", 1)[1].split("]", 1)[0].strip()
-                if " - " in section:
-                    release_date = section.rsplit(" - ", 1)[1].strip()
-                continue
-        else:
-            if line.startswith("## ["):
-                break
-            if line.startswith("- "):
-                notes.append(line[2:].strip())
-    if not version:
-        raise RuntimeError("Unable to extract latest release notes from CHANGELOG.md")
-    return version, release_date, notes
+    release_date = str(raw.get("release_date") or "").strip()
+    if not release_date:
+        raise RuntimeError("AppStream metadata release_date is missing.")
+
+    release_notes = raw.get("release_notes")
+    if not isinstance(release_notes, list):
+        raise RuntimeError("AppStream metadata release_notes must be a list.")
+    notes = [str(note).strip() for note in release_notes if str(note).strip()]
+    return summary, description_blocks, release_date, notes
 
 
 def render_metainfo_xml() -> str:
-    summary, description_blocks = _read_readme_intro()
-    version, release_date, release_notes = _extract_latest_release_notes()
+    summary, description_blocks, release_date, release_notes = _load_appstream_metadata()
+    version = read_version()
     description_xml = "\n".join(
         f"    <p>{html.escape(block)}</p>" for block in description_blocks if block
     )
@@ -184,10 +160,8 @@ def stage_system_package_rootfs(bundle_dir: Path, staging_dir: Path) -> Path:
         raise FileNotFoundError(f"Package desktop entry not found: {DESKTOP_SOURCE}")
     if not LAUNCHER_SOURCE.is_file():
         raise FileNotFoundError(f"Package launcher not found: {LAUNCHER_SOURCE}")
-    if not README_SOURCE.is_file():
-        raise FileNotFoundError(f"README source not found: {README_SOURCE}")
-    if not CHANGELOG_SOURCE.is_file():
-        raise FileNotFoundError(f"Changelog source not found: {CHANGELOG_SOURCE}")
+    if not APPSTREAM_METADATA_SOURCE.is_file():
+        raise FileNotFoundError(f"AppStream metadata source not found: {APPSTREAM_METADATA_SOURCE}")
 
     shutil.rmtree(rootfs_dir, ignore_errors=True)
     install_dir.parent.mkdir(parents=True, exist_ok=True)

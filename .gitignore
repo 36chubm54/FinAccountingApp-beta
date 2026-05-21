@@ -29,6 +29,7 @@ artifacts/
 *.pdf
 *.json
 !pyrightconfig.json
+!appstream_metadata.json
 
 # Database files
 *.db

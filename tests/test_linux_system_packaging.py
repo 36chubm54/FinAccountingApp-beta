@@ -20,6 +20,7 @@ def test_stage_system_package_rootfs_copies_bundle_and_assets(tmp_path: Path) ->
     assert module.DESKTOP_SOURCE.is_file()
     assert module.LAUNCHER_SOURCE.is_file()
     assert module.ICON_SOURCE.is_file()
+    assert module.APPSTREAM_METADATA_SOURCE.is_file()
     bundle_dir = tmp_path / "bundle"
     (bundle_dir / "FinAccountingApp").parent.mkdir(parents=True, exist_ok=True)
     (bundle_dir / "FinAccountingApp").write_text("binary", encoding="utf-8")
@@ -43,29 +44,28 @@ def test_stage_system_package_rootfs_copies_bundle_and_assets(tmp_path: Path) ->
     metainfo_content = metainfo_entry.read_text(encoding="utf-8")
     assert "<pkgname>ledgera</pkgname>" in metainfo_content
     assert '<launchable type="desktop-id">ledgera.desktop</launchable>' in metainfo_content
-    assert "<icon type=\"cached\">ledgera</icon>" in metainfo_content
+    assert '<icon type="cached">ledgera</icon>' in metainfo_content
     assert "<name>Ledgera</name>" in metainfo_content
-    assert (
-        "<summary>Graphical application for personal financial accounting with multicurrency support, import/export, tags, budgets, debts, assets, and goals.</summary>"
-        in metainfo_content
-    )
-    assert '<release version="2.4.0" date="2026-05-20">' in metainfo_content
+    assert "<summary>" in metainfo_content
+    assert f'<release version="{module.read_version()}"' in metainfo_content
 
 
-def test_render_metainfo_xml_includes_readme_summary_and_release_notes() -> None:
+def test_render_metainfo_xml_includes_packaging_owned_metadata_and_release_notes() -> None:
     module = _load_packaging_module()
 
     content = module.render_metainfo_xml()
+    summary, description_blocks, release_date, release_notes = module._load_appstream_metadata()
 
     assert "<name>Ledgera</name>" in content
     assert "<pkgname>ledgera</pkgname>" in content
-    assert (
-        "Graphical application for personal financial accounting with multicurrency support, import/export, tags, budgets, debts, assets, and goals."
-        in content
-    )
-    assert "Added first-class Linux system-package packaging on top of the existing" in content
+    assert summary in content
+    for block in description_blocks:
+        assert block in content
+    for note in release_notes:
+        assert note in content
+    assert f'<release version="{module.read_version()}" date="{release_date}">' in content
     assert '<launchable type="desktop-id">ledgera.desktop</launchable>' in content
-    assert "<icon type=\"cached\">ledgera</icon>" in content
+    assert '<icon type="cached">ledgera</icon>' in content
 
 
 def test_write_package_env_tracks_version_and_rootfs(tmp_path: Path) -> None:

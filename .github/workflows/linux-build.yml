@@ -33,7 +33,7 @@ jobs:
       - name: Install Linux packaging dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk patchelf libfuse2 rpm
+          sudo apt-get install -y python3-tk patchelf libfuse2 rpm appstream
 
       - name: Install Python dependencies
         run: |
@@ -83,6 +83,10 @@ jobs:
           bash packaging/linux/build_system_packages.sh \
             dist/FinAccountingApp \
             artifacts
+
+      - name: Validate generated AppStream metadata
+        run: |
+          appstreamcli validate --pedantic build/linux-packages/ledgera.metainfo.xml
 
       - name: Verify Linux system packages
         run: |

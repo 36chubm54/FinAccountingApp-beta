@@ -1,0 +1,15 @@
+{
+  "summary": "Graphical application for personal financial accounting with multicurrency support, import/export, tags, budgets, debts, assets, and goals.",
+  "description": [
+    "Ledgera personal finance desktop app with multicurrency support, import and export flows, budgets, debts, assets, and reports.",
+    "This Linux packaging wave adds native deb/rpm system packages alongside AppImage while keeping mutable user data outside the install tree and preserving the existing Windows installer and updater contract."
+  ],
+  "release_date": "2026-05-21",
+  "release_notes": [
+    "Added first-class Linux system-package packaging on top of the existing PyInstaller onedir bundle, with deb and rpm artifacts.",
+    "Linux package and software-center identity now uses Ledgera for package names, desktop and AppStream IDs, launcher path, and artifact names while keeping internal FinAccountingApp runtime paths for compatibility.",
+    "The Linux release workflow now builds and publishes Ledgera AppImage, deb, and rpm artifacts.",
+    "Packaged Linux manual-update messaging now points users to downloading a newer Linux package or AppImage from GitHub Releases.",
+    "GNOME Software may still omit license details or release notes for locally installed third-party packages even when AppStream metadata is bundled."
+  ]
+}
