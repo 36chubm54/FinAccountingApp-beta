@@ -7,6 +7,35 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [2.4.0] - 2026-05-21
+
+### Added
+
+- Added first-class Linux system-package packaging on top of the existing `PyInstaller --onedir` bundle, with `.deb` and `.rpm` artifacts
+- Added a staged Linux package assembly layer under `packaging/linux` for `/opt/FinAccountingApp`, `/usr/bin/ledgera`, desktop-entry registration, icon installation, and AppStream metadata
+- Added packaging-owned AppStream metadata plus pedantic validation and Linux package smoke checks in CI instead of relying on release docs as the only metadata source
+
+### Changed
+
+- The Linux release workflow now builds and publishes three `Ledgera` artifact types: `Ledgera-linux.AppImage`, `.deb`, and `.rpm`
+- Packaged Linux manual-update messaging now points users to downloading a newer Linux package or AppImage from GitHub Releases instead of mentioning only AppImage
+- Packaged Linux install layout is now explicitly defined for system packages: read-only bundle files live under `/opt/FinAccountingApp`, while mutable user data still resolves under `XDG_DATA_HOME` or `~/.local/share/FinAccountingApp`
+- Linux package/software-center identity now uses `Ledgera` on `.deb` / `.rpm` package name, desktop/AppStream IDs, launcher path, and artifact names while keeping internal `FinAccountingApp` runtime paths for compatibility
+- Windows installer-facing branding now also uses `Ledgera` for installer artifact names, install directory defaults, and updater asset selection while keeping the internal bundled executable name `FinAccountingApp.exe`
+- Windows CI now builds and uploads the installer path on non-tag workflow runs too, so installer regressions are validated on PRs and manual runs instead of only on tagged releases
+- Added a short documented caveat that `GNOME Software` may omit license details or release notes for locally installed third-party packages even when AppStream metadata is bundled
+- Statement/report ordering is now deterministic within the same day by using `date + record.id` as the effective tie-break contract
+- Narrowed the Linux Wayland/XWayland `Combobox` policy so `deb` / `rpm` packaged Linux builds now stay on the native `ttk.Combobox` path by default, while `AppImage` and source-mode Linux keep the compatibility fallback for problematic selector flows
+- Linux tag autocomplete now uses the custom popup path in `AppImage` and source-mode Linux, while `deb` / `rpm` packaged Linux and Windows keep the native `ttk.Combobox` experience for that selector
+- Linux export popup dismissal now treats app-level focus loss as a real close condition so the custom export popup does not remain orphaned after app switching
+- Tk widget helpers and Linux popup managers now cancel pending `after(...)` callbacks on teardown to avoid stray Tk callback errors during test and shutdown flows
+
+### Testing
+
+- Added Linux system-package smoke checks for `.deb` and `.rpm` payload contents and package metadata
+- Added regression coverage for Linux package rootfs staging, package-env generation, deb payload parsing, and Debian version normalization
+- Added targeted regression coverage for same-day statement ordering, Linux export popup focus loss, `Ledgera` title branding, and Tk callback cleanup paths
+
 ## [2.3.0] - 2026-05-20
 
 ### Added

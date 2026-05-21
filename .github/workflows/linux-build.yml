@@ -33,13 +33,16 @@ jobs:
       - name: Install Linux packaging dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk patchelf libfuse2
+          sudo apt-get install -y python3-tk patchelf libfuse2 rpm appstream
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
           pip install .[pdf,build]
+
+      - name: Install nFPM
+        run: npm install -g @goreleaser/nfpm
 
       - name: Run targeted pytest slice
         run: >
@@ -71,18 +74,47 @@ jobs:
           chmod +x packaging/linux/build_appimage.sh
           bash packaging/linux/build_appimage.sh \
             dist/FinAccountingApp \
-            artifacts/FinAccountingApp-linux.AppImage \
+            artifacts/Ledgera-linux.AppImage \
             tools/appimagetool.AppImage
+
+      - name: Build Linux system packages
+        run: |
+          chmod +x packaging/linux/build_system_packages.sh packaging/linux/ledgera
+          bash packaging/linux/build_system_packages.sh \
+            dist/FinAccountingApp \
+            artifacts
+
+      - name: Validate generated AppStream metadata
+        run: |
+          appstreamcli validate --pedantic build/linux-packages/ledgera.metainfo.xml
+
+      - name: Verify Linux system packages
+        run: |
+          python packaging/linux/verify_system_packages.py \
+            --deb artifacts/Ledgera-$(python -c "import runpy; print(runpy.run_path('version.py')['__version__'])")-x86_64.deb \
+            --rpm artifacts/Ledgera-$(python -c "import runpy; print(runpy.run_path('version.py')['__version__'])")-x86_64.rpm
 
       - name: Upload Linux AppImage artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FinAccountingApp-linux
-          path: artifacts/FinAccountingApp-linux.AppImage
+          name: Ledgera-linux
+          path: artifacts/Ledgera-linux.AppImage
+          if-no-files-found: error
+
+      - name: Upload Linux system packages artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ledgera-linux-system-packages
+          path: |
+            artifacts/Ledgera-*-x86_64.deb
+            artifacts/Ledgera-*-x86_64.rpm
           if-no-files-found: error
 
       - name: Attach Linux AppImage to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/FinAccountingApp-linux.AppImage
+          files: |
+            artifacts/Ledgera-linux.AppImage
+            artifacts/Ledgera-*-x86_64.deb
+            artifacts/Ledgera-*-x86_64.rpm

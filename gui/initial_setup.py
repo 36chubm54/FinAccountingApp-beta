@@ -16,7 +16,7 @@ from app_paths import get_icons_dir
 from config import SQLITE_PATH
 from gui.combobox_compat import enable_wayland_combobox_support
 from gui.i18n import tr
-from gui.shell.shell_window import apply_window_icon
+from gui.shell.shell_window import APP_LINUX_WM_CLASS, apply_window_icon
 from infrastructure.currency_providers import DEFAULT_PROVIDER_REGISTRY, CurrencyProviderRegistry
 
 SUPPORTED_SETUP_CURRENCIES = ("KZT", "USD", "EUR", "RUB")
@@ -302,7 +302,7 @@ def run_initial_setup_wizard(
     if display_currency not in SUPPORTED_SETUP_CURRENCIES:
         display_currency = base_currency
 
-    root = tk.Tk()
+    root = tk.Tk(className=APP_LINUX_WM_CLASS)
     root.title(tr("setup.title", "Первоначальная настройка"))
     root.resizable(False, False)
     root.grid_columnconfigure(0, weight=1)

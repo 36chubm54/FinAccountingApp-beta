@@ -55,7 +55,8 @@ def attach_tag_autocomplete(
     on_input_changed: Callable[[], None] | None = None,
 ) -> None:
     palette = get_palette()
-    is_linux_runtime = detect_gui_display_runtime().is_linux
+    runtime = detect_gui_display_runtime()
+    use_linux_custom_popup = runtime.is_linux and (runtime.is_appimage or not runtime.is_packaged)
     popup_state: dict[str, Any] = {"window": None, "listbox": None, "items": []}
     selection_state: dict[str, Any] = {"committed": (), "fragment": ""}
     focus_check_after_id: dict[str, str | None] = {"value": None}
@@ -326,6 +327,10 @@ def attach_tag_autocomplete(
         _show_popup(focus_listbox=True)
         return "break"
 
+    def _on_destroy(_event: tk.Event | None = None) -> None:
+        _cancel_focus_check()
+        _hide_popup()
+
     def _on_combobox_selected(_event: tk.Event | None = None) -> str:
         chosen = normalize_tag_name(combobox.get())
         if not chosen:
@@ -342,7 +347,7 @@ def attach_tag_autocomplete(
 
     combobox.configure(postcommand=_prepare_native_dropdown)
 
-    if not is_linux_runtime:
+    if not use_linux_custom_popup:
 
         def _on_native_key_release(event: tk.Event | None = None) -> None:
             if event is not None and event.keysym in {"Up", "Down", "Return", "Escape", "Tab"}:
@@ -366,3 +371,4 @@ def attach_tag_autocomplete(
     combobox.bind("<<ComboboxSelected>>", _on_combobox_selected, add="+")
     combobox.bind("<Button-1>", _on_click, add="+")
     combobox.bind("<FocusOut>", lambda _event: _schedule_focus_check(125), add="+")
+    combobox.bind("<Destroy>", _on_destroy, add="+")

@@ -33,11 +33,11 @@ def test_parse_language_file_raises_on_duplicate_key(tmp_path: Path) -> None:
 def test_set_language_and_translate_known_keys() -> None:
     set_language("ru")
     assert get_language() == "ru"
-    assert tr("app.title") == "Финансовый учет"
+    assert tr("app.title") == "Ledgera"
 
     set_language("en")
     assert get_language() == "en"
-    assert tr("app.title") == "Financial Accounting"
+    assert tr("app.title") == "Ledgera"
 
     set_language("ru")
 

@@ -9,7 +9,7 @@
 
 Графическое приложение для персонального финансового учёта с мультивалютностью, импортом/экспортом, тегами, бюджетами, долгами, активами и целями.
 
-Текущий релиз `v2.3.0` развивает Linux desktop-линию дальше: поверх уже добавленного `PyInstaller --onedir` + `AppImage` теперь появился отдельный compatibility slice для `Wayland`, сфокусированный на стабильности `Combobox` и popup-flow без слома Windows installer / updater contract. Приложение по-прежнему держит mutable user data вне install tree, а Linux GUI contract теперь честно описывает поддержку `Wayland` / `XWayland` через compatibility popup path вместо зависимости от native `ttk.Combobox` popdown behavior.
+Текущий релиз `v2.4.0` развивает desktop packaging и branding сразу по двум направлениям: поверх уже существующего `PyInstaller --onedir` + `AppImage` пути проект теперь собирает системные `deb` / `rpm` пакеты, а user-facing installer/package surfaces используют product name `Ledgera` без слома внутренних runtime-контрактов. Приложение по-прежнему держит mutable user data вне install tree, а Linux GUI contract теперь различает `system-package`, `AppImage` и source-mode runtime: `deb` / `rpm` packaged Linux по умолчанию остаётся на native `ttk.Combobox`, а `AppImage` и source-mode Linux при `Wayland` / `XWayland` используют compatibility fallback для проблемных selector flows. При этом internal bundle/runtime paths и часть совместимых технических идентификаторов сохраняют `FinAccountingApp`.
 
 В актуальном runtime-контракте:
 
@@ -69,16 +69,40 @@ python main.py
 - Bundled read-only resources включают `gui/assets/icons`, `locales`, `db/schema.sql`
 - В packaged режиме mutable runtime files (`finance.db`, currency config/cache, backups, updater downloads) создаются в user-scoped `AppData`, а не внутри install directory
 - Migration utilities `migrate_json_to_sqlite.py` и `migration_002_rename_amount_kzt_to_base.py` входят в bundle как raw Python scripts, а не как отдельные `.exe`
+- Windows installer и release artifacts в этой волне используют branding `Ledgera`: setup-файл собирается как `Ledgera-<version>-setup.exe`, а каталог установки по умолчанию — `Program Files\Ledgera`
+- При этом bundled executable и internal runtime paths остаются совместимыми: внутри installer по-прежнему ставится `FinAccountingApp.exe`, а user data продолжают жить в `AppData`
 - GitHub Actions release workflow может опционально подписывать `FinAccountingApp.exe` и installer, если в repository secrets настроен code-signing certificate; без сертификата build остаётся unsigned
+- Windows CI теперь прогоняет installer build path не только на tag release, но и на обычных workflow runs, чтобы installer-регрессии ловились раньше
 
-### Linux build (`PyInstaller --onedir` + `AppImage`)
+### Linux build (`PyInstaller --onedir` + `AppImage` / `deb` / `rpm`)
 
-- Первый Linux-артефакт собирается через `FinAccountingApp.linux.spec`, а затем упаковывается в `FinAccountingApp-linux.AppImage`
-- В Linux `Wayland` и `XWayland` критичные `Combobox` / popup-сценарии обслуживаются через compatibility popup path, а native `ttk.Combobox` dropdown behavior не считается надёжным runtime-контрактом
-- Linux packaged runtime по-прежнему разделяет bundle resources и mutable user data: база, конфиг валют, backups, exports и updates больше не должны попадать рядом с AppImage
+- Linux bundle по-прежнему собирается через `FinAccountingApp.linux.spec`
+- Поверх этого bundle release workflow теперь выпускает три Linux-артефакта:
+  - `Ledgera-linux.AppImage`
+  - `Ledgera-<version>-x86_64.deb`
+  - `Ledgera-<version>-x86_64.rpm`
+- В `deb` / `rpm` packaged Linux runtime `Wayland` / `XWayland` по умолчанию остаётся на native `ttk.Combobox` path с guard-логикой, а `AppImage` и source-mode Linux используют compatibility fallback для проблемных selector surfaces
+- Linux packaged runtime по-прежнему разделяет bundle resources и mutable user data: база, конфиг валют, backups, exports и updates не должны попадать рядом ни с AppImage, ни с установленным system bundle
 - User data для packaged Linux builds размещаются в `XDG_DATA_HOME/FinAccountingApp` или `~/.local/share/FinAccountingApp`
-- Только packaged Linux builds используют manual-update policy в этой волне: встроенный updater не выполняет скачивание/установку и вместо этого ведёт на ручное скачивание нового AppImage из GitHub Releases
-- Wayland compatibility в этой волне в первую очередь покрывает критичные `Combobox` и popup flows через app-managed popup path, включая Linux tag autocomplete; в Windows соответствующие tag selectors остаются на native `ttk.Combobox`
+- Для `.deb` / `.rpm` system packages bundle устанавливается в `/opt/FinAccountingApp`, launcher регистрируется как `/usr/bin/ledgera`, а desktop entry и icon ставятся системно
+- Linux package metadata теперь принадлежат packaging layer: AppStream summary, description и release notes больше не генерируются напрямую из `README` / `CHANGELOG`, а отдельно валидируются через `appstreamcli --pedantic`
+- Только packaged Linux builds используют manual-update policy в этой волне: встроенный updater не выполняет скачивание/установку и вместо этого ведёт на ручное скачивание нового Linux-пакета или AppImage из GitHub Releases
+- Wayland compatibility в этой волне теперь разделяет `system-package`, `AppImage` и source runtime: `deb` / `rpm` packaged Linux сохраняет native `ttk.Combobox` behavior по умолчанию, а `AppImage`, source-mode Linux и Linux tag autocomplete при необходимости используют app-managed fallback path; в Windows соответствующие selectors остаются на native `ttk.Combobox`
+- `GNOME Software` для локально установленных сторонних пакетов может непоследовательно отображать license и release notes даже при наличии AppStream metadata; на практике поведение может отличаться между Ubuntu GNOME и Fedora GNOME
+
+### Linux package build
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements-dev.txt
+pip install .[pdf,build]
+npm install -g @goreleaser/nfpm
+pyinstaller --noconfirm FinAccountingApp.linux.spec
+chmod +x packaging/linux/build_appimage.sh packaging/linux/build_system_packages.sh
+bash packaging/linux/build_system_packages.sh dist/FinAccountingApp artifacts
+```
 
 ## ✨ Основные возможности
 
@@ -87,14 +111,14 @@ python main.py
 - Двухуровневая валютная модель: `base_currency` для хранения и `display_currency` для отображения
 - Теги операций: свободный ввод, нормализация, автоподсказки, цветовая индикация и sidecar-отображение в журнале
 - Отчёты с fixed-rate и current-rate итогами, grouped view, tag filters и экспортом в `CSV` / `XLSX` / `PDF`
-- Выписка в `Reports` и экспортируемые statement-файлы показывают записи от новых к старым (`newest first`)
+- Выписка в `Reports` и экспортируемые statement-файлы показывают записи от новых к старым (`newest first`), а внутри одного дня порядок теперь детерминирован по `date + record.id`
 - Финансовая аналитика: `net worth`, cashflow, category breakdown, tag coverage, monthly summary
 - Бюджеты по категориям и тегам с live progress, pace tracking и forecast-status
 - Учёт долгов и ссуд с историей погашений и write-off сценариями
 - Distribution System для monthly net-income allocation и frozen snapshots
 - Wealth layer: `Assets`, `Goals`, wealth `Dashboard`
 - Full backup / import / migration для `JSON` ↔ `SQLite`
-- Manual Windows app updater в `Settings`: проверка GitHub Release, скачивание installer'а с progress dialog и handoff в штатный setup flow
+- Manual Windows app updater в `Settings`: проверка GitHub Release, скачивание `Ledgera-*-setup.exe` с progress dialog и handoff в штатный setup flow
 - Read-only Data Audit Engine для проверки консистентности данных, включая tag integrity
 - Внешние языковые пакеты `locales/*.txt` и единый i18n-loader с fallback-цепочкой
 - Runtime `theme` / `language` preferences с сохранением в SQLite schema metadata
@@ -115,7 +139,7 @@ python main.py
 - `base_currency` выбирается только при первом запуске через setup wizard, затем источником истины остаётся SQLite `schema_meta`
 - По умолчанию селектор отображения ограничен whitelist-ом `KZT` / `USD` / `EUR` / `RUB`, даже если кэш курсов содержит больше кодов
 - `Settings -> Валюта и курсы` позволяет менять `display_currency`, provider mode, primary/fallback provider, `exchange_rate_api_key`, `auto_update` и `update_interval_minutes`, но не post-startup `base_currency`
-- `Settings -> Обновление приложения` в Windows умеет проверять последний GitHub Release, скачивать `setup.exe` в `AppData\updates` и предлагать install handoff через штатный installer; на packaged Linux builds эта секция пока ведёт только на ручное скачивание нового AppImage
+- `Settings -> Обновление приложения` в Windows умеет проверять последний GitHub Release, скачивать `Ledgera-*-setup.exe` в `AppData\updates` и предлагать install handoff через штатный installer; на packaged Linux builds эта секция пока ведёт только на ручное скачивание нового Linux-пакета или AppImage
 - `exchange_rate_api_key` больше не должен жить в `currency_config.json`: в packaged/runtime flow он переносится в secure OS storage там, где платформа это поддерживает, env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` остаётся override-путём, а аварийный plaintext fallback допустим только когда secure storage недоступен
 - `auto_update` больше не является декоративным флагом: при включённом online mode курсы обновляются автоматически по `update_interval_minutes`
 - Экспортируемые отчёты локализуются по текущему языку UI, а колонки базовых сумм явно показывают код базы, например `Сумма (KZT)`
@@ -169,7 +193,7 @@ python main.py
 | `services.budget_service.BudgetService` | Budget CRUD, category/tag budgets и live tracking |
 | `services.debt_service.DebtService` | Debt/loan lifecycle |
 | `services.distribution_service.DistributionService` | Monthly distribution и frozen rows |
-| `services.app_update_service.AppUpdateService` | Проверка GitHub Release, выбор Windows installer asset и stream-download updater payload |
+| `services.app_update_service.AppUpdateService` | Проверка GitHub Release, выбор Windows `Ledgera` installer asset и stream-download updater payload |
 | `infrastructure.sqlite_repository.SQLiteRecordRepository` | Основной runtime repository |
 | `storage.sqlite_storage.SQLiteStorage` | Низкоуровневый SQLite adapter / schema bootstrap |
 | `infrastructure.currency_providers.CurrencyProviderRegistry` | Реестр и extension point для rate providers |

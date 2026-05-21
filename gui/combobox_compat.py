@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from tkinter import ttk
 from typing import Literal
 
+from app_paths import is_appimage_mode, is_frozen_mode
+
 LinuxComboboxPolicy = Literal["native", "patched-native", "compat-popup"]
 
 
@@ -17,6 +19,8 @@ class GuiDisplayRuntime:
     wayland_display: str
     x11_display: str
     is_linux: bool
+    is_packaged: bool
+    is_appimage: bool
     is_wayland_native: bool
     is_xwayland: bool
 
@@ -28,6 +32,8 @@ def detect_gui_display_runtime(environ: dict[str, str] | None = None) -> GuiDisp
     wayland_display = str(env.get("WAYLAND_DISPLAY", "") or "").strip()
     x11_display = str(env.get("DISPLAY", "") or "").strip()
     is_linux = platform_name.startswith("linux")
+    is_packaged = is_frozen_mode()
+    is_appimage = is_appimage_mode()
     is_xwayland = is_linux and bool(x11_display) and session_type == "wayland"
     is_wayland_native = is_linux and bool(wayland_display) and not is_xwayland
     return GuiDisplayRuntime(
@@ -36,6 +42,8 @@ def detect_gui_display_runtime(environ: dict[str, str] | None = None) -> GuiDisp
         wayland_display=wayland_display,
         x11_display=x11_display,
         is_linux=is_linux,
+        is_packaged=is_packaged,
+        is_appimage=is_appimage,
         is_wayland_native=is_wayland_native,
         is_xwayland=is_xwayland,
     )
@@ -55,6 +63,12 @@ def resolve_linux_combobox_policy(
     if not resolved.is_linux:
         return "native"
     normalized_windowing = str(tk_windowingsystem or "").strip().lower()
+    if resolved.is_appimage:
+        return "compat-popup"
+    if resolved.is_packaged:
+        if normalized_windowing and normalized_windowing != "x11":
+            return "compat-popup"
+        return "patched-native"
     if resolved.session_type == "wayland":
         return "compat-popup"
     if normalized_windowing and normalized_windowing != "x11":
@@ -196,6 +210,8 @@ class WaylandComboboxPopup:
         self.values: tuple[str, ...] = ()
         self._opening_popup = False
         self._focus_check_after_id: str | None = None
+        self._finish_open_after_id: str | None = None
+        self._restore_focus_after_id: str | None = None
         self._bind_events()
 
     def _bind_events(self) -> None:
@@ -282,6 +298,26 @@ class WaylandComboboxPopup:
         except tk.TclError:
             return
 
+    def _cancel_finish_open(self) -> None:
+        after_id = self._finish_open_after_id
+        self._finish_open_after_id = None
+        if not after_id:
+            return
+        try:
+            self.widget.after_cancel(after_id)
+        except tk.TclError:
+            return
+
+    def _cancel_restore_focus(self) -> None:
+        after_id = self._restore_focus_after_id
+        self._restore_focus_after_id = None
+        if not after_id:
+            return
+        try:
+            self.widget.after_cancel(after_id)
+        except tk.TclError:
+            return
+
     def _release_focus(self) -> None:
         try:
             self.widget.focus_set()
@@ -291,6 +327,8 @@ class WaylandComboboxPopup:
     def close_popup(self, *, restore_focus: bool = True) -> None:
         popup = self.popup
         self._cancel_focus_check()
+        self._cancel_finish_open()
+        self._cancel_restore_focus()
         self.popup = None
         self.listbox = None
         self.scrollbar = None
@@ -304,7 +342,7 @@ class WaylandComboboxPopup:
         except tk.TclError:
             pass
         if restore_focus:
-            self.widget.after_idle(self._release_focus)
+            self._restore_focus_after_id = self.widget.after_idle(self._release_focus)
 
     def _select_active(self) -> str:
         listbox = self.listbox
@@ -359,6 +397,7 @@ class WaylandComboboxPopup:
         self._schedule_focus_check()
 
     def _finish_open_popup(self) -> None:
+        self._finish_open_after_id = None
         self._opening_popup = False
         if self.popup is None:
             return
@@ -416,7 +455,7 @@ class WaylandComboboxPopup:
         popup.place(x=pos_x, y=pos_y, width=width, height=height)
         popup.lift()
         listbox.focus_set()
-        popup.after_idle(self._finish_open_popup)
+        self._finish_open_after_id = popup.after_idle(self._finish_open_popup)
 
         listbox.bind("<Return>", lambda _event: self._select_active(), add="+")
         listbox.bind("<KP_Enter>", lambda _event: self._select_active(), add="+")

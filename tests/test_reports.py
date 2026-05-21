@@ -248,6 +248,43 @@ def test_filter_by_period_raises_for_future_date():
         report.filter_by_period("2999-01")
 
 
+def test_sorted_by_date_uses_record_id_as_same_day_tiebreaker() -> None:
+    report = Report(
+        [
+            IncomeRecord(id=7, date="2025-01-03", _amount_init=70.0, category="Third"),
+            IncomeRecord(id=3, date="2025-01-03", _amount_init=30.0, category="First"),
+            IncomeRecord(id=5, date="2025-01-03", _amount_init=50.0, category="Second"),
+        ]
+    )
+
+    assert [int(record.id) for record in report.sorted_by_date().records()] == [3, 5, 7]
+
+
+def test_sorted_records_desc_uses_record_id_as_same_day_tiebreaker() -> None:
+    report = Report(
+        [
+            IncomeRecord(id=3, date="2025-01-03", _amount_init=30.0, category="First"),
+            IncomeRecord(id=7, date="2025-01-03", _amount_init=70.0, category="Third"),
+            IncomeRecord(id=5, date="2025-01-03", _amount_init=50.0, category="Second"),
+        ]
+    )
+
+    assert [int(record.id) for record in report.sorted_records_desc()] == [7, 5, 3]
+
+
+def test_sorted_records_desc_orders_by_date_then_record_id() -> None:
+    report = Report(
+        [
+            IncomeRecord(id=4, date="2025-01-03", _amount_init=40.0, category="Third day early"),
+            IncomeRecord(id=9, date="2025-01-04", _amount_init=90.0, category="Newest day"),
+            IncomeRecord(id=7, date="2025-01-03", _amount_init=70.0, category="Third day late"),
+            IncomeRecord(id=2, date="2025-01-02", _amount_init=20.0, category="Oldest day"),
+        ]
+    )
+
+    assert [int(record.id) for record in report.sorted_records_desc()] == [9, 7, 4, 2]
+
+
 def test_filter_by_period_range_limits_end_date():
     report = _build_opening_balance_test_report()
     filtered = report.filter_by_period_range("2024", "2024-03")

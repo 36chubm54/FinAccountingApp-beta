@@ -761,10 +761,11 @@ def _schedule_treeview_zebra_refresh(tree: ttk.Treeview) -> None:
 
     def _run() -> None:
         setattr(tree, "_zebra_refresh_pending", False)  # noqa: B010
+        setattr(tree, "_zebra_refresh_after_id", None)  # noqa: B010
         if bool(tree.winfo_exists()):
             _sync_treeview_row_tags(tree)
 
-    tree.after_idle(_run)
+    setattr(tree, "_zebra_refresh_after_id", tree.after_idle(_run))  # noqa: B010
 
 
 def enable_treeview_zebra(tree: ttk.Treeview) -> ttk.Treeview:
@@ -797,10 +798,22 @@ def enable_treeview_zebra(tree: ttk.Treeview) -> ttk.Treeview:
         original_move(item, parent, index)
         _schedule_treeview_zebra_refresh(tree)
 
+    def _cancel_pending_refresh(_event: tk.Event | None = None) -> None:
+        setattr(tree, "_zebra_refresh_pending", False)  # noqa: B010
+        after_id = getattr(tree, "_zebra_refresh_after_id", None)
+        setattr(tree, "_zebra_refresh_after_id", None)  # noqa: B010
+        if after_id is None:
+            return
+        try:
+            tree.after_cancel(str(after_id))
+        except tk.TclError:
+            return
+
     tree.insert = _insert  # type: ignore[assignment]
     tree.delete = _delete  # type: ignore[assignment]
     tree.move = _move  # type: ignore[assignment]
     tree.bind("<<TreeviewSelect>>", lambda _event: _schedule_treeview_zebra_refresh(tree), add="+")
+    tree.bind("<Destroy>", _cancel_pending_refresh, add="+")
     setattr(tree, "_zebra_enabled", True)  # noqa: B010
     _schedule_treeview_zebra_refresh(tree)
     return tree

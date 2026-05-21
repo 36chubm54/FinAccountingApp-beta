@@ -73,19 +73,24 @@ Current rules:
 - packaged resources such as `gui/assets/icons`, `locales`, and `db/schema.sql` resolve from the bundle resource root
 - mutable runtime files such as `finance.db`, currency config/cache, and backup output resolve from a user-scoped data directory
 - in Windows packaged mode, that mutable runtime state is expected to live under `AppData`, not inside the install tree
-- in Linux packaged mode, mutable runtime state is expected to live under `XDG_DATA_HOME` or `~/.local/share/FinAccountingApp`, not inside the AppImage mount or extracted bundle
+- in Linux packaged mode, mutable runtime state is expected to live under `XDG_DATA_HOME` or `~/.local/share/FinAccountingApp`, not inside the AppImage mount, extracted bundle, or `/opt/FinAccountingApp` install tree
 - dev checkouts still resolve runtime files from the source tree unless an explicit override is provided
 - updater downloads are treated separately from the general source-tree dev contract and resolve to a dedicated Windows `AppData\updates` cache even in source mode
 
 Packaging note:
 
 - the checked-in `FinAccountingApp.spec` builds the main `PyInstaller --onedir` app bundle
-- `FinAccountingApp.linux.spec` builds the Linux `PyInstaller --onedir` bundle that is then wrapped into `FinAccountingApp-linux.AppImage`
-- the current Linux GUI contract supports `Wayland` / `XWayland` critical selector and popup flows through an app-managed compatibility popup path instead of relying on native Linux `ttk.Combobox` popdowns
-- Linux tag autocomplete follows the same split: custom popup path on Linux sessions, native `ttk.Combobox` behavior on Windows and other non-Linux runtimes
+- `FinAccountingApp.linux.spec` builds the Linux `PyInstaller --onedir` bundle that is then wrapped into `Ledgera-linux.AppImage` and Linux `.deb` / `.rpm` system packages
+- the current Linux GUI contract distinguishes `system-package`, `AppImage`, and source runtime: `deb` / `rpm` packaged Linux stays on native `ttk.Combobox` popdowns by default with guard logic, while `AppImage` and source-mode Linux can fall back to the app-managed compatibility popup path for problematic selector flows
+- Linux tag autocomplete follows the same split: `AppImage` and source-mode Linux can use the custom popup path, while `deb` / `rpm` packaged Linux, Windows, and other non-Linux runtimes stay on native `ttk.Combobox` behavior
 - `migrate_json_to_sqlite.py` and `migrations/migration_002_rename_amount_kzt_to_base.py` are shipped inside that bundle as raw Python utility scripts rather than separate executable tools
 - the Windows release workflow can optionally sign `FinAccountingApp.exe` and the installer if certificate secrets are configured; otherwise the release remains unsigned
-- the Linux release workflow smoke-builds the AppImage path on PRs and publishes `FinAccountingApp-linux.AppImage` on tagged releases
+- the Windows installer-facing brand is now `Ledgera`: setup artifacts are emitted as `Ledgera-<version>-setup.exe`, while the internal bundled executable remains `FinAccountingApp.exe`
+- the Linux release workflow smoke-builds the AppImage and system-package paths on PRs and publishes `Ledgera-linux.AppImage`, `.deb`, and `.rpm` artifacts on tagged releases
+- Linux system packages install the read-only bundle into `/opt/FinAccountingApp`, expose `/usr/bin/ledgera`, and register a desktop entry plus icon through standard system paths
+- Linux package metadata is now owned by `packaging/linux/appstream_metadata.json` and validated in CI through `appstreamcli --pedantic` rather than being generated directly from release prose
+- Linux package/AppStream display identity is `Ledgera`, while internal bundle/data paths remain `FinAccountingApp` for compatibility
+- `GNOME Software` may still omit license details or release notes for locally installed third-party packages even when the package ships valid AppStream metadata; this has been observed to differ between Ubuntu GNOME and Fedora GNOME
 
 ### 3.0.1 Application update flow
 
@@ -104,7 +109,7 @@ Design rules:
 - the running app only checks and downloads; it does not patch binaries in place
 - the installer remains the only component that performs the actual application update
 - source-mode updater runs are supported for testing, but they still target the packaged Windows install flow rather than the source checkout itself
-- packaged Linux builds currently expose the Linux manual-update path only: the UI may open the GitHub Releases page, but it does not download or install AppImage updates in-app yet
+- packaged Linux builds currently expose the Linux manual-update path only: the UI may open the GitHub Releases page, but it does not download or install `.deb`, `.rpm`, or AppImage updates in-app yet
 
 ### 3.1 Startup
 
@@ -171,10 +176,11 @@ Export uses:
 
 Current report/export contract:
 
-- statement-style report views and exported statement rows are ordered newest first
+- statement-style report views and exported statement rows are ordered newest first, with `record.id` used as the same-day tie-breaker so the effective ordering contract is `date + record.id`
 - export headers are localized through shared report-export i18n helpers
 - base-amount columns explicitly include the actual base code, for example `Amount (KZT)` / `Сумма (KZT)`
 - localized statement exports must stay compatible with the generic import parser, not only with direct `report_from_*` helpers
+- Linux export popup helpers must treat app-level focus loss as a real close condition so custom popup surfaces do not survive after app switching
 
 ### Money and transfer semantics
 
@@ -446,6 +452,7 @@ This subsystem is responsible for:
 - applying redesign conventions across form-heavy and table-heavy tabs
 - isolating background polling, deferred startup, status refresh, and lazy tab lifecycle outside the main shell class
 - keeping first paint responsive by deferring charts/budget/distribution refresh work until after the shell becomes interactive
+- ensuring Tk-heavy popup managers and widget helpers cancel pending `after(...)` callbacks on teardown so shutdown and test flows do not leak orphaned callbacks
 
 Current implementation note:
 

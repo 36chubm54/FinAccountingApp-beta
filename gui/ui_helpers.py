@@ -329,6 +329,16 @@ def enable_treeview_column_autosize(
         except (tk.TclError, RuntimeError):
             pending_job["value"] = None
 
+    def _cancel_pending(_event: tk.Event | None = None) -> None:
+        after_id = pending_job["value"]
+        pending_job["value"] = None
+        if after_id is None:
+            return
+        try:
+            tree.after_cancel(after_id)
+        except (tk.TclError, RuntimeError):
+            return
+
     original_insert = cast(Any, tree.insert)
     original_delete = cast(Any, tree.delete)
     original_item = cast(Any, tree.item)
@@ -394,6 +404,7 @@ def enable_treeview_column_autosize(
         "shrink": shrink,
     }
     tree.bind("<Map>", _schedule, add="+")
+    tree.bind("<Destroy>", _cancel_pending, add="+")
     _schedule()
     return tree
 
