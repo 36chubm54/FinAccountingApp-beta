@@ -4,6 +4,7 @@ import argparse
 import runpy
 import subprocess
 from pathlib import Path
+from pathlib import PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[2]
 REQUIRED_PAYLOAD_PATHS = {
@@ -33,13 +34,13 @@ def _normalize_payload_listing(raw_output: str) -> set[str]:
         text = line.strip()
         if not text:
             continue
-        if text.startswith("./"):
-            paths.add("/" + text.removeprefix("./").rstrip("/"))
-            continue
         parts = text.split()
-        candidate = parts[-1].rstrip("/")
-        if candidate.startswith("/"):
-            paths.add(candidate)
+        candidate = text if text.startswith(("./", "/")) else parts[-1]
+        candidate = candidate.rstrip("/")
+        if not candidate.startswith(("./", "/")):
+            continue
+        normalized = str(PurePosixPath("/" + candidate.removeprefix("./").lstrip("/")))
+        paths.add(normalized)
     return paths
 
 

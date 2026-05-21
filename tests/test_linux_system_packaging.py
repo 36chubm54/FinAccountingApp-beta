@@ -114,3 +114,29 @@ def test_verify_system_packages_normalizes_deb_revision_suffix() -> None:
 
     assert module._normalize_deb_version("2.4.0-1") == "2.4.0"
     assert module._normalize_deb_version("1:2.4.0-1") == "2.4.0"
+
+
+def test_verify_system_packages_parses_dpkg_contents_listing() -> None:
+    verify_path = (
+        Path(__file__).resolve().parents[1] / "packaging" / "linux" / "verify_system_packages.py"
+    )
+    spec = importlib.util.spec_from_file_location("verify_system_packages", verify_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    listing = "\n".join(
+        [
+            "drwxr-xr-x root/root         0 2026-05-21 00:00 ./",
+            "drwxr-xr-x root/root         0 2026-05-21 00:00 ./opt/",
+            "-rwxr-xr-x root/root     12345 2026-05-21 00:00 ./opt/FinAccountingApp/FinAccountingApp",
+            "-rwxr-xr-x root/root       123 2026-05-21 00:00 ./usr/bin/ledgera",
+        ]
+    )
+
+    assert module._normalize_payload_listing(listing) == {
+        "/opt",
+        "/opt/FinAccountingApp/FinAccountingApp",
+        "/usr/bin/ledgera",
+    }
