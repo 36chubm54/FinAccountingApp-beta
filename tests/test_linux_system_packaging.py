@@ -100,3 +100,17 @@ def test_write_rendered_nfpm_config_replaces_placeholders(tmp_path: Path) -> Non
     assert "postinstall: packaging/linux/postinstall.sh" in content
     assert "postremove: packaging/linux/postremove.sh" in content
     assert "/usr/share/metainfo/ledgera.metainfo.xml" in content
+
+
+def test_verify_system_packages_normalizes_deb_revision_suffix() -> None:
+    verify_path = (
+        Path(__file__).resolve().parents[1] / "packaging" / "linux" / "verify_system_packages.py"
+    )
+    spec = importlib.util.spec_from_file_location("verify_system_packages", verify_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module._normalize_deb_version("2.4.0-1") == "2.4.0"
+    assert module._normalize_deb_version("1:2.4.0-1") == "2.4.0"

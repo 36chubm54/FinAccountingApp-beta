@@ -43,6 +43,15 @@ def _normalize_payload_listing(raw_output: str) -> set[str]:
     return paths
 
 
+def _normalize_deb_version(raw_version: str) -> str:
+    text = str(raw_version or "").strip()
+    if ":" in text:
+        text = text.split(":", 1)[1]
+    if "-" in text:
+        text = text.rsplit("-", 1)[0]
+    return text
+
+
 def verify_deb_package(path: Path) -> None:
     version = read_version()
     package_name = _run("dpkg-deb", "--field", str(path), "Package")
@@ -51,7 +60,7 @@ def verify_deb_package(path: Path) -> None:
     payload_paths = _normalize_payload_listing(_run("dpkg-deb", "--contents", str(path)))
 
     assert package_name == "ledgera"
-    assert package_version == version
+    assert _normalize_deb_version(package_version) == version
     assert architecture == "amd64"
     assert REQUIRED_PAYLOAD_PATHS.issubset(payload_paths)
 
