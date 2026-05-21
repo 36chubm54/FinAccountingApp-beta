@@ -9,7 +9,7 @@
 
 Graphical application for personal financial accounting with multicurrency support, import/export, tags, budgets, debts, assets, and goals.
 
-The current `v2.3.0` release extends the Linux desktop line further: on top of the earlier `PyInstaller --onedir` + `AppImage` packaging work, it adds a dedicated Wayland compatibility slice focused on `Combobox` and popup stability without regressing the Windows installer / updater contract. Mutable user data still stays outside the install tree, and the Linux GUI contract now explicitly describes `Wayland` / `XWayland` support through a compatibility popup path rather than relying on native `ttk.Combobox` popdown behavior.
+The current `v2.4.0` release extends desktop packaging and branding on two fronts: on top of the earlier `PyInstaller --onedir` + `AppImage` work, it now adds system-package outputs for `deb` and `rpm`, and user-facing installer/package surfaces use the product name `Ledgera` without breaking the internal runtime contracts. Mutable user data still stays outside the install tree, and the Linux GUI contract now distinguishes `system-package`, `AppImage`, and source-mode runtime: `deb` / `rpm` packaged Linux stays on native `ttk.Combobox` by default, while `AppImage` and source-mode Linux on `Wayland` / `XWayland` use a compatibility fallback for problematic selector flows. Internal bundle/runtime paths and other compatibility-sensitive technical identifiers still keep `FinAccountingApp`.
 
 In the current runtime contract:
 
@@ -69,16 +69,39 @@ The app starts a Tkinter GUI on top of SQLite runtime storage. `Infographics` an
 - Bundled read-only resources include `gui/assets/icons`, `locales`, and `db/schema.sql`
 - In packaged mode, mutable runtime files (`finance.db`, currency config/cache, backups, updater downloads) are created in user-scoped `AppData` instead of the install directory
 - Migration utilities `migrate_json_to_sqlite.py` and `migration_002_rename_amount_kzt_to_base.py` are included in the bundle as raw Python scripts, not as separate `.exe` tools
+- Windows installer-facing branding now uses `Ledgera`: the setup artifact is built as `Ledgera-<version>-setup.exe`, and the default install directory becomes `Program Files\\Ledgera`
+- The bundled executable and internal runtime paths remain compatibility-oriented: the installer still ships `FinAccountingApp.exe`, and user data still resolves under `AppData`
 - The GitHub Actions release workflow can optionally sign `FinAccountingApp.exe` and the installer when a code-signing certificate is configured in repository secrets; without a certificate, the build remains unsigned
 
-### Linux build (`PyInstaller --onedir` + `AppImage`)
+### Linux build (`PyInstaller --onedir` + `AppImage` / `deb` / `rpm`)
 
-- The first Linux artifact is built through `FinAccountingApp.linux.spec` and then wrapped as `FinAccountingApp-linux.AppImage`
-- On Linux `Wayland` and `XWayland`, critical `Combobox` / popup flows are handled through the compatibility popup path, and native `ttk.Combobox` dropdown behavior is not treated as a reliable runtime contract
-- Packaged Linux runtime keeps the same read-only resources vs mutable user-data split as Windows builds: the database, currency config, backups, exports, and updates are no longer expected to live beside the AppImage
+- The Linux bundle is still built through `FinAccountingApp.linux.spec`
+- The release workflow now emits three Linux artifact formats from that bundle:
+  - `Ledgera-linux.AppImage`
+  - `Ledgera-<version>-x86_64.deb`
+  - `Ledgera-<version>-x86_64.rpm`
+- `deb` / `rpm` packaged Linux runtime on `Wayland` / `XWayland` now stays on the native `ttk.Combobox` path by default with guard logic, while `AppImage` and source-mode Linux use a compatibility fallback for problematic selector surfaces
+- Packaged Linux runtime keeps the same read-only resources vs mutable user-data split as Windows builds: the database, currency config, backups, exports, and updates are no longer expected to live beside either the AppImage or the installed system bundle
 - User data for packaged Linux builds resolve to `XDG_DATA_HOME/FinAccountingApp` or `~/.local/share/FinAccountingApp`
-- Only packaged Linux builds use the manual-update policy in this release wave: in-app updater actions stay disabled and the supported path is manually downloading a newer AppImage from GitHub Releases
-- In this release wave, Wayland compatibility primarily covers critical `Combobox` and popup flows through an app-managed popup path, including Linux tag autocomplete; the corresponding tag selectors stay on native `ttk.Combobox` on Windows
+- For `.deb` / `.rpm` system packages, the bundle is installed under `/opt/FinAccountingApp`, the launcher is exposed as `/usr/bin/ledgera`, and the desktop entry plus icon are registered system-wide
+- Linux package metadata is now owned by the packaging layer: AppStream summary, description, and release notes are no longer generated directly from `README` / `CHANGELOG`, and the generated metadata is validated through `appstreamcli --pedantic`
+- Only packaged Linux builds use the manual-update policy in this release wave: in-app updater actions stay disabled and the supported path is manually downloading a newer Linux package or AppImage from GitHub Releases
+- In this release wave, Wayland compatibility now splits `system-package`, `AppImage`, and source runtime behavior: `deb` / `rpm` packaged Linux keeps native `ttk.Combobox` behavior by default, while `AppImage`, source-mode Linux, and Linux tag autocomplete can still use the app-managed fallback path when needed; the corresponding selectors stay on native `ttk.Combobox` on Windows
+- `GNOME Software` may display license data and release notes inconsistently for locally installed third-party packages even when AppStream metadata is present; in practice this can differ between Ubuntu GNOME and Fedora GNOME
+
+### Linux package build
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements-dev.txt
+pip install .[pdf,build]
+npm install -g @goreleaser/nfpm
+pyinstaller --noconfirm FinAccountingApp.linux.spec
+chmod +x packaging/linux/build_appimage.sh packaging/linux/build_system_packages.sh
+bash packaging/linux/build_system_packages.sh dist/FinAccountingApp artifacts
+```
 
 ## ✨ Core Features
 
@@ -87,14 +110,14 @@ The app starts a Tkinter GUI on top of SQLite runtime storage. `Infographics` an
 - Two-layer multicurrency model with persisted `base_currency` and runtime-only `display_currency`
 - Operation tags with free-form entry, normalization, suggestions, color coding, and sidecar display in the journal
 - Reports with fixed-rate and current-rate totals, grouped view, tag filters, and `CSV` / `XLSX` / `PDF` export
-- Statement views in `Reports` and exported statement files now list records newest first
+- Statement views in `Reports` and exported statement files now list records newest first, with deterministic same-day ordering by `date + record.id`
 - Financial analytics: `net worth`, cashflow, category breakdown, tag coverage, and monthly summary
 - Category and tag budgets with live progress, pace tracking, and forecast status
 - Debt and loan tracking with repayment history and write-off flows
 - Distribution System for monthly net-income allocation and frozen snapshots
 - Wealth layer: `Assets`, `Goals`, and a dedicated wealth `Dashboard`
 - Full backup / import / migration for `JSON` ↔ `SQLite`
-- Manual Windows app updater in `Settings`: GitHub Release check, installer download with a progress dialog, and installer handoff
+- Manual Windows app updater in `Settings`: GitHub Release check, `Ledgera-*-setup.exe` download with a progress dialog, and installer handoff
 - Read-only Data Audit Engine for runtime consistency checks, including tag integrity
 - External `locales/*.txt` language packs with a shared i18n loader and fallback chain
 - Runtime `theme` / `language` preferences persisted in SQLite schema metadata
@@ -115,7 +138,7 @@ The app starts a Tkinter GUI on top of SQLite runtime storage. `Infographics` an
 - `base_currency` is chosen only during first-run setup, then SQLite `schema_meta` remains the source of truth
 - By default, the display selector is limited to the whitelist `KZT` / `USD` / `EUR` / `RUB`, even if cached rates contain more currency codes
 - `Settings -> Currency and rates` can update `display_currency`, provider mode, primary/fallback provider, `exchange_rate_api_key`, `auto_update`, and `update_interval_minutes`, but not post-startup `base_currency`
-- `Settings -> Application updates` on Windows can check the latest GitHub Release, download `setup.exe` into `AppData\\updates`, and offer install handoff through the normal installer; on packaged Linux builds the same section currently routes users to manual AppImage updates
+- `Settings -> Application updates` on Windows can check the latest GitHub Release, download `Ledgera-*-setup.exe` into `AppData\\updates`, and offer install handoff through the normal installer; on packaged Linux builds the same section currently routes users to manual Linux package or AppImage updates
 - `exchange_rate_api_key` is no longer expected to live in `currency_config.json`: in packaged/runtime flows it is migrated into secure OS storage where the platform supports it, env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` remains an override path, and a plaintext fallback is only tolerated when secure storage is unavailable
 - `auto_update` is now active behavior instead of passive metadata: when online mode is enabled, rates refresh automatically according to `update_interval_minutes`
 - Exported reports are localized to the current UI language, and base-amount columns explicitly show the real base code, for example `Amount (KZT)`
@@ -169,7 +192,7 @@ Also important:
 | `services.budget_service.BudgetService` | Budget CRUD, category/tag budgets, and live tracking |
 | `services.debt_service.DebtService` | Debt/loan lifecycle |
 | `services.distribution_service.DistributionService` | Monthly distribution and frozen rows |
-| `services.app_update_service.AppUpdateService` | GitHub Release lookup, Windows installer asset selection, and streamed updater downloads |
+| `services.app_update_service.AppUpdateService` | GitHub Release lookup, Windows `Ledgera` installer asset selection, and streamed updater downloads |
 | `infrastructure.sqlite_repository.SQLiteRecordRepository` | Primary runtime repository |
 | `storage.sqlite_storage.SQLiteStorage` | Low-level SQLite adapter / schema bootstrap |
 | `infrastructure.currency_providers.CurrencyProviderRegistry` | Registry and extension point for rate providers |
@@ -347,7 +370,7 @@ Useful configuration points:
 ## 🔐 Security Notes
 
 - Runtime data (`finance.db`, `currency_config.json`, `currency_rates.json`, backups, exports) lives in a user-scoped platform data directory: `AppData` on Windows and `XDG_DATA_HOME` / `~/.local/share/FinAccountingApp` on Linux
-- In-app updater downloads on Windows also live in a dedicated `AppData\\updates` cache instead of the source checkout or installed bundle; Linux currently does not perform in-app AppImage installs
+- In-app updater downloads on Windows also live in a dedicated `AppData\\updates` cache instead of the source checkout or installed bundle; Linux currently does not perform in-app package or AppImage installs
 - `exchange_rate_api_key` is expected to live in secure OS-backed storage; `currency_config.json` is no longer treated as a plaintext secret store
 - The SQLite database, JSON backups, and exported reports are still not encrypted at rest: they remain readable financial-data files
 - Uninstalling or removing the bundle does not remove user data from the platform data directory
