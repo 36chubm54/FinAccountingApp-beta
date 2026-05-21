@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://nfpm.goreleaser.com/schema.json
-name: finaccountingapp
+name: ledgera
 arch: amd64
 platform: linux
 version: ${PACKAGE_VERSION}
@@ -21,16 +21,16 @@ contents:
   - src: ${PACKAGE_ROOTFS}/opt/FinAccountingApp/
     dst: /opt/FinAccountingApp
     type: tree
-  - src: ${PACKAGE_ROOTFS}/usr/bin/finaccountingapp
-    dst: /usr/bin/finaccountingapp
+  - src: ${PACKAGE_ROOTFS}/usr/bin/ledgera
+    dst: /usr/bin/ledgera
     file_info:
       mode: 0755
-  - src: ${PACKAGE_ROOTFS}/usr/share/applications/finaccountingapp.desktop
-    dst: /usr/share/applications/finaccountingapp.desktop
-  - src: ${PACKAGE_ROOTFS}/usr/share/metainfo/finaccountingapp.metainfo.xml
-    dst: /usr/share/metainfo/finaccountingapp.metainfo.xml
-  - src: ${PACKAGE_ROOTFS}/usr/share/icons/hicolor/256x256/apps/finaccountingapp.png
-    dst: /usr/share/icons/hicolor/256x256/apps/finaccountingapp.png
+  - src: ${PACKAGE_ROOTFS}/usr/share/applications/ledgera.desktop
+    dst: /usr/share/applications/ledgera.desktop
+  - src: ${PACKAGE_ROOTFS}/usr/share/metainfo/ledgera.metainfo.xml
+    dst: /usr/share/metainfo/ledgera.metainfo.xml
+  - src: ${PACKAGE_ROOTFS}/usr/share/icons/hicolor/256x256/apps/ledgera.png
+    dst: /usr/share/icons/hicolor/256x256/apps/ledgera.png
 overrides:
   deb:
     depends:

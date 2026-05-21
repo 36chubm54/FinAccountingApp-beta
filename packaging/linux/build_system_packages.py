@@ -11,16 +11,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PRODUCT_DISPLAY_NAME = "Ledgera"
 APP_DIR_NAME = "FinAccountingApp"
-PACKAGE_NAME = "finaccountingapp"
+PACKAGE_NAME = "ledgera"
 ICON_SOURCE = ROOT / "gui" / "assets" / "icons" / "app.png"
-DESKTOP_SOURCE = ROOT / "packaging" / "linux" / "finaccountingapp-system.desktop"
-LAUNCHER_SOURCE = ROOT / "packaging" / "linux" / "finaccountingapp"
+DESKTOP_SOURCE = ROOT / "packaging" / "linux" / "ledgera.desktop"
+LAUNCHER_SOURCE = ROOT / "packaging" / "linux" / "ledgera"
 README_SOURCE = ROOT / "README_EN.md"
 CHANGELOG_SOURCE = ROOT / "CHANGELOG.md"
 ENV_FILENAME = "package.env"
 NFPM_TEMPLATE_FILENAME = "nfpm.yaml"
 NFPM_RENDERED_FILENAME = "nfpm.generated.yaml"
-METAINFO_FILENAME = "finaccountingapp.metainfo.xml"
+METAINFO_FILENAME = "ledgera.metainfo.xml"
 
 
 def read_version() -> str:
@@ -102,7 +102,7 @@ def render_metainfo_xml() -> str:
         notes_xml = "          <li>Packaging and desktop metadata updated.</li>"
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>finaccountingapp.desktop</id>
+  <id>ledgera.desktop</id>
   <name>{html.escape(PRODUCT_DISPLAY_NAME)}</name>
   <summary>{html.escape(summary)}</summary>
   <metadata_license>CC0-1.0</metadata_license>
@@ -110,7 +110,7 @@ def render_metainfo_xml() -> str:
   <developer id="36chubm54">
     <name>36chubm54</name>
   </developer>
-  <launchable type="desktop-id">finaccountingapp.desktop</launchable>
+  <launchable type="desktop-id">ledgera.desktop</launchable>
   <branding>
     <color type="primary" scheme_preference="light">#0e4c7f</color>
     <color type="primary" scheme_preference="dark">#0e4c7f</color>

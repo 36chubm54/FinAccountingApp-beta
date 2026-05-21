@@ -8,10 +8,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 REQUIRED_PAYLOAD_PATHS = {
     "/opt/FinAccountingApp/FinAccountingApp",
-    "/usr/bin/finaccountingapp",
-    "/usr/share/applications/finaccountingapp.desktop",
-    "/usr/share/metainfo/finaccountingapp.metainfo.xml",
-    "/usr/share/icons/hicolor/256x256/apps/finaccountingapp.png",
+    "/usr/bin/ledgera",
+    "/usr/share/applications/ledgera.desktop",
+    "/usr/share/metainfo/ledgera.metainfo.xml",
+    "/usr/share/icons/hicolor/256x256/apps/ledgera.png",
 }
 
 
@@ -50,7 +50,7 @@ def verify_deb_package(path: Path) -> None:
     architecture = _run("dpkg-deb", "--field", str(path), "Architecture")
     payload_paths = _normalize_payload_listing(_run("dpkg-deb", "--contents", str(path)))
 
-    assert package_name == "finaccountingapp"
+    assert package_name == "ledgera"
     assert package_version == version
     assert architecture == "amd64"
     assert REQUIRED_PAYLOAD_PATHS.issubset(payload_paths)
@@ -63,7 +63,7 @@ def verify_rpm_package(path: Path) -> None:
     architecture = _run("rpm", "-qp", "--qf", "%{ARCH}", str(path))
     payload_paths = _normalize_payload_listing(_run("rpm", "-qplp", str(path)))
 
-    assert package_name == "finaccountingapp"
+    assert package_name == "ledgera"
     assert package_version == version
     assert architecture == "x86_64"
     assert REQUIRED_PAYLOAD_PATHS.issubset(payload_paths)

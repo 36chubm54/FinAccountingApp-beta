@@ -79,7 +79,7 @@ jobs:
 
       - name: Build Linux system packages
         run: |
-          chmod +x packaging/linux/build_system_packages.sh packaging/linux/finaccountingapp
+          chmod +x packaging/linux/build_system_packages.sh packaging/linux/ledgera
           bash packaging/linux/build_system_packages.sh \
             dist/FinAccountingApp \
             artifacts
