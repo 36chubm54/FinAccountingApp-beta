@@ -9,7 +9,7 @@ section: utils
 priority: optional
 maintainer: 36chubm54 <noreply@github.com>
 description: |
-  Personal financial accounting desktop app with multicurrency support,
+  Ledgera personal finance desktop app with multicurrency support,
   import and export flows, budgets, debts, assets, and reports.
 vendor: 36chubm54
 homepage: https://github.com/36chubm54/FinAccountingApp
@@ -27,6 +27,8 @@ contents:
       mode: 0755
   - src: ${PACKAGE_ROOTFS}/usr/share/applications/finaccountingapp.desktop
     dst: /usr/share/applications/finaccountingapp.desktop
+  - src: ${PACKAGE_ROOTFS}/usr/share/metainfo/finaccountingapp.metainfo.xml
+    dst: /usr/share/metainfo/finaccountingapp.metainfo.xml
   - src: ${PACKAGE_ROOTFS}/usr/share/icons/hicolor/256x256/apps/finaccountingapp.png
     dst: /usr/share/icons/hicolor/256x256/apps/finaccountingapp.png
 overrides:

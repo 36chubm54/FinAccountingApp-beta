@@ -10,6 +10,7 @@ REQUIRED_PAYLOAD_PATHS = {
     "/opt/FinAccountingApp/FinAccountingApp",
     "/usr/bin/finaccountingapp",
     "/usr/share/applications/finaccountingapp.desktop",
+    "/usr/share/metainfo/finaccountingapp.metainfo.xml",
     "/usr/share/icons/hicolor/256x256/apps/finaccountingapp.png",
 }
 

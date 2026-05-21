@@ -8,3 +8,7 @@ fi
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
   gtk-update-icon-cache -q /usr/share/icons/hicolor || true
 fi
+
+if command -v appstreamcli >/dev/null 2>&1; then
+  appstreamcli refresh-cache --force >/dev/null 2>&1 || true
+fi
