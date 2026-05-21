@@ -72,6 +72,7 @@ python main.py
 - Windows installer и release artifacts в этой волне используют branding `Ledgera`: setup-файл собирается как `Ledgera-<version>-setup.exe`, а каталог установки по умолчанию — `Program Files\Ledgera`
 - При этом bundled executable и internal runtime paths остаются совместимыми: внутри installer по-прежнему ставится `FinAccountingApp.exe`, а user data продолжают жить в `AppData`
 - GitHub Actions release workflow может опционально подписывать `FinAccountingApp.exe` и installer, если в repository secrets настроен code-signing certificate; без сертификата build остаётся unsigned
+- Windows CI теперь прогоняет installer build path не только на tag release, но и на обычных workflow runs, чтобы installer-регрессии ловились раньше
 
 ### Linux build (`PyInstaller --onedir` + `AppImage` / `deb` / `rpm`)
 

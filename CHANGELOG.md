@@ -22,6 +22,7 @@ This project adheres to Semantic Versioning.
 - Packaged Linux install layout is now explicitly defined for system packages: read-only bundle files live under `/opt/FinAccountingApp`, while mutable user data still resolves under `XDG_DATA_HOME` or `~/.local/share/FinAccountingApp`
 - Linux package/software-center identity now uses `Ledgera` on `.deb` / `.rpm` package name, desktop/AppStream IDs, launcher path, and artifact names while keeping internal `FinAccountingApp` runtime paths for compatibility
 - Windows installer-facing branding now also uses `Ledgera` for installer artifact names, install directory defaults, and updater asset selection while keeping the internal bundled executable name `FinAccountingApp.exe`
+- Windows CI now builds and uploads the installer path on non-tag workflow runs too, so installer regressions are validated on PRs and manual runs instead of only on tagged releases
 - Added a short documented caveat that `GNOME Software` may omit license details or release notes for locally installed third-party packages even when AppStream metadata is bundled
 - Statement/report ordering is now deterministic within the same day by using `date + record.id` as the effective tie-break contract
 - Narrowed the Linux Wayland/XWayland `Combobox` policy so `deb` / `rpm` packaged Linux builds now stay on the native `ttk.Combobox` path by default, while `AppImage` and source-mode Linux keep the compatibility fallback for problematic selector flows

@@ -72,6 +72,7 @@ The app starts a Tkinter GUI on top of SQLite runtime storage. `Infographics` an
 - Windows installer-facing branding now uses `Ledgera`: the setup artifact is built as `Ledgera-<version>-setup.exe`, and the default install directory becomes `Program Files\\Ledgera`
 - The bundled executable and internal runtime paths remain compatibility-oriented: the installer still ships `FinAccountingApp.exe`, and user data still resolves under `AppData`
 - The GitHub Actions release workflow can optionally sign `FinAccountingApp.exe` and the installer when a code-signing certificate is configured in repository secrets; without a certificate, the build remains unsigned
+- Windows CI now exercises the installer build path on regular workflow runs as well, so installer regressions are caught on PRs and manual runs instead of only on tagged releases
 
 ### Linux build (`PyInstaller --onedir` + `AppImage` / `deb` / `rpm`)
 
