@@ -43,9 +43,9 @@ set +a
 nfpm package \
   --packager deb \
   --config "${NFPM_CONFIG}" \
-  --target "${OUTPUT_DIR}/FinAccountingApp-${PACKAGE_VERSION}-x86_64.deb"
+  --target "${OUTPUT_DIR}/Ledgera-${PACKAGE_VERSION}-x86_64.deb"
 
 nfpm package \
   --packager rpm \
   --config "${NFPM_CONFIG}" \
-  --target "${OUTPUT_DIR}/FinAccountingApp-${PACKAGE_VERSION}-x86_64.rpm"
+  --target "${OUTPUT_DIR}/Ledgera-${PACKAGE_VERSION}-x86_64.rpm"

@@ -74,7 +74,7 @@ jobs:
           chmod +x packaging/linux/build_appimage.sh
           bash packaging/linux/build_appimage.sh \
             dist/FinAccountingApp \
-            artifacts/FinAccountingApp-linux.AppImage \
+            artifacts/Ledgera-linux.AppImage \
             tools/appimagetool.AppImage
 
       - name: Build Linux system packages
@@ -87,23 +87,23 @@ jobs:
       - name: Verify Linux system packages
         run: |
           python packaging/linux/verify_system_packages.py \
-            --deb artifacts/FinAccountingApp-$(python -c "import runpy; print(runpy.run_path('version.py')['__version__'])")-x86_64.deb \
-            --rpm artifacts/FinAccountingApp-$(python -c "import runpy; print(runpy.run_path('version.py')['__version__'])")-x86_64.rpm
+            --deb artifacts/Ledgera-$(python -c "import runpy; print(runpy.run_path('version.py')['__version__'])")-x86_64.deb \
+            --rpm artifacts/Ledgera-$(python -c "import runpy; print(runpy.run_path('version.py')['__version__'])")-x86_64.rpm
 
       - name: Upload Linux AppImage artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FinAccountingApp-linux
-          path: artifacts/FinAccountingApp-linux.AppImage
+          name: Ledgera-linux
+          path: artifacts/Ledgera-linux.AppImage
           if-no-files-found: error
 
       - name: Upload Linux system packages artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FinAccountingApp-linux-system-packages
+          name: Ledgera-linux-system-packages
           path: |
-            artifacts/FinAccountingApp-*-x86_64.deb
-            artifacts/FinAccountingApp-*-x86_64.rpm
+            artifacts/Ledgera-*-x86_64.deb
+            artifacts/Ledgera-*-x86_64.rpm
           if-no-files-found: error
 
       - name: Attach Linux AppImage to GitHub Release
@@ -111,6 +111,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/FinAccountingApp-linux.AppImage
-            artifacts/FinAccountingApp-*-x86_64.deb
-            artifacts/FinAccountingApp-*-x86_64.rpm
+            artifacts/Ledgera-linux.AppImage
+            artifacts/Ledgera-*-x86_64.deb
+            artifacts/Ledgera-*-x86_64.rpm
