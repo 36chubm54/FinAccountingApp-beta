@@ -53,6 +53,7 @@ def build_update_section(
     current_version = str(context.controller.get_app_version() or "").strip() or "unknown"
     release_page_url = str(context.controller.get_app_release_page_url() or "").strip()
     is_linux = sys.platform.startswith("linux")
+    is_source_mode = not packaged_mode
     is_packaged_linux = packaged_mode and is_linux
     is_linux_system_package = (
         is_packaged_linux
@@ -74,24 +75,27 @@ def build_update_section(
             return tr("settings.updates.artifact.appimage", "AppImage")
         return tr("settings.updates.artifact.windows_installer", "Windows installer")
 
+    def _is_linux_package_artifact(kind: str) -> bool:
+        return kind in {"linux-deb", "linux-rpm"}
+
     status_var = tk.StringVar(
         value=(
             tr(
                 "settings.updates.linux_ready",
                 "Можно проверить наличие нового Linux-пакета.",
             )
-            if supported and is_linux_system_package
+            if can_check_updates and is_packaged_linux and not appimage_mode
             else tr(
                 "settings.updates.ready",
                 "Можно проверить наличие нового релиза.",
             )
-            if supported and packaged_mode
+            if can_check_updates and packaged_mode
             else tr(
-                "settings.updates.source_mode",
-                "Режим source: обновление доступно для тестирования. "
-                "Скачанный установщик обновляет packaged app, а не этот checkout.",
+                "settings.updates.source_manual",
+                "Для source-mode встроенная установка обновлений не поддерживается. "
+                "Используйте страницу релизов GitHub вручную.",
             )
-            if supported
+            if is_source_mode
             else tr(
                 "settings.updates.linux_appimage_manual",
                 "Для AppImage встроенная установка обновлений пока недоступна. "
@@ -326,15 +330,15 @@ def build_update_section(
                 tr("settings.updates.install.title", "Установить обновление"),
                 tr(
                     (
-                        "settings.updates.install.source_prompt"
-                        if not packaged_mode
+                        "settings.updates.install.linux_terminal_prompt"
+                        if _is_linux_package_artifact(release.asset.kind)
                         else "settings.updates.install.prompt"
                     ),
                     (
-                        "Вы запущены из source checkout. Скачанный установщик обновит "
-                        "установленную Windows-версию приложения, а не этот исходный "
-                        "проект. Продолжить?"
-                        if not packaged_mode
+                        "Обновление v{version} загружено. "
+                        "Закрыть приложение и открыть терминал для установки скачанного "
+                        "{artifact} через sudo сейчас?"
+                        if _is_linux_package_artifact(release.asset.kind)
                         else "Обновление v{version} загружено. "
                         "Закрыть приложение и открыть скачанный {artifact} сейчас?"
                     ),
@@ -353,6 +357,15 @@ def build_update_section(
                             error=str(error),
                         ),
                     )
+                    fallback_url = release.release_url or release_page_url
+                    if fallback_url and messagebox_module.askyesno(
+                        tr("settings.updates.release_page", "Страница релиза"),
+                        tr(
+                            "settings.updates.install.release_page_fallback",
+                            "Не удалось запустить установку обновления. Открыть страницу релиза GitHub?",  # noqa: E501
+                        ),
+                    ):
+                        webbrowser.open(fallback_url)
 
         def on_error(error: BaseException) -> None:
             _set_update_flow_active(False)
@@ -445,7 +458,7 @@ def build_update_section(
         def on_error(error: BaseException) -> None:
             _set_update_flow_active(False)
             latest_release_holder["value"] = None
-            if not supported and release_page_url and is_linux:
+            if release_page_url:
                 release_link_button.state(["!disabled"])
             else:
                 release_link_button.state(["disabled"])
@@ -488,5 +501,5 @@ def build_update_section(
         command=_open_release_page,
     )
     release_link_button.grid(row=0, column=1, sticky="ew", padx=(PAD_XS, 0))
-    if supported or not release_page_url or not is_linux:
+    if supported or not release_page_url or not (is_linux or is_source_mode):
         release_link_button.state(["disabled"])

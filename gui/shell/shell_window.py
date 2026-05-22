@@ -3,14 +3,67 @@ from __future__ import annotations
 import ctypes
 import logging
 import os
+import shlex
+import shutil
 import subprocess
 import sys
 import tkinter as tk
+from collections.abc import Callable
 from pathlib import Path
-from tkinter import TclError
+from tkinter import TclError, ttk
 from typing import Any
 
+from app_paths import get_linux_package_kind
+from gui.i18n import tr
+
 APP_LINUX_WM_CLASS = "Ledgera"
+_LINUX_TERMINALS_WITH_SEPARATOR = {
+    "kgx",
+    "gnome-terminal",
+    "ptyxis",
+    "xfce4-terminal",
+    "mate-terminal",
+}
+_LINUX_TERMINALS_WITH_EXEC = {
+    "konsole",
+    "qterminal",
+    "lxterminal",
+    "tilix",
+    "kitty",
+    "alacritty",
+    "x-terminal-emulator",
+    "xterm",
+}
+_SUPPORTED_LINUX_TERMINALS = (
+    "kgx",
+    "gnome-terminal",
+    "ptyxis",
+    "konsole",
+    "xfce4-terminal",
+    "mate-terminal",
+    "qterminal",
+    "lxterminal",
+    "tilix",
+    "kitty",
+    "alacritty",
+    "x-terminal-emulator",
+    "xterm",
+)
+_LINUX_TERMINAL_LABELS = {
+    "kgx": "Console",
+    "gnome-terminal": "GNOME Terminal",
+    "ptyxis": "Ptyxis",
+    "konsole": "Konsole",
+    "xfce4-terminal": "Xfce Terminal",
+    "mate-terminal": "MATE Terminal",
+    "qterminal": "QTerminal",
+    "lxterminal": "LXTerminal",
+    "tilix": "Tilix",
+    "kitty": "Kitty",
+    "alacritty": "Alacritty",
+    "x-terminal-emulator": "System Terminal",
+    "xterm": "XTerm",
+}
 
 
 def enable_windows_dpi_awareness(logger: logging.Logger) -> None:
@@ -87,20 +140,237 @@ def configure_main_window(owner: Any) -> None:
     owner.protocol("WM_DELETE_WINDOW", owner.destroy)
 
 
-def launch_downloaded_update_and_exit(owner: Any, artifact_path: str) -> None:
+def _linux_terminal_key(executable_path: str) -> str | None:
+    key = Path(executable_path).name.strip().lower()
+    if key in _LINUX_TERMINALS_WITH_SEPARATOR or key in _LINUX_TERMINALS_WITH_EXEC:
+        return key
+    return None
+
+
+def _build_linux_install_command(artifact_path: str, package_kind: str) -> str:
+    normalized_path = str(artifact_path)
+    quoted_path = shlex.quote(normalized_path)
+    if package_kind == "deb":
+        install_command = f"sudo apt install {quoted_path}"
+    elif package_kind == "rpm":
+        install_command = f"sudo dnf install {quoted_path}"
+    else:
+        raise RuntimeError(
+            tr(
+                "settings.updates.install.error.unknown_linux_package",
+                "Не удалось определить тип Linux-пакета для скачанного обновления.",
+            )
+        )
+    return (
+        f"{install_command}; "
+        "status=$?; "
+        f"printf {shlex.quote(f'{tr('settings.updates.install.terminal_close_prompt', 'Нажмите Enter, чтобы закрыть терминал...')}\\n')}; "
+        "read _dummy; "
+        "exit $status"
+    )
+
+
+def _build_linux_terminal_spawn_args(executable_path: str, shell_command: str) -> list[str]:
+    terminal_key = _linux_terminal_key(executable_path)
+    if terminal_key is None:
+        raise RuntimeError("The selected terminal executable is not supported.")
+    if terminal_key in _LINUX_TERMINALS_WITH_SEPARATOR:
+        return [executable_path, "--", "sh", "-lc", shell_command]
+    return [executable_path, "-e", "sh", "-lc", shell_command]
+
+
+def _detect_linux_terminal_candidates() -> list[tuple[str, str]]:
+    candidates: list[tuple[str, str]] = []
+    seen_paths: set[str] = set()
+    for terminal in _SUPPORTED_LINUX_TERMINALS:
+        resolved = shutil.which(terminal)
+        if not resolved or resolved in seen_paths:
+            continue
+        seen_paths.add(resolved)
+        label = _LINUX_TERMINAL_LABELS.get(terminal, terminal)
+        candidates.append((label, resolved))
+    return candidates
+
+
+def _choose_linux_terminal_executable(
+    owner: Any,
+    candidates: list[tuple[str, str]],
+) -> str | None:
+    if not candidates:
+        return None
+
+    owner_window = owner.winfo_toplevel()
+    dialog = tk.Toplevel(owner_window)
+    dialog.withdraw()
+    dialog.title(
+        tr(
+            "settings.updates.terminal_chooser.title",
+            "Выбор терминала",
+        )
+    )
+    dialog.transient(owner_window)
+    dialog.resizable(False, False)
+    dialog.configure(background=owner_window.cget("background"))
+    selected_path = tk.StringVar(value=candidates[0][1])
+    result: dict[str, str | None] = {"path": None}
+
+    body = ttk.Frame(dialog, padding=16)
+    body.grid(row=0, column=0, sticky="nsew")
+    body.grid_columnconfigure(0, weight=1)
+
+    ttk.Label(
+        body,
+        text=tr(
+            "settings.updates.terminal_chooser.message",
+            "Выберите терминал для установки скачанного пакета обновления.",
+        ),
+        justify="left",
+        wraplength=420,
+    ).grid(row=0, column=0, sticky="w", pady=(0, 12))
+
+    terminal_list = tk.Listbox(body, height=min(max(len(candidates), 3), 8), exportselection=False)
+    terminal_list.grid(row=1, column=0, sticky="ew")
+    for index, (label, path) in enumerate(candidates):
+        terminal_list.insert(index, f"{label} ({path})")
+    terminal_list.selection_set(0)
+    terminal_list.activate(0)
+
+    def _sync_selection(_event: object | None = None) -> None:
+        selection = terminal_list.curselection()
+        if not selection:
+            return
+        selected_path.set(candidates[int(selection[0])][1])
+
+    terminal_list.bind("<<ListboxSelect>>", _sync_selection)
+    terminal_list.bind("<Double-Button-1>", lambda _event: _accept())
+
+    buttons = ttk.Frame(body)
+    buttons.grid(row=2, column=0, sticky="e", pady=(12, 0))
+
+    def _accept() -> None:
+        _sync_selection()
+        result["path"] = str(selected_path.get() or "").strip() or None
+        dialog.destroy()
+
+    def _cancel() -> None:
+        result["path"] = None
+        dialog.destroy()
+
+    ttk.Button(
+        buttons,
+        text=tr("common.cancel", "Отмена"),
+        command=_cancel,
+    ).grid(row=0, column=0, padx=(0, 8))
+    ttk.Button(
+        buttons,
+        text=tr("settings.updates.terminal_chooser.use_button", "Использовать"),
+        command=_accept,
+    ).grid(row=0, column=1)
+
+    dialog.protocol("WM_DELETE_WINDOW", _cancel)
+    dialog.update_idletasks()
+    width = max(dialog.winfo_reqwidth(), 480)
+    height = max(dialog.winfo_reqheight(), 240)
+    x = owner_window.winfo_rootx() + max((owner_window.winfo_width() - width) // 2, 0)
+    y = owner_window.winfo_rooty() + max((owner_window.winfo_height() - height) // 2, 0)
+    dialog.geometry(f"{width}x{height}+{x}+{y}")
+    dialog.deiconify()
+    dialog.grab_set()
+    dialog.wait_window()
+    return result["path"]
+
+
+def _resolve_linux_terminal_executable(
+    owner: Any,
+    *,
+    load_saved_terminal: Callable[[], str | None] | None = None,
+    save_terminal: Callable[[str], None] | None = None,
+) -> str | None:
+    saved_candidate = str(load_saved_terminal() or "").strip() if load_saved_terminal else ""
+    if (
+        saved_candidate
+        and Path(saved_candidate).is_file()
+        and _linux_terminal_key(saved_candidate) is not None
+    ):
+        return saved_candidate
+    candidates = _detect_linux_terminal_candidates()
+    if len(candidates) == 1:
+        return candidates[0][1]
+    chosen = _choose_linux_terminal_executable(owner, candidates)
+    if not chosen:
+        return None
+    if not Path(chosen).is_file() or _linux_terminal_key(chosen) is None:
+        raise RuntimeError(
+            tr(
+                "settings.updates.install.error.unsupported_terminal",
+                "Выбранный терминал не поддерживается для установки обновления.",
+            )
+        )
+    if save_terminal is not None:
+        save_terminal(chosen)
+    return chosen
+
+
+def launch_downloaded_update_and_exit(
+    owner: Any,
+    artifact_path: str,
+    *,
+    load_saved_terminal: Callable[[], str | None] | None = None,
+    save_terminal: Callable[[str], None] | None = None,
+) -> None:
     if not Path(artifact_path).is_file():
-        raise RuntimeError("The downloaded update file was not found.")
+        raise RuntimeError(
+            tr(
+                "settings.updates.install.error.missing_download",
+                "Скачанный файл обновления не найден.",
+            )
+        )
     try:
         if os.name == "nt":
             subprocess.Popen([str(artifact_path)])
         elif sys.platform.startswith("linux"):
-            subprocess.Popen(["xdg-open", str(artifact_path)])
+            package_kind = get_linux_package_kind()
+            if package_kind not in {"deb", "rpm"}:
+                raise RuntimeError(
+                    tr(
+                        "settings.updates.install.error.unknown_linux_package",
+                        "Не удалось определить тип Linux-пакета для скачанного обновления.",
+                    )
+                )
+            terminal_executable = _resolve_linux_terminal_executable(
+                owner,
+                load_saved_terminal=load_saved_terminal,
+                save_terminal=save_terminal,
+            )
+            if not terminal_executable:
+                raise RuntimeError(
+                    tr(
+                        "settings.updates.install.error.no_supported_terminal",
+                        "Не найден поддерживаемый терминал для установки обновления.",
+                    )
+                )
+            subprocess.Popen(
+                _build_linux_terminal_spawn_args(
+                    terminal_executable,
+                    _build_linux_install_command(artifact_path, package_kind),
+                )
+            )
         elif sys.platform == "darwin":
             subprocess.Popen(["open", str(artifact_path)])
         else:
-            raise RuntimeError("Opening downloaded update files is not supported on this platform.")
+            raise RuntimeError(
+                tr(
+                    "settings.updates.install.error.unsupported_platform",
+                    "Открытие скачанного файла обновления не поддерживается на этой платформе.",
+                )
+            )
     except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError("Failed to open the downloaded update file.") from exc
+        raise RuntimeError(
+            tr(
+                "settings.updates.install.error.open_failed",
+                "Не удалось открыть скачанный файл обновления.",
+            )
+        ) from exc
     owner.destroy()
 
 

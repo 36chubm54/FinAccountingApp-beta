@@ -467,7 +467,12 @@ class FinancialApp(tk.Tk):
         scroll_owner_legend_canvas(self, event)
 
     def _launch_downloaded_update_and_exit(self, artifact_path: str) -> None:
-        launch_downloaded_update_and_exit(self, artifact_path)
+        launch_downloaded_update_and_exit(
+            self,
+            artifact_path,
+            load_saved_terminal=self.controller.load_linux_terminal_preference,
+            save_terminal=self.controller.save_linux_terminal_preference,
+        )
 
     def _launch_installer_and_exit(self, installer_path: str) -> None:
         launch_installer_and_exit(self, installer_path)

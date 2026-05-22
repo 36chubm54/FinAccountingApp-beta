@@ -325,6 +325,12 @@ class FinancialController:
     def load_online_mode_preference(self) -> bool:
         return self._ui_preferences.load_online_mode_preference()
 
+    def save_linux_terminal_preference(self, executable_path: str) -> None:
+        self._ui_preferences.save_linux_terminal_preference(executable_path)
+
+    def load_linux_terminal_preference(self) -> str | None:
+        return self._ui_preferences.load_linux_terminal_preference()
+
     def get_app_version(self) -> str:
         return self._app_update.get_current_version()
 

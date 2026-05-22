@@ -61,18 +61,141 @@ def test_launch_installer_and_exit_spawns_process_and_closes_window(monkeypatch)
     assert window.destroyed is True
 
 
-def test_launch_downloaded_update_and_exit_uses_xdg_open_on_linux(monkeypatch) -> None:
+def test_launch_downloaded_update_and_exit_uses_terminal_for_deb_linux(monkeypatch) -> None:
     window = _FakeWindow()
     calls: list[list[str]] = []
     monkeypatch.setattr(Path, "is_file", lambda self: True)
     monkeypatch.setattr("gui.shell.shell_window.os.name", "posix")
     monkeypatch.setattr("gui.shell.shell_window.sys.platform", "linux")
+    monkeypatch.setattr("gui.shell.shell_window.get_linux_package_kind", lambda: "deb")
+    monkeypatch.setattr("gui.shell.shell_window.shutil.which", lambda name: "/usr/bin/kgx")
     monkeypatch.setattr(subprocess, "Popen", lambda args: calls.append(list(args)))
 
     launch_downloaded_update_and_exit(window, "/tmp/Ledgera-2.0.2-x86_64.deb")
 
-    assert calls == [["xdg-open", "/tmp/Ledgera-2.0.2-x86_64.deb"]]
+    assert calls
+    assert calls[0][:4] == ["/usr/bin/kgx", "--", "sh", "-lc"]
+    assert "sudo apt install /tmp/Ledgera-2.0.2-x86_64.deb" in calls[0][4]
     assert window.destroyed is True
+
+
+def test_launch_downloaded_update_and_exit_uses_terminal_for_rpm_linux(monkeypatch) -> None:
+    window = _FakeWindow()
+    calls: list[list[str]] = []
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    monkeypatch.setattr("gui.shell.shell_window.os.name", "posix")
+    monkeypatch.setattr("gui.shell.shell_window.sys.platform", "linux")
+    monkeypatch.setattr("gui.shell.shell_window.get_linux_package_kind", lambda: "rpm")
+    monkeypatch.setattr("gui.shell.shell_window.shutil.which", lambda name: "/usr/bin/konsole")
+    monkeypatch.setattr(subprocess, "Popen", lambda args: calls.append(list(args)))
+
+    launch_downloaded_update_and_exit(window, "/tmp/Ledgera-2.0.2-x86_64.rpm")
+
+    assert calls
+    assert calls[0][:4] == ["/usr/bin/konsole", "-e", "sh", "-lc"]
+    assert "sudo dnf install /tmp/Ledgera-2.0.2-x86_64.rpm" in calls[0][4]
+    assert window.destroyed is True
+
+
+def test_launch_downloaded_update_and_exit_uses_saved_terminal_preference(monkeypatch) -> None:
+    window = _FakeWindow()
+    calls: list[list[str]] = []
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    monkeypatch.setattr("gui.shell.shell_window.os.name", "posix")
+    monkeypatch.setattr("gui.shell.shell_window.sys.platform", "linux")
+    monkeypatch.setattr("gui.shell.shell_window.get_linux_package_kind", lambda: "deb")
+    monkeypatch.setattr("gui.shell.shell_window.shutil.which", lambda name: None)
+    monkeypatch.setattr(subprocess, "Popen", lambda args: calls.append(list(args)))
+
+    launch_downloaded_update_and_exit(
+        window,
+        "/tmp/Ledgera-2.0.2-x86_64.deb",
+        load_saved_terminal=lambda: "/usr/bin/qterminal",
+    )
+
+    assert calls
+    assert calls[0][:4] == ["/usr/bin/qterminal", "-e", "sh", "-lc"]
+    assert window.destroyed is True
+
+
+def test_launch_downloaded_update_and_exit_supports_x_terminal_emulator(monkeypatch) -> None:
+    window = _FakeWindow()
+    calls: list[list[str]] = []
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    monkeypatch.setattr("gui.shell.shell_window.os.name", "posix")
+    monkeypatch.setattr("gui.shell.shell_window.sys.platform", "linux")
+    monkeypatch.setattr("gui.shell.shell_window.get_linux_package_kind", lambda: "deb")
+    monkeypatch.setattr(
+        "gui.shell.shell_window.shutil.which",
+        lambda name: "/usr/bin/x-terminal-emulator" if name == "x-terminal-emulator" else None,
+    )
+    monkeypatch.setattr(subprocess, "Popen", lambda args: calls.append(list(args)))
+
+    launch_downloaded_update_and_exit(window, "/tmp/Ledgera-2.0.2-x86_64.deb")
+
+    assert calls
+    assert calls[0][:4] == ["/usr/bin/x-terminal-emulator", "-e", "sh", "-lc"]
+    assert "sudo apt install /tmp/Ledgera-2.0.2-x86_64.deb" in calls[0][4]
+    assert window.destroyed is True
+
+
+def test_launch_downloaded_update_and_exit_saves_supported_terminal_from_chooser(
+    monkeypatch,
+) -> None:
+    window = _FakeWindow()
+    calls: list[list[str]] = []
+    saved: list[str] = []
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    monkeypatch.setattr("gui.shell.shell_window.os.name", "posix")
+    monkeypatch.setattr("gui.shell.shell_window.sys.platform", "linux")
+    monkeypatch.setattr("gui.shell.shell_window.get_linux_package_kind", lambda: "deb")
+    monkeypatch.setattr(
+        "gui.shell.shell_window._detect_linux_terminal_candidates",
+        lambda: [
+            ("Console", "/usr/bin/kgx"),
+            ("Xfce Terminal", "/usr/bin/xfce4-terminal"),
+        ],
+    )
+    monkeypatch.setattr(
+        "gui.shell.shell_window._choose_linux_terminal_executable",
+        lambda owner, candidates: "/usr/bin/xfce4-terminal",
+    )
+    monkeypatch.setattr(subprocess, "Popen", lambda args: calls.append(list(args)))
+
+    launch_downloaded_update_and_exit(
+        window,
+        "/tmp/Ledgera-2.0.2-x86_64.deb",
+        load_saved_terminal=lambda: None,
+        save_terminal=lambda path: saved.append(path),
+    )
+
+    assert calls
+    assert calls[0][:4] == ["/usr/bin/xfce4-terminal", "--", "sh", "-lc"]
+    assert saved == ["/usr/bin/xfce4-terminal"]
+    assert window.destroyed is True
+
+
+def test_launch_downloaded_update_and_exit_rejects_unsupported_terminal_choice(
+    monkeypatch,
+) -> None:
+    window = _FakeWindow()
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    monkeypatch.setattr("gui.shell.shell_window.os.name", "posix")
+    monkeypatch.setattr("gui.shell.shell_window.sys.platform", "linux")
+    monkeypatch.setattr("gui.shell.shell_window.get_linux_package_kind", lambda: "deb")
+    monkeypatch.setattr(
+        "gui.shell.shell_window._detect_linux_terminal_candidates",
+        lambda: [("Custom", "/usr/bin/custom-terminal")],
+    )
+    monkeypatch.setattr(
+        "gui.shell.shell_window._choose_linux_terminal_executable",
+        lambda owner, candidates: "/usr/bin/custom-terminal",
+    )
+
+    with pytest.raises(RuntimeError, match="not supported"):
+        launch_downloaded_update_and_exit(window, "/tmp/Ledgera-2.0.2-x86_64.deb")
+
+    assert window.destroyed is False
 
 
 def test_launch_installer_and_exit_raises_when_spawn_fails(monkeypatch) -> None:
