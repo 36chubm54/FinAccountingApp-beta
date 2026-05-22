@@ -99,6 +99,25 @@ def test_frozen_linux_package_kind_uses_marker_file(monkeypatch, tmp_path: Path)
     assert app_paths.get_linux_package_kind() == "deb"
 
 
+def test_frozen_linux_package_kind_ignores_meipass_and_reads_executable_root(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    exe_dir = tmp_path / "opt" / "FinAccountingApp"
+    exe_dir.mkdir(parents=True)
+    bundle_dir = exe_dir / "_internal"
+    bundle_dir.mkdir()
+    (exe_dir / app_paths.LINUX_PACKAGE_KIND_MARKER).write_text("rpm\n", encoding="utf-8")
+    monkeypatch.setattr(app_paths, "_is_frozen_mode", lambda: True)
+    monkeypatch.setattr(app_paths, "_is_linux", lambda: True)
+    monkeypatch.setattr(app_paths, "_is_appimage_mode", lambda: False)
+    monkeypatch.setattr(app_paths.sys, "executable", str(exe_dir / "FinAccountingApp"))
+    monkeypatch.setattr(app_paths.sys, "_MEIPASS", str(bundle_dir), raising=False)
+
+    assert app_paths.get_resource_root() == bundle_dir.resolve()
+    assert app_paths.get_linux_package_kind() == "rpm"
+
+
 def test_frozen_resource_root_falls_back_to_executable_parent_without_meipass(
     monkeypatch,
     tmp_path: Path,
