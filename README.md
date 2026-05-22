@@ -9,14 +9,15 @@
 
 Графическое приложение для персонального финансового учёта с мультивалютностью, импортом/экспортом, тегами, бюджетами, долгами, активами и целями.
 
-Текущий релиз `v2.4.0` развивает desktop packaging и branding сразу по двум направлениям: поверх уже существующего `PyInstaller --onedir` + `AppImage` пути проект теперь собирает системные `deb` / `rpm` пакеты, а user-facing installer/package surfaces используют product name `Ledgera` без слома внутренних runtime-контрактов. Приложение по-прежнему держит mutable user data вне install tree, а Linux GUI contract теперь различает `system-package`, `AppImage` и source-mode runtime: `deb` / `rpm` packaged Linux по умолчанию остаётся на native `ttk.Combobox`, а `AppImage` и source-mode Linux при `Wayland` / `XWayland` используют compatibility fallback для проблемных selector flows. При этом internal bundle/runtime paths и часть совместимых технических идентификаторов сохраняют `FinAccountingApp`.
+Текущий релиз `v2.5.0` расширяет desktop updater contract поверх уже завершённой packaging wave: packaged Linux `deb` / `rpm` builds теперь умеют проверять GitHub Releases, подбирать пакет по текущему install type, скачивать его в user-scoped `updates` cache и передавать установку в terminal-based handoff, а updater logic в целом стала prerelease-aware. При этом internal bundle/runtime paths и часть совместимых технических идентификаторов по-прежнему сохраняют `FinAccountingApp`, а source-mode Linux/Windows и `AppImage` остаются на честном manual release-page path.
 
 В актуальном runtime-контракте:
 
 - `exchange_rate_api_key` больше не должен жить в plaintext `currency_config.json` и по умолчанию уходит в OS-backed secure storage
 - env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` остаётся runtime override поверх secure storage
 - packaged mutable runtime state хранится в user-scoped platform data directory: `AppData` на Windows и `XDG_DATA_HOME` / `~/.local/share/FinAccountingApp` на Linux
-- Windows updater скачивает installer в отдельный `updates` cache внутри `AppData` и не пишет payload в install tree
+- Windows updater скачивает installer в отдельный `updates` cache внутри `AppData`, а packaged Linux updater делает то же для `.deb` / `.rpm` в user-scoped Linux updates cache
+- stable builds игнорируют GitHub prerelease releases, а prerelease builds умеют видеть более новые prerelease и затем переходить на финальный stable release
 - backup/export файлы остаются plaintext financial data, и это теперь явно отражено в UX и документации
 - Windows release workflow подготовлен к optional code signing, но без сертификата installer и bundle остаются unsigned
 
@@ -86,7 +87,9 @@ python main.py
 - User data для packaged Linux builds размещаются в `XDG_DATA_HOME/FinAccountingApp` или `~/.local/share/FinAccountingApp`
 - Для `.deb` / `.rpm` system packages bundle устанавливается в `/opt/FinAccountingApp`, launcher регистрируется как `/usr/bin/ledgera`, а desktop entry и icon ставятся системно
 - Linux package metadata теперь принадлежат packaging layer: AppStream summary, description и release notes больше не генерируются напрямую из `README` / `CHANGELOG`, а отдельно валидируются через `appstreamcli --pedantic`
-- Только packaged Linux builds используют manual-update policy в этой волне: встроенный updater не выполняет скачивание/установку и вместо этого ведёт на ручное скачивание нового Linux-пакета или AppImage из GitHub Releases
+- Packaged Linux `deb` / `rpm` builds теперь поддерживают in-app updater flow: приложение определяет текущий package kind через install-root marker, скачивает matching Linux package в user-scoped `updates` cache и после подтверждения открывает terminal-based `sudo apt install ...` / `sudo dnf install ...` handoff
+- Если packaged Linux runtime не может надёжно определить package kind или не находит подходящий terminal executable, updater деградирует к ручной GitHub Releases path вместо угадывания install command
+- `AppImage` и source-mode Linux по-прежнему не обновляются in-app: для них supported path остаётся ручное скачивание нового Linux-пакета или AppImage из GitHub Releases
 - Wayland compatibility в этой волне теперь разделяет `system-package`, `AppImage` и source runtime: `deb` / `rpm` packaged Linux сохраняет native `ttk.Combobox` behavior по умолчанию, а `AppImage`, source-mode Linux и Linux tag autocomplete при необходимости используют app-managed fallback path; в Windows соответствующие selectors остаются на native `ttk.Combobox`
 - `GNOME Software` для локально установленных сторонних пакетов может непоследовательно отображать license и release notes даже при наличии AppStream metadata; на практике поведение может отличаться между Ubuntu GNOME и Fedora GNOME
 
@@ -118,7 +121,7 @@ bash packaging/linux/build_system_packages.sh dist/FinAccountingApp artifacts
 - Distribution System для monthly net-income allocation и frozen snapshots
 - Wealth layer: `Assets`, `Goals`, wealth `Dashboard`
 - Full backup / import / migration для `JSON` ↔ `SQLite`
-- Manual Windows app updater в `Settings`: проверка GitHub Release, скачивание `Ledgera-*-setup.exe` с progress dialog и handoff в штатный setup flow
+- In-app updater в `Settings`: Windows скачивает `Ledgera-*-setup.exe` и передаёт его штатному installer flow, а packaged Linux `deb` / `rpm` builds скачивают matching package и передают установку в terminal-based handoff
 - Read-only Data Audit Engine для проверки консистентности данных, включая tag integrity
 - Внешние языковые пакеты `locales/*.txt` и единый i18n-loader с fallback-цепочкой
 - Runtime `theme` / `language` preferences с сохранением в SQLite schema metadata
@@ -139,7 +142,7 @@ bash packaging/linux/build_system_packages.sh dist/FinAccountingApp artifacts
 - `base_currency` выбирается только при первом запуске через setup wizard, затем источником истины остаётся SQLite `schema_meta`
 - По умолчанию селектор отображения ограничен whitelist-ом `KZT` / `USD` / `EUR` / `RUB`, даже если кэш курсов содержит больше кодов
 - `Settings -> Валюта и курсы` позволяет менять `display_currency`, provider mode, primary/fallback provider, `exchange_rate_api_key`, `auto_update` и `update_interval_minutes`, но не post-startup `base_currency`
-- `Settings -> Обновление приложения` в Windows умеет проверять последний GitHub Release, скачивать `Ledgera-*-setup.exe` в `AppData\updates` и предлагать install handoff через штатный installer; на packaged Linux builds эта секция пока ведёт только на ручное скачивание нового Linux-пакета или AppImage
+- `Settings -> Обновление приложения` в Windows умеет проверять последний GitHub Release, скачивать `Ledgera-*-setup.exe` в `AppData\updates` и предлагать install handoff через штатный installer; packaged Linux `deb` / `rpm` builds теперь similarly скачивают matching package в user-scoped updates cache и открывают terminal-based install handoff, а `AppImage` и source-mode Linux остаются на ручной GitHub Releases path
 - `exchange_rate_api_key` больше не должен жить в `currency_config.json`: в packaged/runtime flow он переносится в secure OS storage там, где платформа это поддерживает, env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` остаётся override-путём, а аварийный plaintext fallback допустим только когда secure storage недоступен
 - `auto_update` больше не является декоративным флагом: при включённом online mode курсы обновляются автоматически по `update_interval_minutes`
 - Экспортируемые отчёты локализуются по текущему языку UI, а колонки базовых сумм явно показывают код базы, например `Сумма (KZT)`
@@ -193,7 +196,7 @@ bash packaging/linux/build_system_packages.sh dist/FinAccountingApp artifacts
 | `services.budget_service.BudgetService` | Budget CRUD, category/tag budgets и live tracking |
 | `services.debt_service.DebtService` | Debt/loan lifecycle |
 | `services.distribution_service.DistributionService` | Monthly distribution и frozen rows |
-| `services.app_update_service.AppUpdateService` | Проверка GitHub Release, выбор Windows `Ledgera` installer asset и stream-download updater payload |
+| `services.app_update_service.AppUpdateService` | Проверка GitHub Releases, prerelease-aware asset selection и stream-download updater payload для Windows installer и packaged Linux packages |
 | `infrastructure.sqlite_repository.SQLiteRecordRepository` | Основной runtime repository |
 | `storage.sqlite_storage.SQLiteStorage` | Низкоуровневый SQLite adapter / schema bootstrap |
 | `infrastructure.currency_providers.CurrencyProviderRegistry` | Реестр и extension point для rate providers |
@@ -208,7 +211,7 @@ bash packaging/linux/build_system_packages.sh dist/FinAccountingApp artifacts
 - `gui.tab_lifecycle` — lazy tab build и lifecycle dispatch вне основного shell-класса
 - `gui.shell.*` — shell-specific lifecycle/refresh/preferences/status helpers, вынесенные из `gui.tkinter_gui`
 - `gui.tabs.*` — реальные tab packages, где `*_tab.py` оставлены как тонкие compatibility shims
-- `gui.tabs.settings.update_section` — updater/update-section UI с Windows installer download flow и Linux manual-release fallback
+- `gui.tabs.settings.update_section` — updater/update-section UI с Windows installer flow, packaged Linux package download + terminal handoff и manual fallback для `AppImage` / source-mode
 - `CurrencyService.get_available_display_currencies()` — whitelist-aware набор кодов для status-bar switcher вместо полного набора из кэша
 - `FinanceService.get_import_capabilities()` — единая capability-модель для import pipeline вместо ad-hoc проверок по атрибутам
 - `services.import_payload_support`, `services.import_replace_support`, `services.import_execution_support`, `services.import_mandatory_support` — разрезанный import stack вместо одного разросшегося service body
@@ -371,7 +374,7 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 ## 🔐 Security Notes
 
 - Runtime data (`finance.db`, `currency_config.json`, `currency_rates.json`, backups, exports) хранятся в user-scoped platform data directory: `AppData` на Windows и `XDG_DATA_HOME` / `~/.local/share/FinAccountingApp` на Linux
-- Downloads встроенного updater'а на Windows живут в отдельном `AppData\updates` cache, а не рядом с исходниками или установленным bundle; на Linux встроенная установка обновлений пока не используется
+- Downloads встроенного updater'а на Windows и packaged Linux живут в user-scoped `updates` cache, а не рядом с исходниками или установленным bundle; `AppImage` и source-mode runtime по-прежнему не используют in-app install handoff
 - `exchange_rate_api_key` должен храниться в secure OS-backed storage; `currency_config.json` больше не рассматривается как место для plaintext secrets
 - SQLite база, JSON backups и exported reports по-прежнему не шифруются at rest: это читаемые файлы с финансовыми данными
 - Uninstall/remove bundle не удаляет пользовательские данные из platform data directory

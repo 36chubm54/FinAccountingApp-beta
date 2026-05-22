@@ -50,6 +50,20 @@ class UIPreferencesService:
         value = self._repository.get_schema_meta("app_theme")
         return str(value).strip().lower() if value else None
 
+    def save_linux_terminal_preference(self, executable_path: str) -> None:
+        if isinstance(self._repository, SchemaMetaRepository):
+            self._repository.set_schema_meta(
+                "linux_terminal_path",
+                str(executable_path or "").strip(),
+            )
+
+    def load_linux_terminal_preference(self) -> str | None:
+        if not isinstance(self._repository, SchemaMetaRepository):
+            return None
+        value = self._repository.get_schema_meta("linux_terminal_path")
+        normalized = str(value or "").strip()
+        return normalized or None
+
     def get_online_status_snapshot(self) -> OnlineStatusSnapshot:
         return OnlineStatusSnapshot(
             is_online=self._currency.is_online,

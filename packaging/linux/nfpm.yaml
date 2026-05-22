@@ -15,7 +15,7 @@ vendor: 36chubm54
 homepage: https://github.com/36chubm54/FinAccountingApp
 license: MIT
 scripts:
-  postinstall: packaging/linux/postinstall.sh
+  postinstall: ${POSTINSTALL_SCRIPT}
   postremove: packaging/linux/postremove.sh
 contents:
   - src: ${PACKAGE_ROOTFS}/opt/FinAccountingApp/

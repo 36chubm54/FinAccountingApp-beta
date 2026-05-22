@@ -35,10 +35,32 @@ def _find_buttons(parent: tk.Misc, text: str) -> list[tk.Button | ttk.Button]:
     return found
 
 
+def _find_labels(parent: tk.Misc) -> list[tk.Label | ttk.Label]:
+    found: list[tk.Label | ttk.Label] = []
+
+    def _walk(node: tk.Misc) -> None:
+        for child in node.winfo_children():
+            if isinstance(child, (tk.Label, ttk.Label)):
+                found.append(child)
+            _walk(child)
+
+    _walk(parent)
+    return found
+
+
 class _Controller:
-    def __init__(self, *, supported: bool = True, packaged_mode: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        supported: bool = True,
+        packaged_mode: bool = True,
+        appimage_mode: bool = False,
+        linux_package_kind: str = "",
+    ) -> None:
         self.supported = supported
         self.packaged_mode = packaged_mode
+        self.appimage_mode = appimage_mode
+        self.linux_package_kind = linux_package_kind
         self.check_calls = 0
         self.download_calls = 0
         self.download_progress: list[AppUpdateDownloadProgress] = []
@@ -50,6 +72,7 @@ class _Controller:
                 name="Ledgera-2.0.2-setup.exe",
                 download_url="https://example.invalid/setup.exe",
                 size_bytes=4096,
+                kind="windows-installer",
             ),
         )
         self.download_path = Path("C:/Temp/Ledgera-2.0.2-setup.exe")
@@ -74,6 +97,8 @@ class _Controller:
         return {
             "user_data_root": "C:/Users/test/AppData/Local/FinAccountingApp",
             "packaged_mode": self.packaged_mode,
+            "appimage_mode": self.appimage_mode,
+            "linux_package_kind": self.linux_package_kind,
         }
 
     def get_supported_currency_provider_names(self) -> list[str]:
@@ -197,6 +222,9 @@ def _build_context(controller: _Controller, launches: list[str]) -> SettingsTabC
                 "_launch_installer_and_exit": lambda self, installer_path: launches.append(
                     installer_path
                 ),
+                "_launch_downloaded_update_and_exit": lambda self, installer_path: launches.append(
+                    installer_path
+                ),
                 "_run_background": lambda self, task, **kwargs: kwargs.get(
                     "on_success", lambda *_: None
                 )(task()),
@@ -241,6 +269,9 @@ def _build_deferred_context(
                 "_refresh_budgets": lambda self: None,
                 "_refresh_all": lambda self: None,
                 "_launch_installer_and_exit": lambda self, installer_path: launches.append(
+                    installer_path
+                ),
+                "_launch_downloaded_update_and_exit": lambda self, installer_path: launches.append(
                     installer_path
                 ),
                 "_run_background": _run_background,
@@ -315,7 +346,7 @@ def test_settings_tab_enables_release_page_for_packaged_linux_manual_updates() -
     root = tk.Tk()
     root.withdraw()
     try:
-        controller = _Controller(supported=False, packaged_mode=True)
+        controller = _Controller(supported=False, packaged_mode=True, appimage_mode=True)
         launches: list[str] = []
         context = _build_context(controller, launches)
         parent = tk.Frame(root)
@@ -335,6 +366,66 @@ def test_settings_tab_enables_release_page_for_packaged_linux_manual_updates() -
         state = getattr(release_buttons[0], "state", None)
         assert callable(state)
         assert "disabled" not in str(state())
+    finally:
+        root.destroy()
+
+
+def test_settings_tab_enables_check_button_for_packaged_linux_without_known_package_kind() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        controller = _Controller(supported=False, packaged_mode=True)
+        launches: list[str] = []
+        context = _build_context(controller, launches)
+        parent = tk.Frame(root)
+        parent.pack()
+
+        with patch("gui.tabs.settings.update_section.sys.platform", "linux"):
+            build_settings_tab(
+                parent,
+                context,
+                messagebox_module=SimpleNamespace(),
+                wallet_manager_dialog=lambda *args, **kwargs: None,
+            )
+        root.update_idletasks()
+
+        check_buttons = _find_buttons(parent, "Проверить обновления")
+        assert check_buttons
+        state = getattr(check_buttons[0], "state", None)
+        assert callable(state)
+        assert "disabled" not in str(state())
+    finally:
+        root.destroy()
+
+
+def test_settings_tab_packaged_linux_with_check_flow_does_not_show_manual_block() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        controller = _Controller(supported=False, packaged_mode=True)
+        launches: list[str] = []
+        context = _build_context(controller, launches)
+        parent = tk.Frame(root)
+        parent.pack()
+
+        with patch("gui.tabs.settings.update_section.sys.platform", "linux"):
+            build_settings_tab(
+                parent,
+                context,
+                messagebox_module=SimpleNamespace(),
+                wallet_manager_dialog=lambda *args, **kwargs: None,
+            )
+        root.update_idletasks()
+
+        texts = []
+        for label in _find_labels(parent):
+            try:
+                texts.append(str(label.cget("text") or ""))
+            except Exception:
+                continue
+        joined = "\n".join(texts)
+        assert "Можно проверить наличие нового Linux-пакета" in joined
+        assert "встроенная установка обновлений пока недоступна" not in joined
     finally:
         root.destroy()
 
@@ -367,11 +458,27 @@ def test_settings_tab_keeps_release_page_disabled_for_packaged_non_linux_updates
         root.destroy()
 
 
-def test_settings_tab_source_mode_uses_source_specific_install_prompt() -> None:
+def test_settings_tab_packaged_linux_flow_downloads_and_opens_package() -> None:
     root = tk.Tk()
     root.withdraw()
     try:
-        controller = _Controller(supported=True, packaged_mode=False)
+        controller = _Controller(
+            supported=True,
+            packaged_mode=True,
+            linux_package_kind="deb",
+        )
+        controller.release = AppUpdateReleaseInfo(
+            version="2.0.2",
+            tag_name="v2.0.2",
+            release_url="https://github.com/36chubm54/FinAccountingApp/releases/tag/v2.0.2",
+            asset=AppReleaseAsset(
+                name="Ledgera-2.0.2-x86_64.deb",
+                download_url="https://example.invalid/linux.deb",
+                size_bytes=4096,
+                kind="linux-deb",
+            ),
+        )
+        controller.download_path = Path("/tmp/Ledgera-2.0.2-x86_64.deb")
         launches: list[str] = []
         prompts: list[str] = []
         context = _build_context(controller, launches)
@@ -387,12 +494,13 @@ def test_settings_tab_source_mode_uses_source_specific_install_prompt() -> None:
             showerror=lambda *args, **kwargs: None,
             showinfo=lambda *args, **kwargs: None,
         )
-        build_settings_tab(
-            parent,
-            context,
-            messagebox_module=messagebox_module,
-            wallet_manager_dialog=lambda *args, **kwargs: None,
-        )
+        with patch("gui.tabs.settings.update_section.sys.platform", "linux"):
+            build_settings_tab(
+                parent,
+                context,
+                messagebox_module=messagebox_module,
+                wallet_manager_dialog=lambda *args, **kwargs: None,
+            )
         root.update()
 
         buttons = _find_buttons(parent, "Проверить обновления")
@@ -400,9 +508,126 @@ def test_settings_tab_source_mode_uses_source_specific_install_prompt() -> None:
         buttons[0].invoke()
         root.update()
 
-        assert len(prompts) == 2
-        assert "исходной копии проекта" in prompts[1]
+        assert controller.check_calls == 1
+        assert controller.download_calls == 1
+        assert any("Linux-пакет" in prompt or "Linux package" in prompt for prompt in prompts)
+        assert any(
+            "терминал" in prompt.lower() or "terminal" in prompt.lower() for prompt in prompts
+        )
         assert launches == [str(controller.download_path)]
+    finally:
+        root.destroy()
+
+
+def test_settings_tab_packaged_linux_offers_release_page_after_launch_failure() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        controller = _Controller(
+            supported=True,
+            packaged_mode=True,
+            linux_package_kind="deb",
+        )
+        controller.release = AppUpdateReleaseInfo(
+            version="2.0.2",
+            tag_name="v2.0.2",
+            release_url="https://github.com/36chubm54/FinAccountingApp/releases/tag/v2.0.2",
+            asset=AppReleaseAsset(
+                name="Ledgera-2.0.2-x86_64.deb",
+                download_url="https://example.invalid/linux.deb",
+                size_bytes=4096,
+                kind="linux-deb",
+            ),
+        )
+        controller.download_path = Path("/tmp/Ledgera-2.0.2-x86_64.deb")
+        launches: list[str] = []
+        opened_urls: list[str] = []
+        prompts: list[str] = []
+        errors: list[str] = []
+        context = _build_context(controller, launches)
+        context._launch_downloaded_update_and_exit = lambda artifact_path: (_ for _ in ()).throw(
+            RuntimeError("no terminal")
+        )
+        parent = tk.Frame(root)
+        parent.pack()
+
+        def _askyesno(_title: str, message: str) -> bool:
+            prompts.append(message)
+            return True
+
+        messagebox_module = SimpleNamespace(
+            askyesno=_askyesno,
+            showerror=lambda _title, message: errors.append(message),
+            showinfo=lambda *args, **kwargs: None,
+        )
+        with (
+            patch("gui.tabs.settings.update_section.sys.platform", "linux"),
+            patch(
+                "gui.tabs.settings.update_section.webbrowser.open",
+                lambda url: opened_urls.append(url),
+            ),
+        ):
+            build_settings_tab(
+                parent,
+                context,
+                messagebox_module=messagebox_module,
+                wallet_manager_dialog=lambda *args, **kwargs: None,
+            )
+            root.update()
+
+            buttons = _find_buttons(parent, "Проверить обновления")
+            assert buttons
+            buttons[0].invoke()
+            root.update()
+
+        assert controller.check_calls == 1
+        assert controller.download_calls == 1
+        assert errors and "no terminal" in errors[0]
+        assert any(
+            "страницу релиза" in prompt.lower() or "releases page" in prompt.lower()
+            for prompt in prompts
+        )
+        assert opened_urls == [controller.release.release_url]
+        assert launches == []
+    finally:
+        root.destroy()
+
+
+def test_settings_tab_windows_source_mode_uses_manual_release_path() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        controller = _Controller(supported=False, packaged_mode=False)
+        launches: list[str] = []
+        context = _build_context(controller, launches)
+        parent = tk.Frame(root)
+        parent.pack()
+        messagebox_module = SimpleNamespace(
+            askyesno=lambda *args, **kwargs: True,
+            showerror=lambda *args, **kwargs: None,
+            showinfo=lambda *args, **kwargs: None,
+        )
+        with patch("gui.tabs.settings.update_section.sys.platform", "win32"):
+            build_settings_tab(
+                parent,
+                context,
+                messagebox_module=messagebox_module,
+                wallet_manager_dialog=lambda *args, **kwargs: None,
+            )
+        root.update_idletasks()
+
+        check_buttons = _find_buttons(parent, "Проверить обновления")
+        assert check_buttons
+        check_state = getattr(check_buttons[0], "state", None)
+        assert callable(check_state)
+        assert "disabled" in str(check_state())
+
+        release_buttons = _find_buttons(parent, "Страница релиза")
+        assert release_buttons
+        release_state = getattr(release_buttons[0], "state", None)
+        assert callable(release_state)
+        assert "disabled" not in str(release_state())
+        assert launches == []
     finally:
         root.destroy()
 
@@ -450,5 +675,51 @@ def test_settings_tab_ignores_repeat_check_clicks_while_flow_is_active() -> None
         state = getattr(buttons[0], "state", None)
         assert callable(state)
         assert "disabled" not in str(state())
+    finally:
+        root.destroy()
+
+
+def test_settings_tab_enables_release_page_after_failed_check_in_supported_env() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        controller = _Controller(supported=True, packaged_mode=True, linux_package_kind="deb")
+        launches: list[str] = []
+        pending: list[dict[str, Any]] = []
+        errors: list[str] = []
+        context = _build_deferred_context(controller, launches, pending)
+        parent = tk.Frame(root)
+        parent.pack()
+
+        messagebox_module = SimpleNamespace(
+            askyesno=lambda *args, **kwargs: False,
+            showerror=lambda _title, message: errors.append(message),
+            showinfo=lambda *args, **kwargs: None,
+        )
+        with patch("gui.tabs.settings.update_section.sys.platform", "linux"):
+            build_settings_tab(
+                parent,
+                context,
+                messagebox_module=messagebox_module,
+                wallet_manager_dialog=lambda *args, **kwargs: None,
+            )
+        root.update()
+
+        check_buttons = _find_buttons(parent, "Проверить обновления")
+        release_buttons = _find_buttons(parent, "Страница релиза")
+        assert check_buttons and release_buttons
+        check_buttons[0].invoke()
+        root.update()
+
+        assert len(pending) == 1
+        on_error = pending[0]["on_error"]
+        assert callable(on_error)
+        on_error(RuntimeError("network failed"))
+        root.update()
+
+        release_state = getattr(release_buttons[0], "state", None)
+        assert callable(release_state)
+        assert "disabled" not in str(release_state())
+        assert errors and "network failed" in errors[0]
     finally:
         root.destroy()

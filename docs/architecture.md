@@ -94,22 +94,25 @@ Packaging note:
 
 ### 3.0.1 Application update flow
 
-The desktop app now has a Windows-first updater surface in `Settings`.
+The desktop app now has a packaged-runtime updater surface in `Settings`.
 
 Current flow:
 
 - `gui.tabs.settings.update_section` initiates the check and download UX
 - `gui.controllers.FinancialController` exposes the thin updater facade to the UI
-- `services.app_update_service.AppUpdateService` queries GitHub Releases, selects the Windows installer asset, and streams the download to the updater cache
-- `gui.shell.shell_window.launch_installer_and_exit(...)` performs the installer handoff after user confirmation
+- `services.app_update_service.AppUpdateService` queries GitHub Releases, applies prerelease-aware release filtering, selects the runtime-matching asset, and streams the download to the updater cache
+- `gui.shell.shell_window.launch_installer_and_exit(...)` performs the final installer/package handoff after user confirmation
 
 Design rules:
 
 - updater logic is separate from currency `auto_update`
 - the running app only checks and downloads; it does not patch binaries in place
-- the installer remains the only component that performs the actual application update
-- source-mode updater runs are supported for testing, but they still target the packaged Windows install flow rather than the source checkout itself
-- packaged Linux builds currently expose the Linux manual-update path only: the UI may open the GitHub Releases page, but it does not download or install `.deb`, `.rpm`, or AppImage updates in-app yet
+- Windows still delegates the real update to the installer, while packaged Linux delegates it to a terminal-launched package-manager command
+- packaged Linux `.deb` / `.rpm` runtime is the only Linux environment with in-app update download/handoff support in this wave
+- packaged Linux updater selects artifacts via the install-root `.linux-package-kind` marker and never guesses `.deb` vs `.rpm` heuristically
+- Linux package handoff runs through a supported terminal executable and a terminal-kept-open `sudo apt install ...` / `sudo dnf install ...` command, not through `xdg-open` or direct package-manager execution in the app process
+- source-mode Windows/Linux and `AppImage` remain explicit manual-release-page paths rather than pretending to support in-app installation
+- stable builds ignore GitHub prerelease releases, while prerelease builds can see newer prereleases and then transition to the final stable release
 
 ### 3.1 Startup
 

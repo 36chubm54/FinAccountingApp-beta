@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 APP_DATA_DIRNAME = "FinAccountingApp"
+LINUX_PACKAGE_KIND_MARKER = ".linux-package-kind"
 _SOURCE_ROOT = Path(__file__).resolve().parent
 
 
@@ -40,6 +41,24 @@ def is_appimage_mode() -> bool:
     return _is_appimage_mode()
 
 
+def _get_executable_root() -> Path:
+    return Path(sys.executable).resolve().parent
+
+
+def get_linux_package_kind() -> str | None:
+    override = str(os.environ.get("FIN_ACCOUNTING_LINUX_PACKAGE_KIND", "") or "").strip().lower()
+    if override in {"deb", "rpm"}:
+        return override
+    if not _is_linux() or not _is_frozen_mode() or _is_appimage_mode():
+        return None
+    marker_path = _get_executable_root() / LINUX_PACKAGE_KIND_MARKER
+    try:
+        value = marker_path.read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        return None
+    return value if value in {"deb", "rpm"} else None
+
+
 def get_resource_root() -> Path:
     override = str(os.environ.get("FIN_ACCOUNTING_RESOURCE_ROOT", "") or "").strip()
     if override:
@@ -48,7 +67,7 @@ def get_resource_root() -> Path:
         meipass = getattr(sys, "_MEIPASS", None)
         if meipass:
             return Path(meipass).resolve()
-        return Path(sys.executable).resolve().parent
+        return _get_executable_root()
     return get_source_root()
 
 

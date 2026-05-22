@@ -90,16 +90,21 @@ def test_write_rendered_nfpm_config_replaces_placeholders(tmp_path: Path) -> Non
     rootfs = tmp_path / "rootfs"
     rootfs.mkdir()
 
-    rendered_path = module.write_rendered_nfpm_config(tmp_path, rootfs)
-    content = rendered_path.read_text(encoding="utf-8")
+    deb_rendered_path = module.write_rendered_nfpm_config(tmp_path, rootfs, packager="deb")
+    rpm_rendered_path = module.write_rendered_nfpm_config(tmp_path, rootfs, packager="rpm")
+    deb_content = deb_rendered_path.read_text(encoding="utf-8")
+    rpm_content = rpm_rendered_path.read_text(encoding="utf-8")
 
-    assert "${PACKAGE_ROOTFS}" not in content
-    assert "${PACKAGE_VERSION}" not in content
-    assert rootfs.as_posix() in content
-    assert f"version: {module.read_version()}" in content
-    assert "postinstall: packaging/linux/postinstall.sh" in content
-    assert "postremove: packaging/linux/postremove.sh" in content
-    assert "/usr/share/metainfo/ledgera.metainfo.xml" in content
+    for content in (deb_content, rpm_content):
+        assert "${PACKAGE_ROOTFS}" not in content
+        assert "${PACKAGE_VERSION}" not in content
+        assert rootfs.as_posix() in content
+        assert f"version: {module.read_version()}" in content
+        assert "postremove: packaging/linux/postremove.sh" in content
+        assert "/usr/share/metainfo/ledgera.metainfo.xml" in content
+
+    assert "postinstall: packaging/linux/postinstall-deb.sh" in deb_content
+    assert "postinstall: packaging/linux/postinstall-rpm.sh" in rpm_content
 
 
 def test_verify_system_packages_normalizes_deb_revision_suffix() -> None:
@@ -114,6 +119,10 @@ def test_verify_system_packages_normalizes_deb_revision_suffix() -> None:
 
     assert module._normalize_deb_version("2.4.0-1") == "2.4.0"
     assert module._normalize_deb_version("1:2.4.0-1") == "2.4.0"
+    assert module._normalize_deb_version("2.5.0~rc2-1") == "2.5.0-rc2"
+    assert module._normalize_deb_version("1:2.5.0~rc2-1") == "2.5.0-rc2"
+    assert module._normalize_rpm_version("2.5.0~rc2") == "2.5.0-rc2"
+    assert module._normalize_rpm_version("1:2.5.0~rc2") == "2.5.0-rc2"
 
 
 def test_verify_system_packages_parses_dpkg_contents_listing() -> None:

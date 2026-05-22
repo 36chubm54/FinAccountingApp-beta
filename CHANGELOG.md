@@ -7,6 +7,35 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [2.5.0] - 2026-05-23
+
+### Added
+
+- Added packaged-Linux in-app updater support for `.deb` and `.rpm` installs, including GitHub Release checks, artifact matching by install type, streamed downloads into a user-scoped `updates` cache, and post-download install handoff
+- Added terminal-based Linux install handoff for packaged updates, with supported terminal auto-detection, chooser fallback, and persisted terminal preference reuse
+- Added package-kind markers under the Linux install root so packaged runtimes can reliably distinguish `.deb` vs `.rpm` during updater selection
+
+### Changed
+
+- `Settings -> Application updates` is now a cross-platform updater surface: packaged Windows and packaged Linux use real download/install handoff flows, while `AppImage` and source-mode runtimes stay on an explicit manual GitHub Releases path
+- Windows source-mode updater behavior is now aligned with Linux source-mode: testing/dev checkouts no longer pretend to support in-app installation and instead use a manual release-page fallback
+- Updater release discovery is now prerelease-aware: stable builds ignore prereleases, prerelease builds can see newer prereleases and then transition to the final stable release
+- GitHub Release scanning now walks multiple API pages instead of depending on a single `latest` or first-page result
+- Linux and Windows prerelease packaging metadata now accept release versions such as `2.5.0-rc2` without breaking package smoke checks or Inno Setup product-version metadata
+
+### Fixed
+
+- Fixed packaged-Linux updater detection so the package-kind marker is resolved from the actual install root instead of a `PyInstaller` resource path
+- Fixed updater UI consistency so packaged Linux no longer shows a manual/source-mode status block while the update check action is active
+- Fixed updater failure fallback so the release page remains available after failed update checks in supported environments
+- Fixed stable-client release selection so GitHub releases marked `prerelease=true` stay hidden from stable builds even when their tag looks stable
+
+### Testing
+
+- Added regression coverage for packaged Linux updater selection, terminal handoff, release-page fallback, and package-kind detection from the install root
+- Added prerelease updater coverage for `rc -> rc`, `rc -> stable`, stable-ignore-prerelease, and paginated GitHub release scanning
+- Added prerelease packaging coverage for Debian/RPM version normalization and Windows installer metadata generation
+
 ## [2.4.0] - 2026-05-21
 
 ### Added
