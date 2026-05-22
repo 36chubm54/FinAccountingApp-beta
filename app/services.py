@@ -18,7 +18,9 @@ from app.secret_storage import (
 from app_paths import (
     get_currency_config_path,
     get_currency_rates_path,
+    get_linux_package_kind,
     get_user_data_root,
+    is_appimage_mode,
     is_frozen_mode,
 )
 from domain.currency import CurrencyService as DomainCurrencyService
@@ -480,6 +482,8 @@ class CurrencyService:
             "api_key_is_configured": bool(self._api_key_status.get("configured", False)),
             "user_data_root": str(get_user_data_root()),
             "packaged_mode": is_frozen_mode(),
+            "appimage_mode": is_appimage_mode(),
+            "linux_package_kind": get_linux_package_kind(),
         }
 
     def update_runtime_currency_config(

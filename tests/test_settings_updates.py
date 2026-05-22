@@ -36,9 +36,18 @@ def _find_buttons(parent: tk.Misc, text: str) -> list[tk.Button | ttk.Button]:
 
 
 class _Controller:
-    def __init__(self, *, supported: bool = True, packaged_mode: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        supported: bool = True,
+        packaged_mode: bool = True,
+        appimage_mode: bool = False,
+        linux_package_kind: str = "",
+    ) -> None:
         self.supported = supported
         self.packaged_mode = packaged_mode
+        self.appimage_mode = appimage_mode
+        self.linux_package_kind = linux_package_kind
         self.check_calls = 0
         self.download_calls = 0
         self.download_progress: list[AppUpdateDownloadProgress] = []
@@ -50,6 +59,7 @@ class _Controller:
                 name="Ledgera-2.0.2-setup.exe",
                 download_url="https://example.invalid/setup.exe",
                 size_bytes=4096,
+                kind="windows-installer",
             ),
         )
         self.download_path = Path("C:/Temp/Ledgera-2.0.2-setup.exe")
@@ -74,6 +84,8 @@ class _Controller:
         return {
             "user_data_root": "C:/Users/test/AppData/Local/FinAccountingApp",
             "packaged_mode": self.packaged_mode,
+            "appimage_mode": self.appimage_mode,
+            "linux_package_kind": self.linux_package_kind,
         }
 
     def get_supported_currency_provider_names(self) -> list[str]:
@@ -197,6 +209,9 @@ def _build_context(controller: _Controller, launches: list[str]) -> SettingsTabC
                 "_launch_installer_and_exit": lambda self, installer_path: launches.append(
                     installer_path
                 ),
+                "_launch_downloaded_update_and_exit": lambda self, installer_path: launches.append(
+                    installer_path
+                ),
                 "_run_background": lambda self, task, **kwargs: kwargs.get(
                     "on_success", lambda *_: None
                 )(task()),
@@ -241,6 +256,9 @@ def _build_deferred_context(
                 "_refresh_budgets": lambda self: None,
                 "_refresh_all": lambda self: None,
                 "_launch_installer_and_exit": lambda self, installer_path: launches.append(
+                    installer_path
+                ),
+                "_launch_downloaded_update_and_exit": lambda self, installer_path: launches.append(
                     installer_path
                 ),
                 "_run_background": _run_background,
@@ -315,7 +333,7 @@ def test_settings_tab_enables_release_page_for_packaged_linux_manual_updates() -
     root = tk.Tk()
     root.withdraw()
     try:
-        controller = _Controller(supported=False, packaged_mode=True)
+        controller = _Controller(supported=False, packaged_mode=True, appimage_mode=True)
         launches: list[str] = []
         context = _build_context(controller, launches)
         parent = tk.Frame(root)
@@ -363,6 +381,64 @@ def test_settings_tab_keeps_release_page_disabled_for_packaged_non_linux_updates
         state = getattr(release_buttons[0], "state", None)
         assert callable(state)
         assert "disabled" in str(state())
+    finally:
+        root.destroy()
+
+
+def test_settings_tab_packaged_linux_flow_downloads_and_opens_package() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        controller = _Controller(
+            supported=True,
+            packaged_mode=True,
+            linux_package_kind="deb",
+        )
+        controller.release = AppUpdateReleaseInfo(
+            version="2.0.2",
+            tag_name="v2.0.2",
+            release_url="https://github.com/36chubm54/FinAccountingApp/releases/tag/v2.0.2",
+            asset=AppReleaseAsset(
+                name="Ledgera-2.0.2-x86_64.deb",
+                download_url="https://example.invalid/linux.deb",
+                size_bytes=4096,
+                kind="linux-deb",
+            ),
+        )
+        controller.download_path = Path("/tmp/Ledgera-2.0.2-x86_64.deb")
+        launches: list[str] = []
+        prompts: list[str] = []
+        context = _build_context(controller, launches)
+        parent = tk.Frame(root)
+        parent.pack()
+
+        def _askyesno(_title: str, message: str) -> bool:
+            prompts.append(message)
+            return True
+
+        messagebox_module = SimpleNamespace(
+            askyesno=_askyesno,
+            showerror=lambda *args, **kwargs: None,
+            showinfo=lambda *args, **kwargs: None,
+        )
+        with patch("gui.tabs.settings.update_section.sys.platform", "linux"):
+            build_settings_tab(
+                parent,
+                context,
+                messagebox_module=messagebox_module,
+                wallet_manager_dialog=lambda *args, **kwargs: None,
+            )
+        root.update()
+
+        buttons = _find_buttons(parent, "Проверить обновления")
+        assert buttons
+        buttons[0].invoke()
+        root.update()
+
+        assert controller.check_calls == 1
+        assert controller.download_calls == 1
+        assert any("Linux-пакет" in prompt or "Linux package" in prompt for prompt in prompts)
+        assert launches == [str(controller.download_path)]
     finally:
         root.destroy()
 

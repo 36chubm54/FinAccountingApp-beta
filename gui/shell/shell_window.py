@@ -4,6 +4,7 @@ import ctypes
 import logging
 import os
 import subprocess
+import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import TclError
@@ -86,11 +87,22 @@ def configure_main_window(owner: Any) -> None:
     owner.protocol("WM_DELETE_WINDOW", owner.destroy)
 
 
-def launch_installer_and_exit(owner: Any, installer_path: str) -> None:
-    if not Path(installer_path).is_file():
-        raise RuntimeError("The downloaded installer file was not found.")
+def launch_downloaded_update_and_exit(owner: Any, artifact_path: str) -> None:
+    if not Path(artifact_path).is_file():
+        raise RuntimeError("The downloaded update file was not found.")
     try:
-        subprocess.Popen([str(installer_path)])
+        if os.name == "nt":
+            subprocess.Popen([str(artifact_path)])
+        elif sys.platform.startswith("linux"):
+            subprocess.Popen(["xdg-open", str(artifact_path)])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(artifact_path)])
+        else:
+            raise RuntimeError("Opening downloaded update files is not supported on this platform.")
     except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError("Failed to launch the downloaded installer.") from exc
+        raise RuntimeError("Failed to open the downloaded update file.") from exc
     owner.destroy()
+
+
+def launch_installer_and_exit(owner: Any, installer_path: str) -> None:
+    launch_downloaded_update_and_exit(owner, installer_path)

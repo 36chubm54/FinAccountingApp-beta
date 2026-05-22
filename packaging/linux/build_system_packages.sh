@@ -8,7 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 STAGING_DIR="${ROOT_DIR}/build/linux-packages"
 ENV_FILE="${STAGING_DIR}/package.env"
-NFPM_CONFIG="${STAGING_DIR}/nfpm.generated.yaml"
+NFPM_CONFIG_DEB="${STAGING_DIR}/nfpm.deb.generated.yaml"
+NFPM_CONFIG_RPM="${STAGING_DIR}/nfpm.rpm.generated.yaml"
 
 if [[ ! -d "${BUNDLE_DIR}" ]]; then
   echo "Bundle directory not found: ${BUNDLE_DIR}" >&2
@@ -31,8 +32,13 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   exit 1
 fi
 
-if [[ ! -f "${NFPM_CONFIG}" ]]; then
-  echo "Rendered nFPM config file not found: ${NFPM_CONFIG}" >&2
+if [[ ! -f "${NFPM_CONFIG_DEB}" ]]; then
+  echo "Rendered deb nFPM config file not found: ${NFPM_CONFIG_DEB}" >&2
+  exit 1
+fi
+
+if [[ ! -f "${NFPM_CONFIG_RPM}" ]]; then
+  echo "Rendered rpm nFPM config file not found: ${NFPM_CONFIG_RPM}" >&2
   exit 1
 fi
 
@@ -42,10 +48,10 @@ set +a
 
 nfpm package \
   --packager deb \
-  --config "${NFPM_CONFIG}" \
+  --config "${NFPM_CONFIG_DEB}" \
   --target "${OUTPUT_DIR}/Ledgera-${PACKAGE_VERSION}-x86_64.deb"
 
 nfpm package \
   --packager rpm \
-  --config "${NFPM_CONFIG}" \
+  --config "${NFPM_CONFIG_RPM}" \
   --target "${OUTPUT_DIR}/Ledgera-${PACKAGE_VERSION}-x86_64.rpm"

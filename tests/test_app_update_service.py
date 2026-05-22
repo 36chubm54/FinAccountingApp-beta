@@ -63,16 +63,16 @@ class _FakeStreamResponse:
 @pytest.fixture
 def service(monkeypatch) -> AppUpdateService:
     svc = AppUpdateService()
-    monkeypatch.setattr(svc, "is_supported_environment", lambda: True)
     monkeypatch.setattr(svc, "get_current_version", lambda: "2.0.1")
+    monkeypatch.setattr(svc, "_get_runtime_kind", lambda: "windows")
     return svc
 
 
 def test_check_for_app_update_rejects_non_windows_runtime() -> None:
     service = AppUpdateService()
-    service.is_supported_environment = lambda: False  # type: ignore[method-assign]
+    service._get_runtime_kind = lambda: "linux-source"  # type: ignore[method-assign]
 
-    with pytest.raises(AppUpdateNotSupportedError, match="Linux package"):
+    with pytest.raises(AppUpdateNotSupportedError, match="GitHub Releases"):
         service.check_for_app_update()
 
 
@@ -98,6 +98,7 @@ def test_check_for_app_update_detects_newer_release(monkeypatch, service: AppUpd
     assert result.latest_release is not None
     assert result.latest_release.version == "2.0.2"
     assert result.latest_release.asset.name == "Ledgera-2.0.2-setup.exe"
+    assert result.latest_release.asset.kind == "windows-installer"
 
 
 def test_check_for_app_update_reports_current_when_versions_match(
@@ -168,6 +169,72 @@ def test_check_for_app_update_rejects_release_without_installer_asset(
         service.check_for_app_update()
 
 
+def test_check_for_app_update_selects_deb_asset_for_packaged_linux(
+    monkeypatch,
+    service: AppUpdateService,
+) -> None:
+    monkeypatch.setattr(service, "_get_runtime_kind", lambda: "linux-deb")
+    payload = {
+        "tag_name": "v2.0.2",
+        "html_url": "https://github.com/36chubm54/FinAccountingApp/releases/tag/v2.0.2",
+        "assets": [
+            {
+                "name": "Ledgera-2.0.2-x86_64.deb",
+                "browser_download_url": "https://example.invalid/linux.deb",
+                "size": 8192,
+            },
+            {
+                "name": "Ledgera-2.0.2-x86_64.rpm",
+                "browser_download_url": "https://example.invalid/linux.rpm",
+                "size": 9216,
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        update_service_module.requests, "get", lambda *args, **kwargs: _FakeJsonResponse(payload)
+    )
+
+    result = service.check_for_app_update()
+
+    assert result.update_available is True
+    assert result.latest_release is not None
+    assert result.latest_release.asset.name.endswith(".deb")
+    assert result.latest_release.asset.kind == "linux-deb"
+
+
+def test_check_for_app_update_selects_rpm_asset_for_packaged_linux(
+    monkeypatch,
+    service: AppUpdateService,
+) -> None:
+    monkeypatch.setattr(service, "_get_runtime_kind", lambda: "linux-rpm")
+    payload = {
+        "tag_name": "v2.0.2",
+        "html_url": "https://github.com/36chubm54/FinAccountingApp/releases/tag/v2.0.2",
+        "assets": [
+            {
+                "name": "Ledgera-2.0.2-x86_64.deb",
+                "browser_download_url": "https://example.invalid/linux.deb",
+                "size": 8192,
+            },
+            {
+                "name": "Ledgera-2.0.2-x86_64.rpm",
+                "browser_download_url": "https://example.invalid/linux.rpm",
+                "size": 9216,
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        update_service_module.requests, "get", lambda *args, **kwargs: _FakeJsonResponse(payload)
+    )
+
+    result = service.check_for_app_update()
+
+    assert result.update_available is True
+    assert result.latest_release is not None
+    assert result.latest_release.asset.name.endswith(".rpm")
+    assert result.latest_release.asset.kind == "linux-rpm"
+
+
 def test_download_app_update_streams_with_progress(
     monkeypatch,
     service: AppUpdateService,
@@ -181,6 +248,7 @@ def test_download_app_update_streams_with_progress(
             name="Ledgera-2.0.2-setup.exe",
             download_url="https://example.invalid/setup.exe",
             size_bytes=6,
+            kind="windows-installer",
         ),
     )
     monkeypatch.setattr(update_service_module, "get_updates_dir", lambda: tmp_path)
@@ -202,6 +270,41 @@ def test_download_app_update_streams_with_progress(
     assert progress[-1].total_bytes == 6
 
 
+def test_download_app_update_streams_linux_package_with_progress(
+    monkeypatch,
+    service: AppUpdateService,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(service, "_get_runtime_kind", lambda: "linux-deb")
+    release = AppUpdateReleaseInfo(
+        version="2.0.2",
+        tag_name="v2.0.2",
+        release_url="https://example.invalid/release",
+        asset=update_service_module.AppReleaseAsset(
+            name="Ledgera-2.0.2-x86_64.deb",
+            download_url="https://example.invalid/linux.deb",
+            size_bytes=6,
+            kind="linux-deb",
+        ),
+    )
+    monkeypatch.setattr(update_service_module, "get_updates_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        update_service_module.requests,
+        "get",
+        lambda *args, **kwargs: _FakeStreamResponse(
+            [b"abc", b"def"],
+            headers={"Content-Length": "6"},
+        ),
+    )
+    progress: list[AppUpdateDownloadProgress] = []
+
+    result = service.download_app_update(release, on_progress=progress.append)
+
+    assert result.downloaded_path.name.endswith(".deb")
+    assert result.downloaded_path.read_bytes() == b"abcdef"
+    assert progress[-1].bytes_downloaded == 6
+
+
 def test_download_app_update_cleans_partial_file_on_failure(
     monkeypatch,
     service: AppUpdateService,
@@ -215,6 +318,7 @@ def test_download_app_update_cleans_partial_file_on_failure(
             name="Ledgera-2.0.2-setup.exe",
             download_url="https://example.invalid/setup.exe",
             size_bytes=6,
+            kind="windows-installer",
         ),
     )
     monkeypatch.setattr(update_service_module, "get_updates_dir", lambda: tmp_path)

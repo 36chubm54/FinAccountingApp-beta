@@ -48,14 +48,39 @@ def build_update_section(
     supported = bool(context.controller.is_app_update_supported())
     security_diagnostics = context.controller.get_runtime_security_diagnostics()
     packaged_mode = bool(security_diagnostics.get("packaged_mode", False))
+    appimage_mode = bool(security_diagnostics.get("appimage_mode", False))
+    linux_package_kind = str(security_diagnostics.get("linux_package_kind") or "").strip().lower()
     current_version = str(context.controller.get_app_version() or "").strip() or "unknown"
     release_page_url = str(context.controller.get_app_release_page_url() or "").strip()
-    is_packaged_linux = packaged_mode and sys.platform.startswith("linux")
+    is_linux = sys.platform.startswith("linux")
+    is_packaged_linux = packaged_mode and is_linux
+    is_linux_system_package = (
+        is_packaged_linux
+        and not appimage_mode
+        and linux_package_kind
+        in {
+            "deb",
+            "rpm",
+        }
+    )
     latest_release_holder: dict[str, AppUpdateReleaseInfo | None] = {"value": None}
     update_flow_state = {"active": False}
+
+    def _artifact_label(kind: str) -> str:
+        if kind in {"linux-deb", "linux-rpm"}:
+            return tr("settings.updates.artifact.linux_package", "Linux package")
+        if kind == "linux-appimage":
+            return tr("settings.updates.artifact.appimage", "AppImage")
+        return tr("settings.updates.artifact.windows_installer", "Windows installer")
+
     status_var = tk.StringVar(
         value=(
             tr(
+                "settings.updates.linux_ready",
+                "Можно проверить наличие нового Linux-пакета.",
+            )
+            if supported and is_linux_system_package
+            else tr(
                 "settings.updates.ready",
                 "Можно проверить наличие нового релиза.",
             )
@@ -67,11 +92,23 @@ def build_update_section(
             )
             if supported
             else tr(
+                "settings.updates.linux_appimage_manual",
+                "Для AppImage встроенная установка обновлений пока недоступна. "
+                "Скачайте новый AppImage со страницы релизов GitHub.",
+            )
+            if is_packaged_linux and appimage_mode
+            else tr(
                 "settings.updates.linux_manual",
                 "Для Linux packaged builds встроенная установка обновлений пока недоступна. "
                 "Скачайте новый Linux-пакет или AppImage со страницы релизов GitHub.",
             )
             if is_packaged_linux
+            else tr(
+                "settings.updates.linux_source_manual",
+                "Для Linux source-mode встроенная установка обновлений не поддерживается. "
+                "Используйте страницу релизов GitHub вручную.",
+            )
+            if is_linux
             else tr(
                 "settings.updates.unsupported",
                 "Обновление из приложения доступно только на Windows.",
@@ -145,7 +182,8 @@ def build_update_section(
             body,
             text=tr(
                 "settings.updates.download.heading",
-                "Загружается установщик v{version}",
+                "Загружается {artifact} v{version}",
+                artifact=_artifact_label(release.asset.kind),
                 version=release.version,
             ),
             style="Hint.TLabel",
@@ -204,7 +242,8 @@ def build_update_section(
             progress_text_var.set(
                 tr(
                     "settings.updates.download.progress",
-                    "Скачиваем установщик...",
+                    "Скачиваем {artifact}...",
+                    artifact=_artifact_label(release.asset.kind),
                 )
             )
             total = snapshot.total_bytes
@@ -296,19 +335,20 @@ def build_update_section(
                         "проект. Продолжить?"
                         if not packaged_mode
                         else "Обновление v{version} загружено. "
-                        "Закрыть приложение и запустить установщик сейчас?"
+                        "Закрыть приложение и открыть скачанный {artifact} сейчас?"
                     ),
+                    artifact=_artifact_label(release.asset.kind),
                     version=release.version,
                 ),
             ):
                 try:
-                    context._launch_installer_and_exit(str(result.downloaded_path))
+                    context._launch_downloaded_update_and_exit(str(result.downloaded_path))
                 except RuntimeError as error:
                     messagebox_module.showerror(
                         tr("common.error", "Ошибка"),
                         tr(
                             "settings.updates.install.error",
-                            "Не удалось запустить установщик: {error}",
+                            "Не удалось открыть скачанный файл обновления: {error}",
                             error=str(error),
                         ),
                     )
@@ -391,7 +431,8 @@ def build_update_section(
                 tr("settings.updates.available.title", "Доступно обновление"),
                 tr(
                     "settings.updates.available.prompt",
-                    "Найдена версия v{version}. Скачать Windows installer сейчас?",
+                    "Найдена версия v{version}. Скачать {artifact} сейчас?",
+                    artifact=_artifact_label(release.asset.kind),
                     version=release.version,
                 ),
             )
@@ -443,5 +484,5 @@ def build_update_section(
         command=_open_release_page,
     )
     release_link_button.grid(row=0, column=1, sticky="ew", padx=(PAD_XS, 0))
-    if supported or not release_page_url or not is_packaged_linux:
+    if supported or not release_page_url or not is_linux:
         release_link_button.state(["disabled"])

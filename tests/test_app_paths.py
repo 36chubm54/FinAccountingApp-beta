@@ -72,6 +72,7 @@ def test_frozen_linux_mode_prefers_xdg_data_home_for_state(
         == (xdg_data_home / app_paths.APP_DATA_DIRNAME / "updates").resolve()
     )
     assert app_paths.is_appimage_mode() is False
+    assert app_paths.get_linux_package_kind() is None
 
 
 def test_frozen_linux_appimage_mode_is_detected_from_environment(
@@ -83,6 +84,19 @@ def test_frozen_linux_appimage_mode_is_detected_from_environment(
     monkeypatch.setenv("APPIMAGE", str(tmp_path / "FinAccountingApp.AppImage"))
 
     assert app_paths.is_appimage_mode() is True
+
+
+def test_frozen_linux_package_kind_uses_marker_file(monkeypatch, tmp_path: Path) -> None:
+    exe_dir = tmp_path / "dist" / "FinAccountingApp"
+    exe_dir.mkdir(parents=True)
+    (exe_dir / app_paths.LINUX_PACKAGE_KIND_MARKER).write_text("deb\n", encoding="utf-8")
+    monkeypatch.setattr(app_paths, "_is_frozen_mode", lambda: True)
+    monkeypatch.setattr(app_paths, "_is_linux", lambda: True)
+    monkeypatch.setattr(app_paths, "_is_appimage_mode", lambda: False)
+    monkeypatch.setattr(app_paths.sys, "executable", str(exe_dir / "FinAccountingApp"))
+    monkeypatch.delattr(app_paths.sys, "_MEIPASS", raising=False)
+
+    assert app_paths.get_linux_package_kind() == "deb"
 
 
 def test_frozen_resource_root_falls_back_to_executable_parent_without_meipass(

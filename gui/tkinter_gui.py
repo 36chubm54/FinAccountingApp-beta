@@ -56,6 +56,7 @@ from gui.shell.shell_window import (
     APP_LINUX_WM_CLASS,
     apply_window_icon,
     configure_main_window,
+    launch_downloaded_update_and_exit,
     launch_installer_and_exit,
 )
 from gui.startup_coordinator import DeferredStartupCoordinator
@@ -464,6 +465,9 @@ class FinancialApp(tk.Tk):
 
     def _on_legend_mousewheel(self, event: tk.Event) -> None:
         scroll_owner_legend_canvas(self, event)
+
+    def _launch_downloaded_update_and_exit(self, artifact_path: str) -> None:
+        launch_downloaded_update_and_exit(self, artifact_path)
 
     def _launch_installer_and_exit(self, installer_path: str) -> None:
         launch_installer_and_exit(self, installer_path)

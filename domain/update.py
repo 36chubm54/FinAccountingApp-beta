@@ -9,6 +9,7 @@ class AppReleaseAsset:
     name: str
     download_url: str
     size_bytes: int | None
+    kind: str
 
 
 @dataclass(frozen=True, slots=True)

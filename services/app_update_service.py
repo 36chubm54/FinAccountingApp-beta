@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import requests
 
-from app_paths import get_updates_dir
+from app_paths import get_linux_package_kind, get_updates_dir, is_appimage_mode, is_frozen_mode
 from domain.update import (
     AppReleaseAsset,
     AppUpdateCheckResult,
@@ -19,10 +20,21 @@ from domain.update import (
 from version import __version__
 
 _INSTALLER_NAME_RE = re.compile(r"^Ledgera-.+-setup\.exe$", re.IGNORECASE)
+_DEB_PACKAGE_NAME_RE = re.compile(r"^Ledgera-.+-x86_64\.deb$", re.IGNORECASE)
+_RPM_PACKAGE_NAME_RE = re.compile(r"^Ledgera-.+-x86_64\.rpm$", re.IGNORECASE)
+_APPIMAGE_NAME_RE = re.compile(r"^Ledgera-linux\.AppImage$", re.IGNORECASE)
 _TAG_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].+)?$")
-WINDOWS_ONLY_UPDATE_MESSAGE = (
-    "In-app updates are currently available only on Windows. "
-    "Packaged Linux builds should download a newer Linux package or AppImage from GitHub Releases."
+WINDOWS_SOURCE_UPDATE_MESSAGE = (
+    "In-app updates are currently available on Windows and packaged Linux system installs. "
+    "Source-mode Linux should use GitHub Releases manually."
+)
+LINUX_APPIMAGE_UPDATE_MESSAGE = (
+    "In-app update handoff is not available yet for AppImage runtime. "
+    "Download a newer AppImage from GitHub Releases."
+)
+LINUX_MANUAL_UPDATE_MESSAGE = (
+    "In-app updates are available only for packaged Linux system installs with a known package type. "
+    "Download a newer Linux package or AppImage from GitHub Releases."
 )
 
 
@@ -58,6 +70,14 @@ def _is_newer_version(current: str, latest: str) -> bool:
     return latest_parts > current_parts
 
 
+def _runtime_not_supported_message(runtime_kind: str) -> str:
+    if runtime_kind == "linux-appimage":
+        return LINUX_APPIMAGE_UPDATE_MESSAGE
+    if runtime_kind in {"linux-source", "linux-unknown-package"}:
+        return LINUX_MANUAL_UPDATE_MESSAGE
+    return WINDOWS_SOURCE_UPDATE_MESSAGE
+
+
 class AppUpdateService:
     RELEASES_LATEST_URL = "https://api.github.com/repos/36chubm54/FinAccountingApp/releases/latest"
     REQUEST_TIMEOUT = (10, 60)
@@ -70,11 +90,26 @@ class AppUpdateService:
         return "https://github.com/36chubm54/FinAccountingApp/releases"
 
     def is_supported_environment(self) -> bool:
-        return os.name == "nt"
+        return self._get_runtime_kind() in {"windows", "linux-deb", "linux-rpm"}
+
+    def _get_runtime_kind(self) -> str:
+        if os.name == "nt":
+            return "windows"
+        if os.name != "nt" and sys.platform.startswith("linux"):
+            if not is_frozen_mode():
+                return "linux-source"
+            if is_appimage_mode():
+                return "linux-appimage"
+            package_kind = get_linux_package_kind()
+            if package_kind in {"deb", "rpm"}:
+                return f"linux-{package_kind}"
+            return "linux-unknown-package"
+        return "unsupported"
 
     def check_for_app_update(self) -> AppUpdateCheckResult:
-        if not self.is_supported_environment():
-            raise AppUpdateNotSupportedError(WINDOWS_ONLY_UPDATE_MESSAGE)
+        runtime_kind = self._get_runtime_kind()
+        if runtime_kind not in {"windows", "linux-deb", "linux-rpm"}:
+            raise AppUpdateNotSupportedError(_runtime_not_supported_message(runtime_kind))
 
         payload = self._fetch_latest_release_payload()
         tag_name = str(payload.get("tag_name") or "").strip()
@@ -91,7 +126,7 @@ class AppUpdateService:
             version=version,
             tag_name=tag_name,
             release_url=str(payload.get("html_url") or "").strip(),
-            asset=self._select_windows_installer_asset(payload),
+            asset=self._select_release_asset(payload, runtime_kind),
         )
         return AppUpdateCheckResult(
             current_version=current_version,
@@ -105,8 +140,9 @@ class AppUpdateService:
         *,
         on_progress: Callable[[AppUpdateDownloadProgress], None] | None = None,
     ) -> AppUpdateDownloadResult:
-        if not self.is_supported_environment():
-            raise AppUpdateNotSupportedError(WINDOWS_ONLY_UPDATE_MESSAGE)
+        runtime_kind = self._get_runtime_kind()
+        if runtime_kind not in {"windows", "linux-deb", "linux-rpm"}:
+            raise AppUpdateNotSupportedError(_runtime_not_supported_message(runtime_kind))
 
         updates_dir = get_updates_dir()
         updates_dir.mkdir(parents=True, exist_ok=True)
@@ -148,13 +184,11 @@ class AppUpdateService:
         except requests.RequestException as err:
             self._cleanup_partial_download(temp_path)
             raise AppUpdateDownloadError(
-                "Failed to download the Windows installer from GitHub Releases."
+                "Failed to download the update file from GitHub Releases."
             ) from err
         except OSError as err:
             self._cleanup_partial_download(temp_path)
-            raise AppUpdateDownloadError(
-                "Failed to save the downloaded Windows installer."
-            ) from err
+            raise AppUpdateDownloadError("Failed to save the downloaded update file.") from err
 
         return AppUpdateDownloadResult(release=release, downloaded_path=final_path)
 
@@ -179,7 +213,45 @@ class AppUpdateService:
             raise AppUpdateMetadataError("GitHub Release tag name is missing or invalid.")
         return payload
 
-    def _select_windows_installer_asset(self, payload: dict[str, Any]) -> AppReleaseAsset:
+    def _select_release_asset(self, payload: dict[str, Any], runtime_kind: str) -> AppReleaseAsset:
+        if runtime_kind == "windows":
+            return self._select_asset(
+                payload,
+                pattern=_INSTALLER_NAME_RE,
+                kind="windows-installer",
+                error_message="The latest GitHub Release does not contain a Windows installer asset.",
+            )
+        if runtime_kind == "linux-deb":
+            return self._select_asset(
+                payload,
+                pattern=_DEB_PACKAGE_NAME_RE,
+                kind="linux-deb",
+                error_message="The latest GitHub Release does not contain a Linux .deb package asset.",
+            )
+        if runtime_kind == "linux-rpm":
+            return self._select_asset(
+                payload,
+                pattern=_RPM_PACKAGE_NAME_RE,
+                kind="linux-rpm",
+                error_message="The latest GitHub Release does not contain a Linux .rpm package asset.",
+            )
+        if runtime_kind == "linux-appimage":
+            return self._select_asset(
+                payload,
+                pattern=_APPIMAGE_NAME_RE,
+                kind="linux-appimage",
+                error_message="The latest GitHub Release does not contain an AppImage asset.",
+            )
+        raise AppUpdateMetadataError("The current environment is not supported for in-app updates.")
+
+    def _select_asset(
+        self,
+        payload: dict[str, Any],
+        *,
+        pattern: re.Pattern[str],
+        kind: str,
+        error_message: str,
+    ) -> AppReleaseAsset:
         assets = payload.get("assets")
         if not isinstance(assets, list):
             raise AppUpdateMetadataError("GitHub Release does not contain a valid asset list.")
@@ -187,7 +259,7 @@ class AppUpdateService:
             if not isinstance(raw_asset, dict):
                 continue
             name = str(raw_asset.get("name") or "").strip()
-            if not _INSTALLER_NAME_RE.match(name):
+            if not pattern.match(name):
                 continue
             download_url = str(raw_asset.get("browser_download_url") or "").strip()
             if not download_url:
@@ -198,10 +270,9 @@ class AppUpdateService:
                 name=name,
                 download_url=download_url,
                 size_bytes=size_bytes,
+                kind=kind,
             )
-        raise AppUpdateMetadataError(
-            "The latest GitHub Release does not contain a Windows installer asset."
-        )
+        raise AppUpdateMetadataError(error_message)
 
     @staticmethod
     def _cleanup_partial_download(path: Path) -> None:

@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from gui.shell.shell_window import configure_main_window, launch_installer_and_exit
+from gui.shell.shell_window import (
+    configure_main_window,
+    launch_downloaded_update_and_exit,
+    launch_installer_and_exit,
+)
 
 
 class _FakeWindow:
@@ -54,6 +58,20 @@ def test_launch_installer_and_exit_spawns_process_and_closes_window(monkeypatch)
     launch_installer_and_exit(window, "C:\\temp\\Ledgera-2.0.2-setup.exe")
 
     assert calls == [["C:\\temp\\Ledgera-2.0.2-setup.exe"]]
+    assert window.destroyed is True
+
+
+def test_launch_downloaded_update_and_exit_uses_xdg_open_on_linux(monkeypatch) -> None:
+    window = _FakeWindow()
+    calls: list[list[str]] = []
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    monkeypatch.setattr("gui.shell.shell_window.os.name", "posix")
+    monkeypatch.setattr("gui.shell.shell_window.sys.platform", "linux")
+    monkeypatch.setattr(subprocess, "Popen", lambda args: calls.append(list(args)))
+
+    launch_downloaded_update_and_exit(window, "/tmp/Ledgera-2.0.2-x86_64.deb")
+
+    assert calls == [["xdg-open", "/tmp/Ledgera-2.0.2-x86_64.deb"]]
     assert window.destroyed is True
 
 

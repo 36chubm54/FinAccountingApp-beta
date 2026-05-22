@@ -19,7 +19,8 @@ LAUNCHER_SOURCE = ROOT / "packaging" / "linux" / "ledgera"
 APPSTREAM_METADATA_SOURCE = ROOT / "packaging" / "linux" / "appstream_metadata.json"
 ENV_FILENAME = "package.env"
 NFPM_TEMPLATE_FILENAME = "nfpm.yaml"
-NFPM_RENDERED_FILENAME = "nfpm.generated.yaml"
+NFPM_RENDERED_FILENAME_DEB = "nfpm.deb.generated.yaml"
+NFPM_RENDERED_FILENAME_RPM = "nfpm.rpm.generated.yaml"
 METAINFO_FILENAME = "ledgera.metainfo.xml"
 
 
@@ -196,15 +197,24 @@ def write_package_env(staging_dir: Path, rootfs_dir: Path) -> Path:
     return env_path
 
 
-def write_rendered_nfpm_config(staging_dir: Path, rootfs_dir: Path) -> Path:
+def write_rendered_nfpm_config(staging_dir: Path, rootfs_dir: Path, *, packager: str) -> Path:
     template_path = ROOT / "packaging" / "linux" / NFPM_TEMPLATE_FILENAME
-    rendered_path = staging_dir / NFPM_RENDERED_FILENAME
+    if packager == "deb":
+        rendered_filename = NFPM_RENDERED_FILENAME_DEB
+        postinstall_script = "packaging/linux/postinstall-deb.sh"
+    elif packager == "rpm":
+        rendered_filename = NFPM_RENDERED_FILENAME_RPM
+        postinstall_script = "packaging/linux/postinstall-rpm.sh"
+    else:
+        raise ValueError(f"Unsupported packager: {packager}")
+    rendered_path = staging_dir / rendered_filename
     template = template_path.read_text(encoding="utf-8")
     rendered = (
         template.replace("${PACKAGE_VERSION}", read_version())
         .replace("${PACKAGE_ROOTFS}", rootfs_dir.as_posix())
         .replace("${PACKAGE_NAME}", PACKAGE_NAME)
         .replace("${PACKAGE_APP_DIR_NAME}", APP_DIR_NAME)
+        .replace("${POSTINSTALL_SCRIPT}", postinstall_script)
     )
     rendered_path.write_text(rendered, encoding="utf-8")
     return rendered_path
@@ -220,10 +230,16 @@ def main() -> int:
 
     rootfs_dir = stage_system_package_rootfs(args.bundle_dir, args.staging_dir)
     env_path = write_package_env(args.staging_dir.resolve(), rootfs_dir)
-    rendered_config_path = write_rendered_nfpm_config(args.staging_dir.resolve(), rootfs_dir)
+    deb_config_path = write_rendered_nfpm_config(
+        args.staging_dir.resolve(), rootfs_dir, packager="deb"
+    )
+    rpm_config_path = write_rendered_nfpm_config(
+        args.staging_dir.resolve(), rootfs_dir, packager="rpm"
+    )
     print(f"Staged Linux package rootfs at {rootfs_dir}")
     print(f"Wrote package env file to {env_path}")
-    print(f"Wrote rendered nFPM config to {rendered_config_path}")
+    print(f"Wrote rendered deb nFPM config to {deb_config_path}")
+    print(f"Wrote rendered rpm nFPM config to {rpm_config_path}")
     return 0
 
 
