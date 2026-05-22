@@ -357,6 +357,34 @@ def test_settings_tab_enables_release_page_for_packaged_linux_manual_updates() -
         root.destroy()
 
 
+def test_settings_tab_enables_check_button_for_packaged_linux_without_known_package_kind() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        controller = _Controller(supported=False, packaged_mode=True)
+        launches: list[str] = []
+        context = _build_context(controller, launches)
+        parent = tk.Frame(root)
+        parent.pack()
+
+        with patch("gui.tabs.settings.update_section.sys.platform", "linux"):
+            build_settings_tab(
+                parent,
+                context,
+                messagebox_module=SimpleNamespace(),
+                wallet_manager_dialog=lambda *args, **kwargs: None,
+            )
+        root.update_idletasks()
+
+        check_buttons = _find_buttons(parent, "Проверить обновления")
+        assert check_buttons
+        state = getattr(check_buttons[0], "state", None)
+        assert callable(state)
+        assert "disabled" not in str(state())
+    finally:
+        root.destroy()
+
+
 def test_settings_tab_keeps_release_page_disabled_for_packaged_non_linux_updates() -> None:
     root = tk.Tk()
     root.withdraw()

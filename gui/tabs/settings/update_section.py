@@ -63,6 +63,7 @@ def build_update_section(
             "rpm",
         }
     )
+    can_check_updates = supported or (is_packaged_linux and not appimage_mode)
     latest_release_holder: dict[str, AppUpdateReleaseInfo | None] = {"value": None}
     update_flow_state = {"active": False}
 
@@ -153,7 +154,7 @@ def build_update_section(
         update_flow_state["active"] = active
         if active:
             check_button.state(["disabled"])
-        elif supported:
+        elif can_check_updates:
             check_button.state(["!disabled"])
 
     def _open_release_page() -> None:
@@ -444,7 +445,10 @@ def build_update_section(
         def on_error(error: BaseException) -> None:
             _set_update_flow_active(False)
             latest_release_holder["value"] = None
-            release_link_button.state(["disabled"])
+            if not supported and release_page_url and is_linux:
+                release_link_button.state(["!disabled"])
+            else:
+                release_link_button.state(["disabled"])
             status_var.set(tr("settings.updates.check.failed", "Не удалось проверить обновления."))
             messagebox_module.showerror(
                 tr("common.error", "Ошибка"),
@@ -475,7 +479,7 @@ def build_update_section(
         command=_on_check_updates,
     )
     check_button.grid(row=0, column=0, sticky="ew", padx=(0, PAD_XS))
-    if not supported:
+    if not can_check_updates:
         check_button.state(["disabled"])
 
     release_link_button = ttk.Button(
