@@ -140,6 +140,21 @@ def configure_main_window(owner: Any) -> None:
     owner.protocol("WM_DELETE_WINDOW", owner.destroy)
 
 
+def activate_main_window(owner: Any) -> None:
+    try:
+        owner.deiconify()
+    except (AttributeError, TclError):
+        pass
+    try:
+        owner.lift()
+    except (AttributeError, TclError):
+        pass
+    try:
+        owner.focus_force()
+    except (AttributeError, TclError):
+        pass
+
+
 def _linux_terminal_key(executable_path: str) -> str | None:
     key = Path(executable_path).name.strip().lower()
     if key in _LINUX_TERMINALS_WITH_SEPARATOR or key in _LINUX_TERMINALS_WITH_EXEC:

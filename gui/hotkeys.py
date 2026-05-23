@@ -536,7 +536,9 @@ def register_hotkeys(app: Any) -> None:
     )
 
     def _on_control_keypress(event: Any) -> bool:
-        if not _has_control(event) or _has_shift(event):
+        # Tk already filters this binding through <Control-KeyPress>; avoid
+        # depending on platform-specific state masks that may vary in packaged builds.
+        if _has_shift(event):
             return False
         if _matches_letter_shortcut(event, "i"):
             if not _allow_operations_shell_hotkeys():
@@ -595,8 +597,7 @@ def register_hotkeys(app: Any) -> None:
         return False
 
     def _on_control_shift_keypress(event: Any) -> bool:
-        if not _has_control(event) or not _has_shift(event):
-            return False
+        # Tk already filters this binding through <Control-Shift-KeyPress>.
         if _matches_letter_shortcut(event, "c"):
             return _guarded_tab_action(lambda: _export_report("csv"))
         if _matches_letter_shortcut(event, "x"):

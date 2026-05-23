@@ -182,6 +182,19 @@ def test_ctrl_i_runs_only_on_operations_tab_without_text_focus() -> None:
     app._operations_bindings.set_type_income.assert_called_once()
 
 
+def test_ctrl_i_still_works_when_control_binding_event_has_zero_state() -> None:
+    app = _make_app()
+    register_hotkeys(app)
+    app._focus_widget = object()
+    app._notebook.select(app._tab_widgets["operations"])
+
+    _trigger_global_binding(
+        app, "<Control-KeyPress>", _key_event(keysym="i", char="i", keycode=73, state=0)
+    )
+
+    app._operations_bindings.set_type_income.assert_called_once()
+
+
 def test_ctrl_i_works_with_russian_layout_letter() -> None:
     app = _make_app()
     register_hotkeys(app)
@@ -347,6 +360,21 @@ def test_ctrl_t_toggles_analytics_tag_mode_even_when_entry_has_focus() -> None:
         app._analytics_bindings.toggle_tag_mode.assert_called_once()
     finally:
         root.destroy()
+
+
+def test_ctrl_shift_c_export_works_when_control_shift_binding_event_has_zero_state() -> None:
+    app = _make_app()
+    register_hotkeys(app)
+    app._focus_widget = object()
+    app._notebook.select(app._tab_widgets["reports"])
+
+    _trigger_global_binding(
+        app,
+        "<Control-Shift-KeyPress>",
+        _key_event(keysym="c", char="c", keycode=67, state=0),
+    )
+
+    app._reports_tab._export.assert_called_once_with("csv")
 
 
 def test_enter_does_not_fire_when_modal_dialog_has_focus() -> None:

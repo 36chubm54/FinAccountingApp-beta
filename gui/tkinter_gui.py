@@ -54,6 +54,7 @@ from gui.shell.shell_support import resolve_import_policy
 from gui.shell.shell_tabs import apply_tab_titles, rebuild_built_tabs
 from gui.shell.shell_window import (
     APP_LINUX_WM_CLASS,
+    activate_main_window,
     apply_window_icon,
     configure_main_window,
     launch_downloaded_update_and_exit,
@@ -206,6 +207,8 @@ class FinancialApp(tk.Tk):
             controller=self.controller,
             repository=self.repository,
             run_background=self._run_background,
+            schedule_after_idle=self._schedule_after_idle,
+            schedule_after=self._schedule_after,
             refresh_list=self._refresh_list,
             refresh_charts=_refresh_charts_deferred,
             refresh_budgets=_refresh_budgets_deferred,
@@ -220,6 +223,7 @@ class FinancialApp(tk.Tk):
                     title=tr("app.autopay.title", "Автоплатежи применены"),
                 ),
             ),
+            restore_keyboard_focus=lambda: activate_main_window(self),
             set_busy=self._set_busy,
             logger=logger,
         )
@@ -270,6 +274,7 @@ class FinancialApp(tk.Tk):
         self._busy_frame.grid_remove()
         self._schedule_notebook_underline()
         self._set_busy(True, tr("app.busy.startup", "Подготавливаем рабочее пространство..."))
+        self._schedule_after_idle("activate_main_window", lambda: activate_main_window(self))
         self._schedule_after_idle("deferred_startup", self._startup.start)
 
     def destroy(self) -> None:
