@@ -14,8 +14,8 @@ ICON_SOURCE="${ROOT_DIR}/gui/assets/icons/app.png"
 DESKTOP_SOURCE="${ROOT_DIR}/packaging/linux/ledgera.desktop"
 APP_RUN_SOURCE="${ROOT_DIR}/packaging/linux/AppRun"
 APP_BINARY="${BUNDLE_DIR}/Ledgera"
-APPIMAGE_DESKTOP_ID="Ledgera.desktop"
-APPIMAGE_ICON_ID="Ledgera.png"
+APPIMAGE_DESKTOP_ID="ledgera.desktop"
+APPIMAGE_ICON_ID="ledgera.png"
 
 if [[ ! -d "${BUNDLE_DIR}" ]]; then
   echo "Bundle directory not found: ${BUNDLE_DIR}" >&2
