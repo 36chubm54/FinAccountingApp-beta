@@ -7,6 +7,31 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [2.6.0] - 2026-05-23
+
+### Added
+
+- Added runtime migration for packaged user-data roots so existing `FinAccountingApp` installs can move best-effort into the new `Ledgera` data root on first packaged launch
+- Added secure-storage compatibility fallback so existing `FinAccountingApp` ExchangeRate API keys remain readable while the new runtime starts writing under the `Ledgera` service name
+
+### Changed
+
+- Completed the full `FinAccountingApp -> Ledgera` rename across product identity, installer/artifact identity, and runtime/internal identity
+- Windows bundle identity is now fully `Ledgera`: the checked-in spec is `Ledgera.spec`, the packaged executable is `Ledgera.exe`, and installer packaging keeps the same `Ledgera-<version>-setup.exe` artifact line
+- Linux bundle identity is now fully `Ledgera`: the checked-in spec is `Ledgera.linux.spec`, AppImage internal layout now uses `usr/lib/Ledgera/Ledgera`, and `.deb` / `.rpm` system packages now install the bundle into `/opt/Ledgera`
+- Packaged runtime state now resolves under `AppData\Ledgera` on Windows and `XDG_DATA_HOME` / `~/.local/share/Ledgera` on Linux
+- Runtime environment overrides now prefer the `LEDGERA_*` names while keeping legacy `FIN_ACCOUNTING_*` and `FINACCOUNTING_*` overrides as compatibility fallbacks
+
+### Fixed
+
+- Fixed packaged Linux install-root marker scripts and smoke-check expectations so updater package-kind detection follows the new `/opt/Ledgera` layout
+- Fixed startup/runtime continuity during the rename so existing packaged users do not lose updater cache, SQLite data, backups, or OS-backed API credentials when moving from `FinAccountingApp` to `Ledgera`
+
+### Testing
+
+- Added regression coverage for packaged runtime data-root migration from legacy `FinAccountingApp` paths into `Ledgera`
+- Added secure-storage compatibility coverage for reading legacy `FinAccountingApp` credentials and cleaning them up after writing to `Ledgera`
+
 ## [2.5.1] - 2026-05-23
 
 ### Added
