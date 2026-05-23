@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import shlex
 from pathlib import Path
+from unittest.mock import patch
 
 
 def _load_packaging_module():
@@ -22,13 +23,13 @@ def test_stage_system_package_rootfs_copies_bundle_and_assets(tmp_path: Path) ->
     assert module.ICON_SOURCE.is_file()
     assert module.APPSTREAM_METADATA_SOURCE.is_file()
     bundle_dir = tmp_path / "bundle"
-    (bundle_dir / "FinAccountingApp").parent.mkdir(parents=True, exist_ok=True)
-    (bundle_dir / "FinAccountingApp").write_text("binary", encoding="utf-8")
+    (bundle_dir / "Ledgera").parent.mkdir(parents=True, exist_ok=True)
+    (bundle_dir / "Ledgera").write_text("binary", encoding="utf-8")
     staging_dir = tmp_path / "staging"
 
     rootfs = module.stage_system_package_rootfs(bundle_dir, staging_dir)
 
-    assert (rootfs / "opt" / "FinAccountingApp" / "FinAccountingApp").is_file()
+    assert (rootfs / "opt" / "Ledgera" / "Ledgera").is_file()
     assert (rootfs / "usr" / "bin" / "ledgera").is_file()
     desktop_entry = rootfs / "usr" / "share" / "applications" / "ledgera.desktop"
     metainfo_entry = rootfs / "usr" / "share" / "metainfo" / "ledgera.metainfo.xml"
@@ -139,13 +140,75 @@ def test_verify_system_packages_parses_dpkg_contents_listing() -> None:
         [
             "drwxr-xr-x root/root         0 2026-05-21 00:00 ./",
             "drwxr-xr-x root/root         0 2026-05-21 00:00 ./opt/",
-            "-rwxr-xr-x root/root     12345 2026-05-21 00:00 ./opt/FinAccountingApp/FinAccountingApp",
+            "-rwxr-xr-x root/root     12345 2026-05-21 00:00 ./opt/Ledgera/Ledgera",
             "-rwxr-xr-x root/root       123 2026-05-21 00:00 ./usr/bin/ledgera",
         ]
     )
 
     assert module._normalize_payload_listing(listing) == {
         "/opt",
-        "/opt/FinAccountingApp/FinAccountingApp",
+        "/opt/Ledgera/Ledgera",
         "/usr/bin/ledgera",
     }
+
+
+def test_verify_system_packages_requires_at_least_one_package_argument() -> None:
+    verify_path = (
+        Path(__file__).resolve().parents[1] / "packaging" / "linux" / "verify_system_packages.py"
+    )
+    spec = importlib.util.spec_from_file_location("verify_system_packages", verify_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    with patch("argparse.ArgumentParser.error", side_effect=SystemExit(2)) as error_mock:
+        with patch("sys.argv", ["verify_system_packages.py"]):
+            try:
+                module.main()
+            except SystemExit as exc:
+                assert exc.code == 2
+            else:
+                raise AssertionError("Expected parser error for missing package arguments")
+
+    error_mock.assert_called_once_with("at least one of --deb or --rpm must be provided")
+
+
+def test_verify_rpm_package_raises_clear_error_when_rpm_tool_is_missing(tmp_path: Path) -> None:
+    verify_path = (
+        Path(__file__).resolve().parents[1] / "packaging" / "linux" / "verify_system_packages.py"
+    )
+    spec = importlib.util.spec_from_file_location("verify_system_packages", verify_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    rpm_path = tmp_path / "Ledgera-2.6.0-x86_64.rpm"
+    rpm_path.write_text("rpm", encoding="utf-8")
+
+    with patch.object(module.shutil, "which", return_value=None):
+        try:
+            module.verify_rpm_package(rpm_path)
+        except RuntimeError as exc:
+            assert "Required verification tool is not available: rpm" in str(exc)
+        else:
+            raise AssertionError("Expected clear RuntimeError when rpm tool is missing")
+
+
+def test_build_appimage_script_uses_consistent_desktop_and_icon_names() -> None:
+    script_path = Path(__file__).resolve().parents[1] / "packaging" / "linux" / "build_appimage.sh"
+    content = script_path.read_text(encoding="utf-8")
+
+    assert 'DESKTOP_SOURCE="${ROOT_DIR}/packaging/linux/ledgera.desktop"' in content
+    assert 'APPIMAGE_DESKTOP_ID="ledgera.desktop"' in content
+    assert 'APPIMAGE_ICON_ID="ledgera.png"' in content
+
+
+def test_postinstall_scripts_write_linux_package_kind_marker_under_ledgera_root() -> None:
+    root = Path(__file__).resolve().parents[1]
+    deb_script = (root / "packaging" / "linux" / "postinstall-deb.sh").read_text(encoding="utf-8")
+    rpm_script = (root / "packaging" / "linux" / "postinstall-rpm.sh").read_text(encoding="utf-8")
+
+    assert "printf '%s\\n' \"deb\" >/opt/Ledgera/.linux-package-kind || true" in deb_script
+    assert "printf '%s\\n' \"rpm\" >/opt/Ledgera/.linux-package-kind || true" in rpm_script

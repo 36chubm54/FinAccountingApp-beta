@@ -1,15 +1,16 @@
 {
-  "summary": "Graphical application for personal financial accounting with multicurrency support, import/export, tags, budgets, debts, assets, and goals",
+  "summary": "Graphical personal finance desktop app with multicurrency support, import/export, tags, budgets, debts, assets, and goals",
   "description": [
     "Ledgera personal finance desktop app with multicurrency support, import and export flows, budgets, debts, assets, and reports.",
-    "This release hardens the desktop updater contract: packaged Linux deb/rpm installs can persist a downloaded update across restart, switch the primary action to installation, and clean up the downloaded package only after the next successful upgraded launch, while AppImage and source-mode runtimes stay on the manual GitHub Releases path."
+    "This release completes the FinAccountingApp to Ledgera rename across packaged identity and internal runtime paths: bundled executables, Linux install roots, user-data roots, and secure-storage service names now use Ledgera, while startup performs a best-effort migration from legacy FinAccountingApp runtime roots and credentials and keeps the shell responsive during first paint."
   ],
   "release_date": "2026-05-23",
   "release_notes": [
-    "Packaged desktop updater flows now persist downloaded update state across restart and switch the primary action to installation instead of forcing a second download.",
-    "Downloaded installer and package artifacts are now cleaned up only after the next successful launch of the target-or-newer version.",
-    "Packaged Linux updater behavior is stricter and more honest: unknown package-type installs stay on the manual path, and terminal handoff now preflights the required apt or dnf package manager.",
-    "Updater cleanup gating now handles same-core stable and prerelease version comparisons correctly during startup reconciliation.",
-    "The deferred startup busy surface and first-run initial setup wizard were polished to better match the current desktop shell."
+    "Windows and Linux packaged bundles now use Ledgera end-to-end as the executable and bundle identity instead of keeping the old FinAccountingApp internal name.",
+    "Packaged runtime state now resolves to Ledgera user-data roots, with startup migration from legacy FinAccountingApp data directories when needed.",
+    "Linux system packages now install into /opt/Ledgera and AppImage runtime layout now uses Ledgera internal paths as well.",
+    "Secure OS credential storage now prefers the Ledgera service name while continuing to read legacy FinAccountingApp credentials during migration.",
+    "Updater and startup compatibility contracts remain intact during the rename, including persisted update state, prerelease-aware comparisons, packaged Linux terminal handoff, and explicit package verification errors when local rpm tooling is unavailable.",
+    "Packaged Windows startup now restores keyboard focus earlier and no longer depends on fragile modifier-state masks for Ctrl and Ctrl+Shift hotkeys."
   ]
 }

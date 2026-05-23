@@ -49,9 +49,12 @@ jobs:
           xvfb-run -a pytest -q --tb=short
           tests/test_app_paths.py
           tests/test_app_update_service.py
+          tests/test_hotkeys.py
           tests/test_initial_setup.py
+          tests/test_linux_system_packaging.py
           tests/test_main_startup.py
           tests/test_online_mode.py
+          tests/test_secret_storage.py
           tests/test_settings_updates.py
           tests/test_bootstrap_migration_verification.py
           tests/test_migrate_json_to_sqlite.py
@@ -60,7 +63,7 @@ jobs:
         run: npx -y pyright
 
       - name: Build Linux bundle
-        run: pyinstaller --noconfirm FinAccountingApp.linux.spec
+        run: pyinstaller --noconfirm Ledgera.linux.spec
 
       - name: Download appimagetool
         run: |
@@ -73,7 +76,7 @@ jobs:
         run: |
           chmod +x packaging/linux/build_appimage.sh
           bash packaging/linux/build_appimage.sh \
-            dist/FinAccountingApp \
+            dist/Ledgera \
             artifacts/Ledgera-linux.AppImage \
             tools/appimagetool.AppImage
 
@@ -81,7 +84,7 @@ jobs:
         run: |
           chmod +x packaging/linux/build_system_packages.sh packaging/linux/ledgera
           bash packaging/linux/build_system_packages.sh \
-            dist/FinAccountingApp \
+            dist/Ledgera \
             artifacts
 
       - name: Validate generated AppStream metadata

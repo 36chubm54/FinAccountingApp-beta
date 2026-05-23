@@ -60,7 +60,7 @@ Current contract:
 - runtime updates to `display_currency`, provider mode, provider selection, API key, auto-update, and refresh interval are persisted before the in-memory runtime is reconfigured
 - failed config persistence must not leave partially applied runtime currency state in memory
 - `exchange_rate_api_key` should be persisted through OS-backed secure storage rather than plaintext `currency_config.json`
-- env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` remains a runtime override, but not the preferred default persistence path
+- env var `LEDGERA_EXCHANGE_RATE_API_KEY` is now the primary runtime override, while `FINACCOUNTING_EXCHANGE_RATE_API_KEY` remains a compatibility fallback rather than the preferred default persistence path
 
 ## 3. Key Runtime Flows
 
@@ -72,24 +72,25 @@ Current rules:
 
 - packaged resources such as `gui/assets/icons`, `locales`, and `db/schema.sql` resolve from the bundle resource root
 - mutable runtime files such as `finance.db`, currency config/cache, and backup output resolve from a user-scoped data directory
-- in Windows packaged mode, that mutable runtime state is expected to live under `AppData`, not inside the install tree
-- in Linux packaged mode, mutable runtime state is expected to live under `XDG_DATA_HOME` or `~/.local/share/FinAccountingApp`, not inside the AppImage mount, extracted bundle, or `/opt/FinAccountingApp` install tree
+- in Windows packaged mode, that mutable runtime state is expected to live under `AppData\Ledgera`, not inside the install tree
+- in Linux packaged mode, mutable runtime state is expected to live under `XDG_DATA_HOME` or `~/.local/share/Ledgera`, not inside the AppImage mount, extracted bundle, or `/opt/Ledgera` install tree
+- startup now performs a best-effort migration from legacy `FinAccountingApp` runtime roots into the new `Ledgera` runtime root before opening SQLite-backed state
 - dev checkouts still resolve runtime files from the source tree unless an explicit override is provided
 - updater downloads are treated separately from the general source-tree dev contract and resolve to a dedicated Windows `AppData\updates` cache even in source mode
 
 Packaging note:
 
-- the checked-in `FinAccountingApp.spec` builds the main `PyInstaller --onedir` app bundle
-- `FinAccountingApp.linux.spec` builds the Linux `PyInstaller --onedir` bundle that is then wrapped into `Ledgera-linux.AppImage` and Linux `.deb` / `.rpm` system packages
+- the checked-in `Ledgera.spec` builds the main `PyInstaller --onedir` app bundle
+- `Ledgera.linux.spec` builds the Linux `PyInstaller --onedir` bundle that is then wrapped into `Ledgera-linux.AppImage` and Linux `.deb` / `.rpm` system packages
 - the current Linux GUI contract distinguishes `system-package`, `AppImage`, and source runtime: `deb` / `rpm` packaged Linux stays on native `ttk.Combobox` popdowns by default with guard logic, while `AppImage` and source-mode Linux can fall back to the app-managed compatibility popup path for problematic selector flows
 - Linux tag autocomplete follows the same split: `AppImage` and source-mode Linux can use the custom popup path, while `deb` / `rpm` packaged Linux, Windows, and other non-Linux runtimes stay on native `ttk.Combobox` behavior
 - `migrate_json_to_sqlite.py` and `migrations/migration_002_rename_amount_kzt_to_base.py` are shipped inside that bundle as raw Python utility scripts rather than separate executable tools
-- the Windows release workflow can optionally sign `FinAccountingApp.exe` and the installer if certificate secrets are configured; otherwise the release remains unsigned
-- the Windows installer-facing brand is now `Ledgera`: setup artifacts are emitted as `Ledgera-<version>-setup.exe`, while the internal bundled executable remains `FinAccountingApp.exe`
+- the Windows release workflow can optionally sign `Ledgera.exe` and the installer if certificate secrets are configured; otherwise the release remains unsigned
+- the Windows installer-facing brand and bundled executable are now both `Ledgera`: setup artifacts are emitted as `Ledgera-<version>-setup.exe`, and the packaged executable is `Ledgera.exe`
 - the Linux release workflow smoke-builds the AppImage and system-package paths on PRs and publishes `Ledgera-linux.AppImage`, `.deb`, and `.rpm` artifacts on tagged releases
-- Linux system packages install the read-only bundle into `/opt/FinAccountingApp`, expose `/usr/bin/ledgera`, and register a desktop entry plus icon through standard system paths
+- Linux system packages install the read-only bundle into `/opt/Ledgera`, expose `/usr/bin/ledgera`, and register a desktop entry plus icon through standard system paths
 - Linux package metadata is now owned by `packaging/linux/appstream_metadata.json` and validated in CI through `appstreamcli --pedantic` rather than being generated directly from release prose
-- Linux package/AppStream display identity is `Ledgera`, while internal bundle/data paths remain `FinAccountingApp` for compatibility
+- Linux package/AppStream display identity and internal bundle paths are now both `Ledgera`; migration safety is handled through runtime data-root and credential fallback logic instead of keeping the old internal bundle name
 - `GNOME Software` may still omit license details or release notes for locally installed third-party packages even when the package ships valid AppStream metadata; this has been observed to differ between Ubuntu GNOME and Fedora GNOME
 
 ### 3.0.1 Application update flow
@@ -114,6 +115,7 @@ Design rules:
 - packaged Linux updater selects artifacts via the install-root `.linux-package-kind` marker and never guesses `.deb` vs `.rpm` heuristically
 - Linux package handoff runs through a supported terminal executable and a terminal-kept-open `sudo apt install ...` / `sudo dnf install ...` command, not through `xdg-open` or direct package-manager execution in the app process
 - terminal handoff now also preflights the required package manager (`apt` / `dnf`) before spawning the terminal UX
+- local Linux package smoke verification can now validate `--deb` and `--rpm` independently, and missing tooling is surfaced as an explicit verification error rather than a raw subprocess traceback
 - source-mode Windows/Linux and `AppImage` remain explicit manual-release-page paths rather than pretending to support in-app installation
 - stable builds ignore GitHub prerelease releases, while prerelease builds can see newer prereleases and then transition to the final stable release
 
@@ -135,6 +137,7 @@ Important startup concerns:
 - optional currency refresh
 - auto-application of mandatory payments
 - early reconciliation of persisted updater install/cleanup state before the full shell build
+- staged post-startup refresh sequencing plus early keyboard-focus restore so the main shell becomes interactive before slower refresh passes complete
 - deferred GUI work and safe `after(...)` scheduling through `gui.runtime_coordinator.UiRuntimeCoordinator`
 - eager build of `Infographics` and `Operations`, with the remaining tabs composed lazily on first activation
 - online-mode status refresh through `gui.status_bar_coordinator.StatusBarCoordinator`
@@ -489,6 +492,7 @@ Important design rules:
 - actions are executed only when the matching tab is active
 - destructive or input-conflicting shortcuts also check current focus and skip when focus is inside `Entry`, `Combobox`, or `Text`
 - the design is compatible with lazy tab build and `_reset_tab_bindings()` because handlers read current `app._*_bindings` references on each keypress
+- packaged startup should not rely on Tk modifier-state masks alone for `Ctrl` / `Ctrl+Shift` shortcuts; the binding sequence itself is the stable source of truth across packaged Windows runs
 
 ### 4.12 Currency Provider System
 
@@ -521,7 +525,7 @@ Configuration model:
 
 - `provider_order` overrides the whole chain explicitly when present
 - otherwise `provider_mode` chooses between `fallback_provider` and `commercial_fallback_provider`
-- `exchange_rate_api_key` should resolve from OS-backed secure storage first, with env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` as an override path
+- `exchange_rate_api_key` should resolve from OS-backed secure storage first, with env var `LEDGERA_EXCHANGE_RATE_API_KEY` as the primary override path and `FINACCOUNTING_EXCHANGE_RATE_API_KEY` as legacy compatibility fallback
 - `display_currency_whitelist` constrains which codes appear in the status-bar switcher
 - `auto_update` and `update_interval_minutes` control recurring rate refresh while online mode is enabled
 - first-run setup may seed the initial provider/display config through a dedicated GUI wizard, but `base_currency` remains a bootstrap-only choice that is persisted into SQLite `schema_meta`

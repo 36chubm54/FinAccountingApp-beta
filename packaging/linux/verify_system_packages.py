@@ -3,13 +3,13 @@ from __future__ import annotations
 import argparse
 import re
 import runpy
+import shutil
 import subprocess
-from pathlib import Path
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[2]
 REQUIRED_PAYLOAD_PATHS = {
-    "/opt/FinAccountingApp/FinAccountingApp",
+    "/opt/Ledgera/Ledgera",
     "/usr/bin/ledgera",
     "/usr/share/applications/ledgera.desktop",
     "/usr/share/metainfo/ledgera.metainfo.xml",
@@ -27,6 +27,15 @@ def read_version() -> str:
 
 def _run(*args: str) -> str:
     return subprocess.check_output(args, text=True).strip()
+
+
+def _ensure_tool(tool_name: str) -> None:
+    if shutil.which(tool_name):
+        return
+    raise RuntimeError(
+        f"Required verification tool is not available: {tool_name}. "
+        f"Install it or skip the corresponding package verification."
+    )
 
 
 def _normalize_payload_listing(raw_output: str) -> set[str]:
@@ -62,6 +71,7 @@ def _normalize_rpm_version(raw_version: str) -> str:
 
 
 def verify_deb_package(path: Path) -> None:
+    _ensure_tool("dpkg-deb")
     version = read_version()
     package_name = _run("dpkg-deb", "--field", str(path), "Package")
     package_version = _run("dpkg-deb", "--field", str(path), "Version")
@@ -75,6 +85,7 @@ def verify_deb_package(path: Path) -> None:
 
 
 def verify_rpm_package(path: Path) -> None:
+    _ensure_tool("rpm")
     version = read_version()
     package_name = _run("rpm", "-qp", "--qf", "%{NAME}", str(path))
     package_version = _run("rpm", "-qp", "--qf", "%{VERSION}", str(path))
@@ -89,12 +100,17 @@ def verify_rpm_package(path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Verify Linux .deb and .rpm package payloads.")
-    parser.add_argument("--deb", required=True, type=Path)
-    parser.add_argument("--rpm", required=True, type=Path)
+    parser.add_argument("--deb", type=Path)
+    parser.add_argument("--rpm", type=Path)
     args = parser.parse_args()
 
-    verify_deb_package(args.deb.resolve())
-    verify_rpm_package(args.rpm.resolve())
+    if args.deb is None and args.rpm is None:
+        parser.error("at least one of --deb or --rpm must be provided")
+
+    if args.deb is not None:
+        verify_deb_package(args.deb.resolve())
+    if args.rpm is not None:
+        verify_rpm_package(args.rpm.resolve())
     print("Linux system-package smoke checks passed.")
     return 0
 

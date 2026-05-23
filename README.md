@@ -1,4 +1,4 @@
-# FinAccountingApp
+# Ledgera
 
 [![Release](https://img.shields.io/github/v/release/36chubm54/FinAccountingApp?display_name=tag)](https://github.com/36chubm54/FinAccountingApp/releases)
 [![Windows Build](https://img.shields.io/github/actions/workflow/status/36chubm54/FinAccountingApp/windows-build.yml?branch=main&label=windows%20build)](https://github.com/36chubm54/FinAccountingApp/actions/workflows/windows-build.yml)
@@ -9,19 +9,21 @@
 
 Графическое приложение для персонального финансового учёта с мультивалютностью, импортом/экспортом, тегами, бюджетами, долгами, активами и целями.
 
-Текущий релиз `v2.5.1` доводит updater и startup UX после `v2.5.0`: packaged Windows и packaged Linux теперь сохраняют состояние уже скачанного обновления между перезапусками, primary CTA в `Settings -> Обновление приложения` переключается из `Проверить обновления` в `Установить обновление`, а скачанные installer/package файлы удаляются только после следующего успешного запуска target-or-newer версии. Параллельно polished startup surfaces делают deferred startup и first-run setup более цельными визуально, а prerelease-aware updater logic и terminal/package-manager preflight продолжают держать install handoff честным.
+Текущий релиз `v2.6.0` завершает полный `FinAccountingApp -> Ledgera` rename через product, installer/artifact и runtime/internal identity. `Ledgera` теперь является не только user-facing brand, но и реальным bundle/runtime именем: Windows и Linux packaged builds используют `Ledgera` как executable, install root, user-data root и secure-storage service name, а startup-маршрут выполняет best-effort миграцию старых `FinAccountingApp` data paths и credentials.
 
 В актуальном runtime-контракте:
 
 - `exchange_rate_api_key` больше не должен жить в plaintext `currency_config.json` и по умолчанию уходит в OS-backed secure storage
-- env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` остаётся runtime override поверх secure storage
-- packaged mutable runtime state хранится в user-scoped platform data directory: `AppData` на Windows и `XDG_DATA_HOME` / `~/.local/share/FinAccountingApp` на Linux
+- env var `LEDGERA_EXCHANGE_RATE_API_KEY` становится основным runtime override поверх secure storage, а legacy `FINACCOUNTING_EXCHANGE_RATE_API_KEY` остаётся compatibility fallback
+- packaged mutable runtime state хранится в user-scoped platform data directory: `AppData\Ledgera` на Windows и `XDG_DATA_HOME` / `~/.local/share/Ledgera` на Linux
 - Windows updater скачивает installer в отдельный `updates` cache внутри `AppData`, а packaged Linux updater делает то же для `.deb` / `.rpm` в user-scoped Linux updates cache
 - Если installer/package уже скачан, updater теперь восстанавливает это состояние после перезапуска и предлагает `Установить обновление` без повторного скачивания
 - Скачанные updater artifacts удаляются только после следующего успешного запуска уже обновлённой target-or-newer версии, а не сразу после handoff
 - stable builds игнорируют GitHub prerelease releases, а prerelease builds умеют видеть более новые prerelease и затем переходить на финальный stable release
 - backup/export файлы остаются plaintext financial data, и это теперь явно отражено в UX и документации
 - Windows release workflow подготовлен к optional code signing, но без сертификата installer и bundle остаются unsigned
+- legacy `FinAccountingApp` user-data roots и secure-storage keys best-effort мигрируются в новый `Ledgera` runtime при первом packaged запуске
+- startup после первого показа окна теперь раньше возвращает keyboard focus главному shell и разносит тяжёлые refresh-проходы по нескольким UI-тикам, чтобы hotkeys и поля ввода не “зависали” до первого клика
 
 ## 🚀 Быстрый старт
 
@@ -64,30 +66,30 @@ pip install -r requirements-dev.txt
 python main.py
 ```
 
-Приложение запускает Tkinter GUI поверх SQLite runtime-storage. Вкладки `Infographics` и `Operations` строятся сразу, остальные вкладки достраиваются лениво, а post-startup maintenance и тяжёлые refresh-проходы выполняются после первого показа окна.
+Приложение запускает Tkinter GUI поверх SQLite runtime-storage. Вкладки `Infographics` и `Operations` строятся сразу, остальные вкладки достраиваются лениво, а post-startup maintenance и тяжёлые refresh-проходы выполняются после первого показа окна через staged shell startup, чтобы главное окно быстрее становилось интерактивным.
 
 ### Windows build (`PyInstaller --onedir`)
 
-- Основной Windows bundle собирается через checked-in `FinAccountingApp.spec`
+- Основной Windows bundle собирается через checked-in `Ledgera.spec`
 - Bundled read-only resources включают `gui/assets/icons`, `locales`, `db/schema.sql`
 - В packaged режиме mutable runtime files (`finance.db`, currency config/cache, backups, updater downloads) создаются в user-scoped `AppData`, а не внутри install directory
 - Migration utilities `migrate_json_to_sqlite.py` и `migration_002_rename_amount_kzt_to_base.py` входят в bundle как raw Python scripts, а не как отдельные `.exe`
-- Windows installer и release artifacts в этой волне используют branding `Ledgera`: setup-файл собирается как `Ledgera-<version>-setup.exe`, а каталог установки по умолчанию — `Program Files\Ledgera`
-- При этом bundled executable и internal runtime paths остаются совместимыми: внутри installer по-прежнему ставится `FinAccountingApp.exe`, а user data продолжают жить в `AppData`
-- GitHub Actions release workflow может опционально подписывать `FinAccountingApp.exe` и installer, если в repository secrets настроен code-signing certificate; без сертификата build остаётся unsigned
+- Windows installer и release artifacts используют `Ledgera` end-to-end: setup-файл собирается как `Ledgera-<version>-setup.exe`, bundled executable теперь `Ledgera.exe`, а каталог установки по умолчанию — `Program Files\Ledgera`
+- Windows packaged runtime data теперь живут в `AppData\Ledgera`, а startup выполняет best-effort migration из legacy `AppData\FinAccountingApp`, если она ещё не была перенесена
+- GitHub Actions release workflow может опционально подписывать `Ledgera.exe` и installer, если в repository secrets настроен code-signing certificate; без сертификата build остаётся unsigned
 - Windows CI теперь прогоняет installer build path не только на tag release, но и на обычных workflow runs, чтобы installer-регрессии ловились раньше
 
 ### Linux build (`PyInstaller --onedir` + `AppImage` / `deb` / `rpm`)
 
-- Linux bundle по-прежнему собирается через `FinAccountingApp.linux.spec`
+- Linux bundle теперь собирается через `Ledgera.linux.spec`
 - Поверх этого bundle release workflow теперь выпускает три Linux-артефакта:
   - `Ledgera-linux.AppImage`
   - `Ledgera-<version>-x86_64.deb`
   - `Ledgera-<version>-x86_64.rpm`
 - В `deb` / `rpm` packaged Linux runtime `Wayland` / `XWayland` по умолчанию остаётся на native `ttk.Combobox` path с guard-логикой, а `AppImage` и source-mode Linux используют compatibility fallback для проблемных selector surfaces
 - Linux packaged runtime по-прежнему разделяет bundle resources и mutable user data: база, конфиг валют, backups, exports и updates не должны попадать рядом ни с AppImage, ни с установленным system bundle
-- User data для packaged Linux builds размещаются в `XDG_DATA_HOME/FinAccountingApp` или `~/.local/share/FinAccountingApp`
-- Для `.deb` / `.rpm` system packages bundle устанавливается в `/opt/FinAccountingApp`, launcher регистрируется как `/usr/bin/ledgera`, а desktop entry и icon ставятся системно
+- User data для packaged Linux builds размещаются в `XDG_DATA_HOME/Ledgera` или `~/.local/share/Ledgera`
+- Для `.deb` / `.rpm` system packages bundle устанавливается в `/opt/Ledgera`, launcher регистрируется как `/usr/bin/ledgera`, а desktop entry и icon ставятся системно
 - Linux package metadata теперь принадлежат packaging layer: AppStream summary, description и release notes больше не генерируются напрямую из `README` / `CHANGELOG`, а отдельно валидируются через `appstreamcli --pedantic`
 - Packaged Linux `deb` / `rpm` builds теперь поддерживают persisted in-app updater flow: приложение определяет текущий package kind через install-root marker, скачивает matching Linux package в user-scoped `updates` cache, переживает рестарт с готовым install CTA и после подтверждения открывает terminal-based `sudo apt install ...` / `sudo dnf install ...` handoff
 - Если packaged Linux runtime не может надёжно определить package kind, не находит подходящий terminal executable или не видит нужный package manager (`apt` / `dnf`), updater деградирует к ручной GitHub Releases path вместо угадывания install command
@@ -104,9 +106,12 @@ python -m pip install --upgrade pip
 pip install -r requirements-dev.txt
 pip install .[pdf,build]
 npm install -g @goreleaser/nfpm
-pyinstaller --noconfirm FinAccountingApp.linux.spec
+pyinstaller --noconfirm Ledgera.linux.spec
 chmod +x packaging/linux/build_appimage.sh packaging/linux/build_system_packages.sh
-bash packaging/linux/build_system_packages.sh dist/FinAccountingApp artifacts
+bash packaging/linux/build_system_packages.sh dist/Ledgera artifacts
+python packaging/linux/verify_system_packages.py --deb artifacts/Ledgera-<version>-x86_64.deb
+# Для полной smoke-проверки .rpm нужен локально установленный tool `rpm`:
+# python packaging/linux/verify_system_packages.py --deb ... --rpm ...
 ```
 
 ## ✨ Основные возможности
@@ -144,8 +149,8 @@ bash packaging/linux/build_system_packages.sh dist/FinAccountingApp artifacts
 - `base_currency` выбирается только при первом запуске через setup wizard, затем источником истины остаётся SQLite `schema_meta`
 - По умолчанию селектор отображения ограничен whitelist-ом `KZT` / `USD` / `EUR` / `RUB`, даже если кэш курсов содержит больше кодов
 - `Settings -> Валюта и курсы` позволяет менять `display_currency`, provider mode, primary/fallback provider, `exchange_rate_api_key`, `auto_update` и `update_interval_minutes`, но не post-startup `base_currency`
-- `Settings -> Обновление приложения` в Windows умеет проверять последний GitHub Release, скачивать `Ledgera-*-setup.exe` в `AppData\updates`, переживать рестарт с готовым install CTA и затем передавать handoff штатному installer; packaged Linux `deb` / `rpm` builds делают то же для matching package в user-scoped updates cache и terminal-based install handoff, а `AppImage` и source-mode Linux остаются на ручной GitHub Releases path
-- `exchange_rate_api_key` больше не должен жить в `currency_config.json`: в packaged/runtime flow он переносится в secure OS storage там, где платформа это поддерживает, env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` остаётся override-путём, а аварийный plaintext fallback допустим только когда secure storage недоступен
+- `Settings -> Обновление приложения` в Windows умеет проверять последний GitHub Release, скачивать `Ledgera-*-setup.exe` в `AppData\Ledgera\updates`, переживать рестарт с готовым install CTA и затем передавать handoff штатному installer; packaged Linux `deb` / `rpm` builds делают то же для matching package в user-scoped updates cache и terminal-based install handoff, а `AppImage` и source-mode Linux остаются на ручной GitHub Releases path
+- `exchange_rate_api_key` больше не должен жить в `currency_config.json`: в packaged/runtime flow он переносится в secure OS storage там, где платформа это поддерживает, env var `LEDGERA_EXCHANGE_RATE_API_KEY` становится основным override-путём, legacy `FINACCOUNTING_EXCHANGE_RATE_API_KEY` остаётся compatibility fallback, а аварийный plaintext fallback допустим только когда secure storage недоступен
 - `auto_update` больше не является декоративным флагом: при включённом online mode курсы обновляются автоматически по `update_interval_minutes`
 - Экспортируемые отчёты локализуются по текущему языку UI, а колонки базовых сумм явно показывают код базы, например `Сумма (KZT)`
 - Локализованные report `CSV` / `XLSX` exports остаются import-safe для generic import pipeline приложения
@@ -242,7 +247,7 @@ bash packaging/linux/build_system_packages.sh dist/FinAccountingApp artifacts
 
 ## ⌨️ Горячие клавиши
 
-Глобальные сочетания регистрируются через `gui.hotkeys.register_hotkeys(app)` один раз на экземпляр `FinancialApp`. Обработчики читают активную вкладку и текущий фокус в момент нажатия, поэтому остаются корректными даже при lazy-build и пересборке вкладок.
+Глобальные сочетания регистрируются через `gui.hotkeys.register_hotkeys(app)` один раз на экземпляр `FinancialApp`. Обработчики читают активную вкладку и текущий фокус в момент нажатия, поэтому остаются корректными даже при lazy-build и пересборке вкладок. В packaged Windows startup path hotkeys больше не зависят от platform-specific `event.state` масок и должны работать сразу после запуска, без “разогрева” через первый клик по readonly-combobox.
 
 | Клавиша | Область | Действие |
 | --- | --- | --- |
@@ -371,11 +376,12 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 Полезные config points:
 
 - `currency_config.json` — `provider_mode`, `fallback_provider`, `commercial_fallback_provider`, `display_currency_whitelist`, `auto_update`, `update_interval_minutes`
-- env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` — runtime override для `exchange_rate_api_key`
+- env var `LEDGERA_EXCHANGE_RATE_API_KEY` — основной runtime override для `exchange_rate_api_key`
+- env var `FINACCOUNTING_EXCHANGE_RATE_API_KEY` — legacy compatibility override для существующих setup/scripts
 
 ## 🔐 Security Notes
 
-- Runtime data (`finance.db`, `currency_config.json`, `currency_rates.json`, backups, exports) хранятся в user-scoped platform data directory: `AppData` на Windows и `XDG_DATA_HOME` / `~/.local/share/FinAccountingApp` на Linux
+- Runtime data (`finance.db`, `currency_config.json`, `currency_rates.json`, backups, exports) хранятся в user-scoped platform data directory: `AppData\Ledgera` на Windows и `XDG_DATA_HOME` / `~/.local/share/Ledgera` на Linux
 - Downloads встроенного updater'а на Windows и packaged Linux живут в user-scoped `updates` cache, а не рядом с исходниками или установленным bundle; `AppImage` и source-mode runtime по-прежнему не используют in-app install handoff
 - `exchange_rate_api_key` должен храниться в secure OS-backed storage; `currency_config.json` больше не рассматривается как место для plaintext secrets
 - SQLite база, JSON backups и exported reports по-прежнему не шифруются at rest: это читаемые файлы с финансовыми данными
