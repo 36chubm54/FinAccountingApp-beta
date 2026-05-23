@@ -115,6 +115,7 @@ Design rules:
 - packaged Linux updater selects artifacts via the install-root `.linux-package-kind` marker and never guesses `.deb` vs `.rpm` heuristically
 - Linux package handoff runs through a supported terminal executable and a terminal-kept-open `sudo apt install ...` / `sudo dnf install ...` command, not through `xdg-open` or direct package-manager execution in the app process
 - terminal handoff now also preflights the required package manager (`apt` / `dnf`) before spawning the terminal UX
+- local Linux package smoke verification can now validate `--deb` and `--rpm` independently, and missing tooling is surfaced as an explicit verification error rather than a raw subprocess traceback
 - source-mode Windows/Linux and `AppImage` remain explicit manual-release-page paths rather than pretending to support in-app installation
 - stable builds ignore GitHub prerelease releases, while prerelease builds can see newer prereleases and then transition to the final stable release
 
@@ -136,6 +137,7 @@ Important startup concerns:
 - optional currency refresh
 - auto-application of mandatory payments
 - early reconciliation of persisted updater install/cleanup state before the full shell build
+- staged post-startup refresh sequencing plus early keyboard-focus restore so the main shell becomes interactive before slower refresh passes complete
 - deferred GUI work and safe `after(...)` scheduling through `gui.runtime_coordinator.UiRuntimeCoordinator`
 - eager build of `Infographics` and `Operations`, with the remaining tabs composed lazily on first activation
 - online-mode status refresh through `gui.status_bar_coordinator.StatusBarCoordinator`
@@ -490,6 +492,7 @@ Important design rules:
 - actions are executed only when the matching tab is active
 - destructive or input-conflicting shortcuts also check current focus and skip when focus is inside `Entry`, `Combobox`, or `Text`
 - the design is compatible with lazy tab build and `_reset_tab_bindings()` because handlers read current `app._*_bindings` references on each keypress
+- packaged startup should not rely on Tk modifier-state masks alone for `Ctrl` / `Ctrl+Shift` shortcuts; the binding sequence itself is the stable source of truth across packaged Windows runs
 
 ### 4.12 Currency Provider System
 

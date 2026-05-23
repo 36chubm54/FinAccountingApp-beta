@@ -23,6 +23,7 @@
 - backup/export файлы остаются plaintext financial data, и это теперь явно отражено в UX и документации
 - Windows release workflow подготовлен к optional code signing, но без сертификата installer и bundle остаются unsigned
 - legacy `FinAccountingApp` user-data roots и secure-storage keys best-effort мигрируются в новый `Ledgera` runtime при первом packaged запуске
+- startup после первого показа окна теперь раньше возвращает keyboard focus главному shell и разносит тяжёлые refresh-проходы по нескольким UI-тикам, чтобы hotkeys и поля ввода не “зависали” до первого клика
 
 ## 🚀 Быстрый старт
 
@@ -65,7 +66,7 @@ pip install -r requirements-dev.txt
 python main.py
 ```
 
-Приложение запускает Tkinter GUI поверх SQLite runtime-storage. Вкладки `Infographics` и `Operations` строятся сразу, остальные вкладки достраиваются лениво, а post-startup maintenance и тяжёлые refresh-проходы выполняются после первого показа окна.
+Приложение запускает Tkinter GUI поверх SQLite runtime-storage. Вкладки `Infographics` и `Operations` строятся сразу, остальные вкладки достраиваются лениво, а post-startup maintenance и тяжёлые refresh-проходы выполняются после первого показа окна через staged shell startup, чтобы главное окно быстрее становилось интерактивным.
 
 ### Windows build (`PyInstaller --onedir`)
 
@@ -108,6 +109,9 @@ npm install -g @goreleaser/nfpm
 pyinstaller --noconfirm Ledgera.linux.spec
 chmod +x packaging/linux/build_appimage.sh packaging/linux/build_system_packages.sh
 bash packaging/linux/build_system_packages.sh dist/Ledgera artifacts
+python packaging/linux/verify_system_packages.py --deb artifacts/Ledgera-<version>-x86_64.deb
+# Для полной smoke-проверки .rpm нужен локально установленный tool `rpm`:
+# python packaging/linux/verify_system_packages.py --deb ... --rpm ...
 ```
 
 ## ✨ Основные возможности
@@ -243,7 +247,7 @@ bash packaging/linux/build_system_packages.sh dist/Ledgera artifacts
 
 ## ⌨️ Горячие клавиши
 
-Глобальные сочетания регистрируются через `gui.hotkeys.register_hotkeys(app)` один раз на экземпляр `FinancialApp`. Обработчики читают активную вкладку и текущий фокус в момент нажатия, поэтому остаются корректными даже при lazy-build и пересборке вкладок.
+Глобальные сочетания регистрируются через `gui.hotkeys.register_hotkeys(app)` один раз на экземпляр `FinancialApp`. Обработчики читают активную вкладку и текущий фокус в момент нажатия, поэтому остаются корректными даже при lazy-build и пересборке вкладок. В packaged Windows startup path hotkeys больше не зависят от platform-specific `event.state` масок и должны работать сразу после запуска, без “разогрева” через первый клик по readonly-combobox.
 
 | Клавиша | Область | Действие |
 | --- | --- | --- |

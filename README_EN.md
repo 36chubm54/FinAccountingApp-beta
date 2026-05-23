@@ -23,6 +23,7 @@ In the current runtime contract:
 - backup/export files remain plaintext financial data, and that is now reflected explicitly in the UX and docs
 - the Windows release workflow is prepared for optional code signing, but without a certificate the installer and bundle remain unsigned
 - legacy `FinAccountingApp` user-data roots and secure-storage keys are migrated best-effort into the new `Ledgera` runtime on first packaged launch
+- after first paint, startup now restores keyboard focus to the main shell earlier and spreads heavier refresh passes across multiple UI ticks so hotkeys and input fields do not stay stalled until the first click
 
 ## 🚀 Quick Start
 
@@ -65,7 +66,7 @@ pip install -r requirements-dev.txt
 python main.py
 ```
 
-The app starts a Tkinter GUI on top of SQLite runtime storage. `Infographics` and `Operations` are built eagerly, the remaining tabs are built lazily, and post-startup maintenance plus heavier refresh passes run after the first window paint.
+The app starts a Tkinter GUI on top of SQLite runtime storage. `Infographics` and `Operations` are built eagerly, the remaining tabs are built lazily, and post-startup maintenance plus heavier refresh passes run after the first window paint through a staged shell-startup flow so the main window becomes interactive earlier.
 
 ### Windows build (`PyInstaller --onedir`)
 
@@ -108,6 +109,9 @@ npm install -g @goreleaser/nfpm
 pyinstaller --noconfirm Ledgera.linux.spec
 chmod +x packaging/linux/build_appimage.sh packaging/linux/build_system_packages.sh
 bash packaging/linux/build_system_packages.sh dist/Ledgera artifacts
+python packaging/linux/verify_system_packages.py --deb artifacts/Ledgera-<version>-x86_64.deb
+# Full .rpm smoke verification additionally requires a local `rpm` CLI:
+# python packaging/linux/verify_system_packages.py --deb ... --rpm ...
 ```
 
 ## ✨ Core Features
@@ -243,7 +247,7 @@ Practical highlights in the current working tree:
 
 ## ⌨️ Hotkeys
 
-Global shortcuts are registered through `gui.hotkeys.register_hotkeys(app)` once per `FinancialApp` instance. Handlers inspect the active tab and current focus at keypress time, so they remain valid across lazy-built and rebuilt tabs.
+Global shortcuts are registered through `gui.hotkeys.register_hotkeys(app)` once per `FinancialApp` instance. Handlers inspect the active tab and current focus at keypress time, so they remain valid across lazy-built and rebuilt tabs. On packaged Windows startup, hotkeys no longer depend on platform-specific `event.state` masks and are expected to work immediately after launch instead of needing a first click on a readonly combobox.
 
 | Key | Scope | Action |
 | --- | --- | --- |

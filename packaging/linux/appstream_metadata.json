@@ -2,7 +2,7 @@
   "summary": "Graphical personal finance desktop app with multicurrency support, import/export, tags, budgets, debts, assets, and goals",
   "description": [
     "Ledgera personal finance desktop app with multicurrency support, import and export flows, budgets, debts, assets, and reports.",
-    "This release completes the FinAccountingApp to Ledgera rename across packaged identity and internal runtime paths: bundled executables, Linux install roots, user-data roots, and secure-storage service names now use Ledgera, while startup performs a best-effort migration from legacy FinAccountingApp runtime roots and credentials."
+    "This release completes the FinAccountingApp to Ledgera rename across packaged identity and internal runtime paths: bundled executables, Linux install roots, user-data roots, and secure-storage service names now use Ledgera, while startup performs a best-effort migration from legacy FinAccountingApp runtime roots and credentials and keeps the shell responsive during first paint."
   ],
   "release_date": "2026-05-23",
   "release_notes": [
@@ -10,6 +10,7 @@
     "Packaged runtime state now resolves to Ledgera user-data roots, with startup migration from legacy FinAccountingApp data directories when needed.",
     "Linux system packages now install into /opt/Ledgera and AppImage runtime layout now uses Ledgera internal paths as well.",
     "Secure OS credential storage now prefers the Ledgera service name while continuing to read legacy FinAccountingApp credentials during migration.",
-    "Updater and startup compatibility contracts remain intact during the rename, including persisted update state, prerelease-aware comparisons, and packaged Linux terminal handoff."
+    "Updater and startup compatibility contracts remain intact during the rename, including persisted update state, prerelease-aware comparisons, packaged Linux terminal handoff, and explicit package verification errors when local rpm tooling is unavailable.",
+    "Packaged Windows startup now restores keyboard focus earlier and no longer depends on fragile modifier-state masks for Ctrl and Ctrl+Shift hotkeys."
   ]
 }

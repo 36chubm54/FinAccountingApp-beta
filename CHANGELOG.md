@@ -26,11 +26,15 @@ This project adheres to Semantic Versioning.
 
 - Fixed packaged Linux install-root marker scripts and smoke-check expectations so updater package-kind detection follows the new `/opt/Ledgera` layout
 - Fixed startup/runtime continuity during the rename so existing packaged users do not lose updater cache, SQLite data, backups, or OS-backed API credentials when moving from `FinAccountingApp` to `Ledgera`
+- Fixed startup input responsiveness so the main shell restores keyboard focus earlier and staggers heavy post-startup refresh work instead of leaving hotkeys and input widgets stalled until the first click
+- Fixed packaged Windows hotkeys so `Ctrl` / `Ctrl+Shift` bindings no longer depend on fragile Tk modifier-state masks in packaged startup flows
+- Fixed local Linux package verification ergonomics so `.deb` and `.rpm` can be verified independently and missing `rpm` tooling now fails with an explicit message instead of `FileNotFoundError`
 
 ### Testing
 
 - Added regression coverage for packaged runtime data-root migration from legacy `FinAccountingApp` paths into `Ledgera`
 - Added secure-storage compatibility coverage for reading legacy `FinAccountingApp` credentials and cleaning them up after writing to `Ledgera`
+- Added regression coverage for packaged-Windows hotkeys, staged startup focus/refresh orchestration, AppImage desktop/icon naming, optional `.deb` / `.rpm` verification, and Linux install-root marker contracts
 
 ## [2.5.1] - 2026-05-23
 
