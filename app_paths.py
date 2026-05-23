@@ -94,23 +94,21 @@ def _get_legacy_user_data_root() -> Path | None:
     return base_dir / LEGACY_APP_DATA_DIRNAME
 
 
-def _merge_directory_contents(source: Path, target: Path) -> None:
+def _copy_missing_directory_contents(source: Path, target: Path) -> None:
     target.mkdir(parents=True, exist_ok=True)
     for child in source.iterdir():
         destination = target / child.name
         if child.is_dir():
             if destination.exists() and destination.is_dir():
-                _merge_directory_contents(child, destination)
-                try:
-                    child.rmdir()
-                except OSError:
-                    pass
+                _copy_missing_directory_contents(child, destination)
                 continue
-            shutil.move(str(child), str(destination))
+            if destination.exists():
+                continue
+            shutil.copytree(str(child), str(destination))
             continue
         if destination.exists():
             continue
-        shutil.move(str(child), str(destination))
+        shutil.copy2(str(child), str(destination))
 
 
 def _migrate_legacy_user_data_root(target_root: Path) -> Path:
@@ -124,10 +122,9 @@ def _migrate_legacy_user_data_root(target_root: Path) -> Path:
         return target_root
     if target_root.exists():
         try:
-            _merge_directory_contents(legacy_root, target_root)
-            legacy_root.rmdir()
+            _copy_missing_directory_contents(legacy_root, target_root)
         except OSError:
-            return legacy_root
+            return target_root
         return target_root
     try:
         target_root.parent.mkdir(parents=True, exist_ok=True)

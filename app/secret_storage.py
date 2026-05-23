@@ -119,8 +119,7 @@ def _get_password(service_name: str) -> str:
 
 
 def get_exchange_rate_api_key() -> str:
-    status = get_secret_storage_status()
-    if not status.available or keyring is None:
+    if keyring is None:
         return ""
     return _get_password(SERVICE_NAME) or _get_password(LEGACY_SERVICE_NAME)
 

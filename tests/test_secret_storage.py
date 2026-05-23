@@ -62,6 +62,32 @@ def test_exchange_rate_api_key_reads_legacy_service_when_new_name_is_empty(monke
     assert get_exchange_rate_api_key() == "legacy-key"
 
 
+def test_exchange_rate_api_key_reads_legacy_service_when_status_is_unavailable(
+    monkeypatch,
+) -> None:
+    class DummyKeyring:
+        def get_password(self, service_name: str, account: str) -> str:
+            assert account == EXCHANGE_RATE_API_KEY_ACCOUNT
+            if service_name == SERVICE_NAME:
+                return ""
+            if service_name == LEGACY_SERVICE_NAME:
+                return "legacy-key"
+            return ""
+
+    monkeypatch.setattr(
+        secret_storage,
+        "get_secret_storage_status",
+        lambda: secret_storage.SecretStorageStatus(
+            available=False,
+            backend_name="DummyKeyring",
+            backend_label="Secure OS secret storage is unavailable",
+        ),
+    )
+    monkeypatch.setattr(secret_storage, "keyring", DummyKeyring())
+
+    assert get_exchange_rate_api_key() == "legacy-key"
+
+
 def test_set_exchange_rate_api_key_cleans_up_legacy_service(monkeypatch) -> None:
     calls: list[tuple[str, str, str | None]] = []
 

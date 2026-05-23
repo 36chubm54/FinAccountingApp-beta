@@ -185,3 +185,77 @@ def test_legacy_windows_data_root_is_migrated_to_ledgera(monkeypatch, tmp_path: 
     assert (root / "finance.db").read_text(encoding="utf-8") == "sqlite"
     assert (root / "backups" / "old.json").read_text(encoding="utf-8") == "backup"
     assert not legacy_root.exists()
+
+
+def test_existing_ledgera_root_copies_missing_legacy_files_without_switching_back(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    local_appdata = tmp_path / "LocalAppData"
+    legacy_root = local_appdata / app_paths.LEGACY_APP_DATA_DIRNAME
+    target_root = local_appdata / app_paths.APP_DATA_DIRNAME
+    legacy_root.mkdir(parents=True)
+    target_root.mkdir(parents=True)
+    (legacy_root / "finance.db").write_text("legacy-sqlite", encoding="utf-8")
+    (legacy_root / "currency_config.json").write_text("legacy-config", encoding="utf-8")
+    (target_root / "finance.db").write_text("new-sqlite", encoding="utf-8")
+    monkeypatch.delenv("LEDGERA_DATA_DIR", raising=False)
+    monkeypatch.delenv("FIN_ACCOUNTING_DATA_DIR", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(local_appdata))
+    monkeypatch.setattr(app_paths, "_is_frozen_mode", lambda: True)
+    monkeypatch.setattr(app_paths, "_is_windows", lambda: True)
+
+    root = app_paths.get_user_data_root()
+
+    assert root == target_root.resolve()
+    assert (target_root / "finance.db").read_text(encoding="utf-8") == "new-sqlite"
+    assert (target_root / "currency_config.json").read_text(encoding="utf-8") == "legacy-config"
+    assert (legacy_root / "finance.db").read_text(encoding="utf-8") == "legacy-sqlite"
+
+
+def test_legacy_linux_data_root_is_migrated_to_ledgera(monkeypatch, tmp_path: Path) -> None:
+    xdg_data_home = tmp_path / "xdg-data"
+    legacy_root = xdg_data_home / app_paths.LEGACY_APP_DATA_DIRNAME
+    (legacy_root / "backups").mkdir(parents=True)
+    (legacy_root / "finance.db").write_text("sqlite", encoding="utf-8")
+    (legacy_root / "backups" / "old.json").write_text("backup", encoding="utf-8")
+    monkeypatch.delenv("LEDGERA_DATA_DIR", raising=False)
+    monkeypatch.delenv("FIN_ACCOUNTING_DATA_DIR", raising=False)
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_data_home))
+    monkeypatch.setattr(app_paths, "_is_frozen_mode", lambda: True)
+    monkeypatch.setattr(app_paths, "_is_windows", lambda: False)
+    monkeypatch.setattr(app_paths, "_is_linux", lambda: True)
+
+    root = app_paths.get_user_data_root()
+
+    assert root == (xdg_data_home / app_paths.APP_DATA_DIRNAME).resolve()
+    assert (root / "finance.db").read_text(encoding="utf-8") == "sqlite"
+    assert (root / "backups" / "old.json").read_text(encoding="utf-8") == "backup"
+    assert not legacy_root.exists()
+
+
+def test_existing_ledgera_linux_root_copies_missing_legacy_files_without_switching_back(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    xdg_data_home = tmp_path / "xdg-data"
+    legacy_root = xdg_data_home / app_paths.LEGACY_APP_DATA_DIRNAME
+    target_root = xdg_data_home / app_paths.APP_DATA_DIRNAME
+    legacy_root.mkdir(parents=True)
+    target_root.mkdir(parents=True)
+    (legacy_root / "finance.db").write_text("legacy-sqlite", encoding="utf-8")
+    (legacy_root / "currency_config.json").write_text("legacy-config", encoding="utf-8")
+    (target_root / "finance.db").write_text("new-sqlite", encoding="utf-8")
+    monkeypatch.delenv("LEDGERA_DATA_DIR", raising=False)
+    monkeypatch.delenv("FIN_ACCOUNTING_DATA_DIR", raising=False)
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_data_home))
+    monkeypatch.setattr(app_paths, "_is_frozen_mode", lambda: True)
+    monkeypatch.setattr(app_paths, "_is_windows", lambda: False)
+    monkeypatch.setattr(app_paths, "_is_linux", lambda: True)
+
+    root = app_paths.get_user_data_root()
+
+    assert root == target_root.resolve()
+    assert (target_root / "finance.db").read_text(encoding="utf-8") == "new-sqlite"
+    assert (target_root / "currency_config.json").read_text(encoding="utf-8") == "legacy-config"
+    assert (legacy_root / "finance.db").read_text(encoding="utf-8") == "legacy-sqlite"
