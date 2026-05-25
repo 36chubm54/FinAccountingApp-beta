@@ -9,8 +9,7 @@ section: utils
 priority: optional
 maintainer: 36chubm54 <noreply@github.com>
 description: |
-  Ledgera personal finance desktop app with multicurrency support,
-  import and export flows, budgets, debts, assets, and reports.
+${PACKAGE_DESCRIPTION}
 vendor: 36chubm54
 homepage: https://github.com/36chubm54/Ledgera
 license: MIT

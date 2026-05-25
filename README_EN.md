@@ -9,7 +9,7 @@
 
 Graphical application for personal financial accounting with multicurrency support, import/export, tags, budgets, debts, assets, and goals.
 
-The current shipping release `v2.6.0` completes the full `FinAccountingApp -> Ledgera` rename across product identity, installer/artifact identity, and runtime/internal identity. On top of that, the current working tree closes a large internal decomposition wave: `app`, `gui`, `services`, `infrastructure`, and `utils` now use narrower package clusters and direct import paths instead of older flat compatibility facades.
+The current shipping release `v2.6.1` keeps the full `FinAccountingApp -> Ledgera` rename in place and adds patch-level polish across Linux packaging and packaged updater flows. On top of that, the current working tree closes a large internal decomposition wave: `app`, `gui`, `services`, `infrastructure`, and `utils` now use narrower package clusters and direct import paths instead of older flat compatibility facades.
 
 In the current runtime contract:
 
@@ -90,8 +90,9 @@ The app starts a Tkinter GUI on top of SQLite runtime storage. `Infographics` an
 - Packaged Linux runtime keeps the same read-only resources vs mutable user-data split as Windows builds: the database, currency config, backups, exports, and updates are no longer expected to live beside either the AppImage or the installed system bundle
 - User data for packaged Linux builds resolve to `XDG_DATA_HOME/Ledgera` or `~/.local/share/Ledgera`
 - For `.deb` / `.rpm` system packages, the bundle is installed under `/opt/Ledgera`, the launcher is exposed as `/usr/bin/ledgera`, and the desktop entry plus icon are registered system-wide
-- Linux package metadata is now owned by the packaging layer: AppStream summary, description, and release notes are no longer generated directly from `README` / `CHANGELOG`, and the generated metadata is validated through `appstreamcli --pedantic`
+- Linux package metadata is now owned by the packaging layer: AppStream summary, description, and release notes live in `packaging/linux/appstream_metadata.json`, while the `nFPM` package description is rendered from the same source instead of a separate hand-maintained marketing blurb; the generated metadata is still validated through `appstreamcli --pedantic`
 - Packaged Linux `deb` / `rpm` builds now support a persisted in-app updater flow: the app detects the current package kind through an install-root marker, downloads the matching Linux package into a user-scoped `updates` cache, survives restarts with a ready-to-install CTA, and after confirmation opens a terminal-based `sudo apt install ...` / `sudo dnf install ...` handoff
+- Linux terminal handoff now uses terminal-specific invocation modes instead of one shared spawn pattern: chooser/modal startup waits for the dialog to become viewable first, and the handoff path separately supports `GNOME Terminal`, `Ptyxis`, `GNOME Console`, `Tilix`, `QTerminal`, `Xfce Terminal`, `MATE Terminal`, and compatible `x-terminal-emulator` wrappers
 - If the packaged Linux runtime cannot determine the package kind confidently, cannot resolve a supported terminal executable, or cannot find the required package manager (`apt` / `dnf`), the updater degrades to the manual GitHub Releases path instead of guessing an install command
 - `AppImage` and source-mode Linux still do not update in-app: for those runtimes the supported path remains manually downloading a newer Linux package or AppImage from GitHub Releases
 - In this release wave, Wayland compatibility now splits `system-package`, `AppImage`, and source runtime behavior: `deb` / `rpm` packaged Linux keeps native `ttk.Combobox` behavior by default, while `AppImage`, source-mode Linux, and Linux tag autocomplete can still use the app-managed fallback path when needed; the corresponding selectors stay on native `ttk.Combobox` on Windows
