@@ -66,6 +66,14 @@ def _load_appstream_metadata() -> tuple[str, list[str], str, list[str]]:
     return summary, description_blocks, release_date, notes
 
 
+def _render_nfpm_description() -> str:
+    summary, description_blocks, _release_date, _release_notes = _load_appstream_metadata()
+    lines = [summary.rstrip(".")]
+    if description_blocks:
+        lines.append(description_blocks[0])
+    return "\n".join(f"  {line}" for line in lines if line)
+
+
 def render_metainfo_xml() -> str:
     summary, description_blocks, release_date, release_notes = _load_appstream_metadata()
     version = read_version()
@@ -215,6 +223,7 @@ def write_rendered_nfpm_config(staging_dir: Path, rootfs_dir: Path, *, packager:
         .replace("${PACKAGE_NAME}", PACKAGE_NAME)
         .replace("${PACKAGE_APP_DIR_NAME}", APP_DIR_NAME)
         .replace("${POSTINSTALL_SCRIPT}", postinstall_script)
+        .replace("${PACKAGE_DESCRIPTION}", _render_nfpm_description())
     )
     rendered_path.write_text(rendered, encoding="utf-8")
     return rendered_path

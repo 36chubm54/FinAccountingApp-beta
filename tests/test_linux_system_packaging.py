@@ -99,10 +99,13 @@ def test_write_rendered_nfpm_config_replaces_placeholders(tmp_path: Path) -> Non
     for content in (deb_content, rpm_content):
         assert "${PACKAGE_ROOTFS}" not in content
         assert "${PACKAGE_VERSION}" not in content
+        assert "${PACKAGE_DESCRIPTION}" not in content
         assert rootfs.as_posix() in content
         assert f"version: {module.read_version()}" in content
         assert "postremove: packaging/linux/postremove.sh" in content
         assert "/usr/share/metainfo/ledgera.metainfo.xml" in content
+        assert "Personal finance desktop app with multicurrency tracking and reports" in content
+        assert "Track wallets, tagged records, budgets, debts, assets, and goals" in content
 
     assert "postinstall: packaging/linux/postinstall-deb.sh" in deb_content
     assert "postinstall: packaging/linux/postinstall-rpm.sh" in rpm_content

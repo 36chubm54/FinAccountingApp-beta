@@ -1,16 +1,14 @@
 {
-  "summary": "Graphical personal finance desktop app with multicurrency support, import/export, tags, budgets, debts, assets, and goals",
+  "summary": "Personal finance desktop app with multicurrency tracking and reports",
   "description": [
-    "Ledgera personal finance desktop app with multicurrency support, import and export flows, budgets, debts, assets, and reports.",
-    "This release completes the FinAccountingApp to Ledgera rename across packaged identity and internal runtime paths: bundled executables, Linux install roots, user-data roots, and secure-storage service names now use Ledgera, while startup performs a best-effort migration from legacy FinAccountingApp runtime roots and credentials and keeps the shell responsive during first paint."
+    "Track wallets, tagged records, budgets, debts, assets, and goals across multiple currencies with built-in import, export, and reporting tools.",
+    "This patch refreshes the Linux software-center AppStream card and hardens packaged updater terminal handoff on Fedora and Ubuntu so terminal selection and launch both stay reliable during local .deb and .rpm installs."
   ],
-  "release_date": "2026-05-23",
+  "release_date": "2026-05-25",
   "release_notes": [
-    "Windows and Linux packaged bundles now use Ledgera end-to-end as the executable and bundle identity instead of keeping the old FinAccountingApp internal name.",
-    "Packaged runtime state now resolves to Ledgera user-data roots, with startup migration from legacy FinAccountingApp data directories when needed.",
-    "Linux system packages now install into /opt/Ledgera and AppImage runtime layout now uses Ledgera internal paths as well.",
-    "Secure OS credential storage now prefers the Ledgera service name while continuing to read legacy FinAccountingApp credentials during migration.",
-    "Updater and startup compatibility contracts remain intact during the rename, including persisted update state, prerelease-aware comparisons, packaged Linux terminal handoff, and explicit package verification errors when local rpm tooling is unavailable.",
-    "Packaged Windows startup now restores keyboard focus earlier and no longer depends on fragile modifier-state masks for Ctrl and Ctrl+Shift hotkeys."
+    "Refreshed the packaged Linux AppStream metadata card for the v2.6.1 patch release.",
+    "Fixed Fedora terminal chooser startup by waiting until the selection dialog is viewable before applying the modal grab.",
+    "Fixed Ubuntu, GNOME Console, Tilix, and Xfce-family terminal launch handoff by using terminal-specific documented command invocation modes.",
+    "Packaged Linux updater flows continue to reuse saved terminal preferences and keep .deb versus .rpm install commands aligned with the current package kind."
   ]
 }
