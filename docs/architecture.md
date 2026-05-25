@@ -89,7 +89,7 @@ Packaging note:
 - the Windows installer-facing brand and bundled executable are now both `Ledgera`: setup artifacts are emitted as `Ledgera-<version>-setup.exe`, and the packaged executable is `Ledgera.exe`
 - the Linux release workflow smoke-builds the AppImage and system-package paths on PRs and publishes `Ledgera-linux.AppImage`, `.deb`, and `.rpm` artifacts on tagged releases
 - Linux system packages install the read-only bundle into `/opt/Ledgera`, expose `/usr/bin/ledgera`, and register a desktop entry plus icon through standard system paths
-- Linux package metadata is now owned by `packaging/linux/appstream_metadata.json` and validated in CI through `appstreamcli --pedantic` rather than being generated directly from release prose
+- Linux package metadata is now owned by `packaging/linux/appstream_metadata.json`; `nFPM` package description is rendered from the same source, and the resulting metadata is validated in CI through `appstreamcli --pedantic`
 - Linux package/AppStream display identity and internal bundle paths are now both `Ledgera`; migration safety is handled through runtime data-root and credential fallback logic instead of keeping the old internal bundle name
 - `GNOME Software` may still omit license details or release notes for locally installed third-party packages even when the package ships valid AppStream metadata; this has been observed to differ between Ubuntu GNOME and Fedora GNOME
 
@@ -114,6 +114,8 @@ Design rules:
 - packaged Linux `.deb` / `.rpm` runtime is the only Linux environment with in-app update download/handoff support in this wave
 - packaged Linux updater selects artifacts via the install-root `.linux-package-kind` marker and never guesses `.deb` vs `.rpm` heuristically
 - Linux package handoff runs through a supported terminal executable and a terminal-kept-open `sudo apt install ...` / `sudo dnf install ...` command, not through `xdg-open` or direct package-manager execution in the app process
+- terminal chooser startup now waits until the dialog becomes viewable before applying the modal grab, which avoids the Linux/Wayland-style `grab failed` path seen in packaged runs
+- Linux terminal spawn arguments are now terminal-specific rather than shared across the whole supported list; the current mapping distinguishes `GNOME Terminal` / `Ptyxis`, `GNOME Console`, `Tilix`, `QTerminal`, `Xfce Terminal`, `MATE Terminal`, and `x-terminal-emulator`-style wrappers
 - terminal handoff now also preflights the required package manager (`apt` / `dnf`) before spawning the terminal UX
 - local Linux package smoke verification can now validate `--deb` and `--rpm` independently, and missing tooling is surfaced as an explicit verification error rather than a raw subprocess traceback
 - source-mode Windows/Linux and `AppImage` remain explicit manual-release-page paths rather than pretending to support in-app installation

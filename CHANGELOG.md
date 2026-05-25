@@ -23,6 +23,22 @@ This project adheres to Semantic Versioning.
 
 - Synced `README.md`, `README_EN.md`, and `docs/architecture.md` with the current package layout, direct import paths, and removal of legacy tab/app shim layers
 
+## [2.6.1] - 2026-05-25
+
+### Changed
+
+- Refreshed the packaged Linux AppStream card metadata for the `v2.6.1` patch release
+- Unified Linux package marketing text so AppStream and `nFPM` metadata now render from the same packaging-owned source
+
+### Fixed
+
+- Fixed Fedora packaged-updater terminal chooser startup by waiting for the dialog to become viewable before applying the modal grab
+- Fixed Ubuntu, GNOME Console, Tilix, and Xfce-family packaged-updater terminal launch by using terminal-specific documented command invocation modes
+
+### Testing
+
+- Added regression coverage for Linux terminal chooser modal startup ordering plus `kgx`, `tilix`, `mate-terminal`, `xfce4-terminal`, and `x-terminal-emulator` launch handoff
+
 ## [2.6.0] - 2026-05-23
 
 ### Added

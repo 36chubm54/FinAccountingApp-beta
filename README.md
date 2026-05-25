@@ -9,7 +9,7 @@
 
 Графическое приложение для персонального финансового учёта с мультивалютностью, импортом/экспортом, тегами, бюджетами, долгами, активами и целями.
 
-Текущий shipping-релиз `v2.6.0` завершает полный `FinAccountingApp -> Ledgera` rename через product, installer/artifact и runtime/internal identity. Поверх него текущее рабочее дерево закрывает большую internal decomposition wave: `app`, `gui`, `services`, `infrastructure` и `utils` теперь собраны в более узкие package-кластеры с прямыми import-path вместо старых flat compat-фасадов.
+Текущий shipping-релиз `v2.6.1` оставляет в силе полный `FinAccountingApp -> Ledgera` rename и добавляет patch-level polish поверх Linux packaging и packaged updater flows. Поверх него текущее рабочее дерево закрывает большую internal decomposition wave: `app`, `gui`, `services`, `infrastructure` и `utils` теперь собраны в более узкие package-кластеры с прямыми import-path вместо старых flat compat-фасадов.
 
 В актуальном runtime-контракте:
 
@@ -90,8 +90,9 @@ python main.py
 - Linux packaged runtime по-прежнему разделяет bundle resources и mutable user data: база, конфиг валют, backups, exports и updates не должны попадать рядом ни с AppImage, ни с установленным system bundle
 - User data для packaged Linux builds размещаются в `XDG_DATA_HOME/Ledgera` или `~/.local/share/Ledgera`
 - Для `.deb` / `.rpm` system packages bundle устанавливается в `/opt/Ledgera`, launcher регистрируется как `/usr/bin/ledgera`, а desktop entry и icon ставятся системно
-- Linux package metadata теперь принадлежат packaging layer: AppStream summary, description и release notes больше не генерируются напрямую из `README` / `CHANGELOG`, а отдельно валидируются через `appstreamcli --pedantic`
+- Linux package metadata теперь принадлежат packaging layer: AppStream summary, description и release notes живут в `packaging/linux/appstream_metadata.json`, а `nFPM` package description рендерится из того же источника вместо отдельного ручного marketing text; итоговая metadata по-прежнему валидируется через `appstreamcli --pedantic`
 - Packaged Linux `deb` / `rpm` builds теперь поддерживают persisted in-app updater flow: приложение определяет текущий package kind через install-root marker, скачивает matching Linux package в user-scoped `updates` cache, переживает рестарт с готовым install CTA и после подтверждения открывает terminal-based `sudo apt install ...` / `sudo dnf install ...` handoff
+- Linux terminal handoff теперь использует terminal-specific invocation modes вместо единой схемы запуска: chooser/modal startup корректно ждёт viewable-state окна, а handoff отдельно учитывает `GNOME Terminal`, `Ptyxis`, `GNOME Console`, `Tilix`, `QTerminal`, `Xfce Terminal`, `MATE Terminal` и совместимые `x-terminal-emulator`-обёртки
 - Если packaged Linux runtime не может надёжно определить package kind, не находит подходящий terminal executable или не видит нужный package manager (`apt` / `dnf`), updater деградирует к ручной GitHub Releases path вместо угадывания install command
 - `AppImage` и source-mode Linux по-прежнему не обновляются in-app: для них supported path остаётся ручное скачивание нового Linux-пакета или AppImage из GitHub Releases
 - Wayland compatibility в этой волне теперь разделяет `system-package`, `AppImage` и source runtime: `deb` / `rpm` packaged Linux сохраняет native `ttk.Combobox` behavior по умолчанию, а `AppImage`, source-mode Linux и Linux tag autocomplete при необходимости используют app-managed fallback path; в Windows соответствующие selectors остаются на native `ttk.Combobox`
