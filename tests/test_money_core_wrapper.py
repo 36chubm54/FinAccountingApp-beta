@@ -6,6 +6,9 @@ from utils.finance import money
 
 
 def test_public_money_helpers_match_python_fallback_semantics() -> None:
+    assert money.quantize_money("1.005") == money._py_quantize_money("1.005")
+    assert money.quantize_money("-1.005") == money._py_quantize_money("-1.005")
+    assert money.quantize_rate("1.2345675") == money._py_quantize_rate("1.2345675")
     assert money.to_money_float("1.005") == money._py_to_money_float("1.005")
     assert money.to_money_float("-1.005") == money._py_to_money_float("-1.005")
     assert money.to_rate_float("1.2345675") == money._py_to_rate_float("1.2345675")

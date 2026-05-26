@@ -147,19 +147,17 @@ fn calculate_daily_burn(total_spent: f64, days_passed: i32) -> PyResult<f64> {
 
 #[pyfunction]
 fn to_money_float(value: &Bound<'_, PyAny>) -> PyResult<f64> {
-    let scaled = parse_scaled_decimal(&py_value_to_text(value, "0")?, MONEY_SCALE)?;
-    scaled_to_float(scaled, MONEY_SCALE)
+    scaled_to_float(quantize_scaled_decimal(value, MONEY_SCALE)?, MONEY_SCALE)
 }
 
 #[pyfunction]
 fn to_rate_float(value: &Bound<'_, PyAny>) -> PyResult<f64> {
-    let scaled = parse_scaled_decimal(&py_value_to_text(value, "0")?, RATE_SCALE)?;
-    scaled_to_float(scaled, RATE_SCALE)
+    scaled_to_float(quantize_scaled_decimal(value, RATE_SCALE)?, RATE_SCALE)
 }
 
 #[pyfunction]
 fn to_minor_units(value: &Bound<'_, PyAny>) -> PyResult<i64> {
-    let scaled = parse_scaled_decimal(&py_value_to_text(value, "0")?, MONEY_SCALE)?;
+    let scaled = quantize_scaled_decimal(value, MONEY_SCALE)?;
     i64::try_from(scaled).map_err(|_| PyValueError::new_err("minor units overflow"))
 }
 
@@ -196,14 +194,27 @@ fn build_rate(
 
 #[pyfunction]
 fn money_abs(value: &Bound<'_, PyAny>) -> PyResult<f64> {
-    let scaled = parse_scaled_decimal(&py_value_to_text(value, "0")?, MONEY_SCALE)?;
+    let scaled = quantize_scaled_decimal(value, MONEY_SCALE)?;
     scaled_to_float(scaled.abs(), MONEY_SCALE)
+}
+
+fn quantize_scaled_decimal(value: &Bound<'_, PyAny>, scale: u32) -> PyResult<i128> {
+    parse_scaled_decimal(&py_value_to_text(value, "0")?, scale)
+}
+
+#[pyfunction]
+fn quantize_money_text(value: &Bound<'_, PyAny>) -> PyResult<String> {
+    scaled_to_text(quantize_scaled_decimal(value, MONEY_SCALE)?, MONEY_SCALE)
+}
+
+#[pyfunction]
+fn quantize_rate_text(value: &Bound<'_, PyAny>) -> PyResult<String> {
+    scaled_to_text(quantize_scaled_decimal(value, RATE_SCALE)?, RATE_SCALE)
 }
 
 #[pyfunction]
 fn rate_to_text(value: &Bound<'_, PyAny>) -> PyResult<String> {
-    let scaled = parse_scaled_decimal(&py_value_to_text(value, "0")?, RATE_SCALE)?;
-    scaled_to_text(scaled, RATE_SCALE)
+    quantize_rate_text(value)
 }
 
 #[pyfunction]
@@ -240,6 +251,8 @@ fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(minor_to_money, m)?)?;
     m.add_function(wrap_pyfunction!(build_rate, m)?)?;
     m.add_function(wrap_pyfunction!(money_abs, m)?)?;
+    m.add_function(wrap_pyfunction!(quantize_money_text, m)?)?;
+    m.add_function(wrap_pyfunction!(quantize_rate_text, m)?)?;
     m.add_function(wrap_pyfunction!(rate_to_text, m)?)?;
     m.add_function(wrap_pyfunction!(money_diff_text, m)?)?;
     m.add_function(wrap_pyfunction!(rate_diff_text, m)?)?;
@@ -330,6 +343,26 @@ mod tests {
         Python::attach(|py| {
             let value = PyString::new(py, "-10.004");
             assert_eq!(money_abs(&value.into_any()).unwrap(), 10.0);
+        });
+    }
+
+    #[test]
+    fn test_quantize_money_text_half_up() {
+        Python::initialize();
+        Python::attach(|py| {
+            let value = PyString::new(py, "1.005");
+            assert_eq!(quantize_money_text(&value.into_any()).unwrap(), "1.01");
+            let negative = PyString::new(py, "-1.005");
+            assert_eq!(quantize_money_text(&negative.into_any()).unwrap(), "-1.01");
+        });
+    }
+
+    #[test]
+    fn test_quantize_rate_text_half_up() {
+        Python::initialize();
+        Python::attach(|py| {
+            let value = PyString::new(py, "1.2345675");
+            assert_eq!(quantize_rate_text(&value.into_any()).unwrap(), "1.234568");
         });
     }
 

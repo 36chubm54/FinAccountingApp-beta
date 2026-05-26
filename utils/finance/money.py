@@ -20,6 +20,10 @@ class _RustMoneyCore(Protocol):
 
     def money_abs(self, value: object) -> float: ...
 
+    def quantize_money_text(self, value: object) -> str: ...
+
+    def quantize_rate_text(self, value: object) -> str: ...
+
     def rate_diff_text(self, left: object, right: object) -> str: ...
 
     def rate_to_text(self, value: object) -> str: ...
@@ -33,7 +37,7 @@ class _RustMoneyCore(Protocol):
 
 def _load_rust_money_core() -> _RustMoneyCore | None:
     try:
-        module = importlib.import_module("ledgera_core")
+        module = importlib.import_module("ledgera_core.ledgera_core")
     except Exception:
         return None
 
@@ -42,13 +46,15 @@ def _load_rust_money_core() -> _RustMoneyCore | None:
         "minor_to_money",
         "money_diff_text",
         "money_abs",
+        "quantize_money_text",
+        "quantize_rate_text",
         "rate_diff_text",
         "rate_to_text",
         "to_minor_units",
         "to_money_float",
         "to_rate_float",
     )
-    if not all(hasattr(module, name) for name in required):
+    if not all(callable(getattr(module, name, None)) for name in required):
         return None
     return cast(_RustMoneyCore, module)
 
@@ -64,28 +70,40 @@ def to_decimal(value: object, default: str = "0") -> Decimal:
     return Decimal(str(value).strip() or default)
 
 
-def quantize_money(value: object) -> Decimal:
+def _py_quantize_money(value: object) -> Decimal:
     return to_decimal(value).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
 
 
-def quantize_rate(value: object) -> Decimal:
+def _py_quantize_rate(value: object) -> Decimal:
     return to_decimal(value).quantize(RATE_QUANT, rounding=ROUND_HALF_UP)
 
 
+def quantize_money(value: object) -> Decimal:
+    if _RUST_MONEY_CORE is None:
+        return _py_quantize_money(value)
+    return Decimal(_RUST_MONEY_CORE.quantize_money_text(_decimal_text(value)))
+
+
+def quantize_rate(value: object) -> Decimal:
+    if _RUST_MONEY_CORE is None:
+        return _py_quantize_rate(value)
+    return Decimal(_RUST_MONEY_CORE.quantize_rate_text(_decimal_text(value)))
+
+
 def _py_to_money_float(value: object) -> float:
-    return float(quantize_money(value))
+    return float(_py_quantize_money(value))
 
 
 def _py_to_rate_float(value: object) -> float:
-    return float(quantize_rate(value))
+    return float(_py_quantize_rate(value))
 
 
 def _py_rate_to_text(value: object) -> str:
-    return format(quantize_rate(value), "f")
+    return format(_py_quantize_rate(value), "f")
 
 
 def _py_to_minor_units(value: object) -> int:
-    quantized = quantize_money(value)
+    quantized = _py_quantize_money(value)
     return int((quantized * MINOR_FACTOR).to_integral_value(rounding=ROUND_HALF_UP))
 
 
@@ -96,25 +114,25 @@ def _py_minor_to_money(value: object) -> float:
 def _py_build_rate(amount_original: object, amount_base: object, currency: str) -> float:
     if str(currency or "").strip().upper() == "KZT":
         return 1.0
-    amount_decimal = quantize_money(amount_original)
+    amount_decimal = _py_quantize_money(amount_original)
     if amount_decimal == 0:
         return 1.0
-    amount_base_decimal = quantize_money(amount_base)
+    amount_base_decimal = _py_quantize_money(amount_base)
     return float(
         (amount_base_decimal / amount_decimal).quantize(RATE_QUANT, rounding=ROUND_HALF_UP)
     )
 
 
 def _py_money_diff(left: object, right: object) -> Decimal:
-    return quantize_money(left) - quantize_money(right)
+    return _py_quantize_money(left) - _py_quantize_money(right)
 
 
 def _py_rate_diff(left: object, right: object) -> Decimal:
-    return quantize_rate(left) - quantize_rate(right)
+    return _py_quantize_rate(left) - _py_quantize_rate(right)
 
 
 def _py_money_abs(value: object) -> float:
-    return float(abs(quantize_money(value)))
+    return float(abs(_py_quantize_money(value)))
 
 
 def _decimal_text(value: object, default: str = "0") -> str:
@@ -122,27 +140,20 @@ def _decimal_text(value: object, default: str = "0") -> str:
 
 
 def to_money_float(value: object) -> float:
-    if _RUST_MONEY_CORE is None:
-        return _py_to_money_float(value)
-    return _RUST_MONEY_CORE.to_money_float(_decimal_text(value))
+    return float(quantize_money(value))
 
 
 def to_rate_float(value: object) -> float:
-    if _RUST_MONEY_CORE is None:
-        return _py_to_rate_float(value)
-    return _RUST_MONEY_CORE.to_rate_float(_decimal_text(value))
+    return float(quantize_rate(value))
 
 
 def rate_to_text(value: object) -> str:
-    if _RUST_MONEY_CORE is None:
-        return _py_rate_to_text(value)
-    return _RUST_MONEY_CORE.rate_to_text(_decimal_text(value))
+    return format(quantize_rate(value), "f")
 
 
 def to_minor_units(value: object) -> int:
-    if _RUST_MONEY_CORE is None:
-        return _py_to_minor_units(value)
-    return _RUST_MONEY_CORE.to_minor_units(_decimal_text(value))
+    quantized = quantize_money(value)
+    return int((quantized * MINOR_FACTOR).to_integral_value(rounding=ROUND_HALF_UP))
 
 
 def minor_to_money(value: object) -> float:
@@ -162,9 +173,7 @@ def build_rate(amount_original: object, amount_base: object, currency: str) -> f
 
 
 def money_abs(value: object) -> float:
-    if _RUST_MONEY_CORE is None:
-        return _py_money_abs(value)
-    return _RUST_MONEY_CORE.money_abs(_decimal_text(value))
+    return float(abs(quantize_money(value)))
 
 
 def money_diff(left: object, right: object) -> Decimal:

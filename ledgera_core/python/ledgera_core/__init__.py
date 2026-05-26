@@ -5,6 +5,8 @@ from .ledgera_core import minor_to_money, money_abs, to_minor_units, to_money_fl
 rate_to_text = getattr(_ledgera_core, "rate_to_text", None)
 money_diff_text = getattr(_ledgera_core, "money_diff_text", None)
 rate_diff_text = getattr(_ledgera_core, "rate_diff_text", None)
+quantize_money_text = getattr(_ledgera_core, "quantize_money_text", None)
+quantize_rate_text = getattr(_ledgera_core, "quantize_rate_text", None)
 
 __all__ = [
     "build_rate",
@@ -22,4 +24,8 @@ if money_diff_text is not None:
     __all__.append("money_diff_text")
 if rate_diff_text is not None:
     __all__.append("rate_diff_text")
+if quantize_money_text is not None:
+    __all__.append("quantize_money_text")
+if quantize_rate_text is not None:
+    __all__.append("quantize_rate_text")
 __doc__ = _ledgera_core.__doc__
