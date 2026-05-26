@@ -90,6 +90,21 @@ fn scaled_to_float(value: i128, scale: u32) -> PyResult<f64> {
     Ok(value as f64 / divisor)
 }
 
+fn scaled_to_text(value: i128, scale: u32) -> PyResult<String> {
+    let sign = if value < 0 { "-" } else { "" };
+    let abs_value = value.abs();
+    let divisor = pow10(scale)?;
+    let integer = abs_value / divisor;
+    if scale == 0 {
+        return Ok(format!("{sign}{integer}"));
+    }
+    let fraction = abs_value % divisor;
+    Ok(format!(
+        "{sign}{integer}.{fraction:0width$}",
+        width = scale as usize
+    ))
+}
+
 fn round_div_half_up(numerator: i128, denominator: i128) -> PyResult<i128> {
     if denominator == 0 {
         return Err(PyValueError::new_err("division by zero"));
@@ -185,6 +200,36 @@ fn money_abs(value: &Bound<'_, PyAny>) -> PyResult<f64> {
     scaled_to_float(scaled.abs(), MONEY_SCALE)
 }
 
+#[pyfunction]
+fn rate_to_text(value: &Bound<'_, PyAny>) -> PyResult<String> {
+    let scaled = parse_scaled_decimal(&py_value_to_text(value, "0")?, RATE_SCALE)?;
+    scaled_to_text(scaled, RATE_SCALE)
+}
+
+#[pyfunction]
+fn money_diff_text(left: &Bound<'_, PyAny>, right: &Bound<'_, PyAny>) -> PyResult<String> {
+    let left_scaled = parse_scaled_decimal(&py_value_to_text(left, "0")?, MONEY_SCALE)?;
+    let right_scaled = parse_scaled_decimal(&py_value_to_text(right, "0")?, MONEY_SCALE)?;
+    scaled_to_text(
+        left_scaled
+            .checked_sub(right_scaled)
+            .ok_or_else(|| PyValueError::new_err("money difference overflow"))?,
+        MONEY_SCALE,
+    )
+}
+
+#[pyfunction]
+fn rate_diff_text(left: &Bound<'_, PyAny>, right: &Bound<'_, PyAny>) -> PyResult<String> {
+    let left_scaled = parse_scaled_decimal(&py_value_to_text(left, "0")?, RATE_SCALE)?;
+    let right_scaled = parse_scaled_decimal(&py_value_to_text(right, "0")?, RATE_SCALE)?;
+    scaled_to_text(
+        left_scaled
+            .checked_sub(right_scaled)
+            .ok_or_else(|| PyValueError::new_err("rate difference overflow"))?,
+        RATE_SCALE,
+    )
+}
+
 #[pymodule]
 fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(convert_amount, m)?)?;
@@ -195,6 +240,9 @@ fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(minor_to_money, m)?)?;
     m.add_function(wrap_pyfunction!(build_rate, m)?)?;
     m.add_function(wrap_pyfunction!(money_abs, m)?)?;
+    m.add_function(wrap_pyfunction!(rate_to_text, m)?)?;
+    m.add_function(wrap_pyfunction!(money_diff_text, m)?)?;
+    m.add_function(wrap_pyfunction!(rate_diff_text, m)?)?;
     Ok(())
 }
 
@@ -282,6 +330,41 @@ mod tests {
         Python::attach(|py| {
             let value = PyString::new(py, "-10.004");
             assert_eq!(money_abs(&value.into_any()).unwrap(), 10.0);
+        });
+    }
+
+    #[test]
+    fn test_rate_to_text_preserves_canonical_scale() {
+        Python::initialize();
+        Python::attach(|py| {
+            let value = PyString::new(py, "1.2");
+            assert_eq!(rate_to_text(&value.into_any()).unwrap(), "1.200000");
+        });
+    }
+
+    #[test]
+    fn test_money_diff_text_preserves_sign_and_rounding() {
+        Python::initialize();
+        Python::attach(|py| {
+            let left = PyString::new(py, "10.005");
+            let right = PyString::new(py, "1.00");
+            assert_eq!(
+                money_diff_text(&left.into_any(), &right.into_any()).unwrap(),
+                "9.01"
+            );
+        });
+    }
+
+    #[test]
+    fn test_rate_diff_text_preserves_sign_and_scale() {
+        Python::initialize();
+        Python::attach(|py| {
+            let left = PyString::new(py, "1.2345675");
+            let right = PyString::new(py, "0.2345674");
+            assert_eq!(
+                rate_diff_text(&left.into_any(), &right.into_any()).unwrap(),
+                "1.000001"
+            );
         });
     }
 }

@@ -18,7 +18,13 @@ class _LedgeraCoreModule(Protocol):
 
     def minor_to_money(self, value: object) -> float: ...
 
+    def money_diff_text(self, left: object, right: object) -> str: ...
+
     def money_abs(self, value: object) -> float: ...
+
+    def rate_diff_text(self, left: object, right: object) -> str: ...
+
+    def rate_to_text(self, value: object) -> str: ...
 
     def to_minor_units(self, value: object) -> int: ...
 
@@ -50,3 +56,9 @@ def test_build_rate_preserves_python_contract():
     assert ledgera_core.build_rate("10.00", "5000.00", "USD") == pytest.approx(500.0)
     assert ledgera_core.build_rate("0", "5000.00", "USD") == pytest.approx(1.0)
     assert ledgera_core.build_rate("10.00", "5000.00", "KZT") == pytest.approx(1.0)
+
+
+def test_decimal_parity_text_helpers():
+    assert ledgera_core.rate_to_text("1.2") == "1.200000"
+    assert ledgera_core.money_diff_text("10.005", "1.00") == "9.01"
+    assert ledgera_core.rate_diff_text("1.2345675", "0.2345674") == "1.000001"

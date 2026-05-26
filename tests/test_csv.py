@@ -441,3 +441,49 @@ def test_export_records_to_csv_keeps_unlinked_transfer_aggregates() -> None:
         assert rows[1]["transfer_id"] == "7"
     finally:
         os.unlink(tmp_path)
+
+
+def test_validate_transfer_integrity_reports_rate_mismatch_with_rounded_parity() -> None:
+    from utils.csv_utils import _validate_transfer_integrity
+
+    records = [
+        ExpenseRecord(
+            id=1,
+            date="2026-03-01",
+            wallet_id=1,
+            transfer_id=7,
+            amount_original=10.005,
+            currency="USD",
+            rate_at_operation=500.1234567,
+            amount_base=5003.74,
+            category="Transfer",
+        ),
+        IncomeRecord(
+            id=2,
+            date="2026-03-01",
+            wallet_id=2,
+            transfer_id=7,
+            amount_original=10.005,
+            currency="USD",
+            rate_at_operation=500.1234564,
+            amount_base=5003.74,
+            category="Transfer",
+        ),
+    ]
+    transfers = {
+        7: Transfer(
+            id=7,
+            from_wallet_id=1,
+            to_wallet_id=2,
+            date="2026-03-01",
+            amount_original=10.005,
+            currency="USD",
+            rate_at_operation=500.1234567,
+            amount_base=5003.74,
+            description="Move",
+        )
+    }
+
+    errors = _validate_transfer_integrity(records, transfers, wallet_ids={1, 2})
+
+    assert any("linked records rate mismatch" in error for error in errors)

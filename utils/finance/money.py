@@ -16,7 +16,13 @@ class _RustMoneyCore(Protocol):
 
     def minor_to_money(self, value: object) -> float: ...
 
+    def money_diff_text(self, left: object, right: object) -> str: ...
+
     def money_abs(self, value: object) -> float: ...
+
+    def rate_diff_text(self, left: object, right: object) -> str: ...
+
+    def rate_to_text(self, value: object) -> str: ...
 
     def to_minor_units(self, value: object) -> int: ...
 
@@ -34,7 +40,10 @@ def _load_rust_money_core() -> _RustMoneyCore | None:
     required = (
         "build_rate",
         "minor_to_money",
+        "money_diff_text",
         "money_abs",
+        "rate_diff_text",
+        "rate_to_text",
         "to_minor_units",
         "to_money_float",
         "to_rate_float",
@@ -71,7 +80,7 @@ def _py_to_rate_float(value: object) -> float:
     return float(quantize_rate(value))
 
 
-def rate_to_text(value: object) -> str:
+def _py_rate_to_text(value: object) -> str:
     return format(quantize_rate(value), "f")
 
 
@@ -96,11 +105,11 @@ def _py_build_rate(amount_original: object, amount_base: object, currency: str) 
     )
 
 
-def money_diff(left: object, right: object) -> Decimal:
+def _py_money_diff(left: object, right: object) -> Decimal:
     return quantize_money(left) - quantize_money(right)
 
 
-def rate_diff(left: object, right: object) -> Decimal:
+def _py_rate_diff(left: object, right: object) -> Decimal:
     return quantize_rate(left) - quantize_rate(right)
 
 
@@ -122,6 +131,12 @@ def to_rate_float(value: object) -> float:
     if _RUST_MONEY_CORE is None:
         return _py_to_rate_float(value)
     return _RUST_MONEY_CORE.to_rate_float(_decimal_text(value))
+
+
+def rate_to_text(value: object) -> str:
+    if _RUST_MONEY_CORE is None:
+        return _py_rate_to_text(value)
+    return _RUST_MONEY_CORE.rate_to_text(_decimal_text(value))
 
 
 def to_minor_units(value: object) -> int:
@@ -150,3 +165,15 @@ def money_abs(value: object) -> float:
     if _RUST_MONEY_CORE is None:
         return _py_money_abs(value)
     return _RUST_MONEY_CORE.money_abs(_decimal_text(value))
+
+
+def money_diff(left: object, right: object) -> Decimal:
+    if _RUST_MONEY_CORE is None:
+        return _py_money_diff(left, right)
+    return Decimal(_RUST_MONEY_CORE.money_diff_text(_decimal_text(left), _decimal_text(right)))
+
+
+def rate_diff(left: object, right: object) -> Decimal:
+    if _RUST_MONEY_CORE is None:
+        return _py_rate_diff(left, right)
+    return Decimal(_RUST_MONEY_CORE.rate_diff_text(_decimal_text(left), _decimal_text(right)))

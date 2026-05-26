@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from utils.finance import money
 
 
@@ -20,3 +22,13 @@ def test_build_rate_matches_python_fallback_semantics() -> None:
     assert money.build_rate("10.00", "5000.00", "KZT") == money._py_build_rate(
         "10.00", "5000.00", "KZT"
     )
+
+
+def test_decimal_parity_helpers_match_python_fallback_semantics() -> None:
+    assert money.rate_to_text("1.2") == money._py_rate_to_text("1.2")
+    assert money.money_diff("10.005", "1.00") == money._py_money_diff("10.005", "1.00")
+    assert money.rate_diff("1.2345675", "0.2345674") == money._py_rate_diff(
+        "1.2345675", "0.2345674"
+    )
+    assert money.money_diff("1.00", "1.00") == Decimal("0.00")
+    assert money.rate_diff("1.000001", "1.000002") == Decimal("-0.000001")
