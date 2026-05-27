@@ -1,10 +1,11 @@
+import importlib
 import sys
 from pathlib import Path
 from typing import Protocol, cast
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "ledgera_core" / "python"))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "rust" / "ledgera_engine" / "python"))
 
-import ledgera_core as _ledgera_core
+_ledgera_core = importlib.import_module("ledgera_core")
 
 
 class _LedgeraCoreModule(Protocol):

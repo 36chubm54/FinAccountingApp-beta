@@ -23,6 +23,10 @@ class _RustRecordCore(Protocol):
 
     def record_rows_by_tag(self, db_path: str, tag_name: str) -> list[dict[str, object]]: ...
 
+    def transfer_list_rows(self, db_path: str) -> list[dict[str, object]]: ...
+
+    def wallet_list_rows(self, db_path: str) -> list[dict[str, object]]: ...
+
 
 class _RustRecordRow(TypedDict):
     id: int
@@ -41,6 +45,28 @@ class _RustRecordRow(TypedDict):
     tags: list[str]
 
 
+class _RustTransferRow(TypedDict):
+    id: int
+    from_wallet_id: int
+    to_wallet_id: int
+    date: str
+    amount_original: float
+    currency: str
+    rate_at_operation: float
+    amount_base: float
+    description: str
+
+
+class _RustWalletRow(TypedDict):
+    id: int
+    name: str
+    currency: str
+    initial_balance: float
+    system: bool
+    allow_negative: bool
+    is_active: bool
+
+
 def _load_rust_record_core() -> _RustRecordCore | None:
     try:
         module = importlib.import_module("ledgera_core.ledgera_core")
@@ -52,6 +78,10 @@ def _load_rust_record_core() -> _RustRecordCore | None:
 
 
 _RUST_RECORD_CORE = _load_rust_record_core()
+
+
+def _record_core_has(name: str) -> bool:
+    return _RUST_RECORD_CORE is not None and callable(getattr(_RUST_RECORD_CORE, name, None))
 
 
 class SQLiteRecordsWalletsMixin:
@@ -126,6 +156,32 @@ class SQLiteRecordsWalletsMixin:
         transfer_id: int | None = None,
         related_debt_id: int | None = None,
     ) -> None: ...
+
+    @staticmethod
+    def _transfer_from_rust_row(row: _RustTransferRow) -> Transfer:
+        return Transfer(
+            id=int(row["id"]),
+            from_wallet_id=int(row["from_wallet_id"]),
+            to_wallet_id=int(row["to_wallet_id"]),
+            date=str(row["date"]),
+            amount_original=float(row["amount_original"]),
+            currency=str(row["currency"]),
+            rate_at_operation=float(row["rate_at_operation"]),
+            amount_base=float(row["amount_base"]),
+            description=str(row["description"] or ""),
+        )
+
+    @staticmethod
+    def _wallet_from_rust_row(row: _RustWalletRow) -> Wallet:
+        return Wallet(
+            id=int(row["id"]),
+            name=str(row["name"]),
+            currency=str(row["currency"]),
+            initial_balance=float(row["initial_balance"]),
+            system=bool(row["system"]),
+            allow_negative=bool(row["allow_negative"]),
+            is_active=bool(row["is_active"]),
+        )
 
     def _insert_mandatory_row(self, expense: MandatoryExpenseRecord, *, wallet_id: int) -> int: ...
 
@@ -267,6 +323,12 @@ class SQLiteRecordsWalletsMixin:
             return True
 
     def load_wallets(self) -> list[Wallet]:
+        db_path = getattr(self, "db_path", None)
+        if isinstance(db_path, str) and db_path and _record_core_has("wallet_list_rows"):
+            return [
+                self._wallet_from_rust_row(cast(_RustWalletRow, raw_row))
+                for raw_row in cast(_RustRecordCore, _RUST_RECORD_CORE).wallet_list_rows(db_path)
+            ]
         return self._storage.get_wallets()
 
     def get_system_wallet(self) -> Wallet:
@@ -295,6 +357,12 @@ class SQLiteRecordsWalletsMixin:
                 self._insert_transfer_row(transfer)
 
     def load_transfers(self) -> list[Transfer]:
+        db_path = getattr(self, "db_path", None)
+        if isinstance(db_path, str) and db_path and _record_core_has("transfer_list_rows"):
+            return [
+                self._transfer_from_rust_row(cast(_RustTransferRow, raw_row))
+                for raw_row in cast(_RustRecordCore, _RUST_RECORD_CORE).transfer_list_rows(db_path)
+            ]
         return self._storage.get_transfers()
 
     def replace_records_and_transfers(

@@ -119,3 +119,37 @@ def test_sqlite_repo_get_by_id_and_get_records_by_tag_match_python_fallback(tmp_
         assert rust_food[1].tags == ("food", "home")
     finally:
         repo.close()
+
+
+def test_sqlite_repo_load_wallets_and_transfers_match_python_fallback(tmp_path: Path) -> None:
+    repo = _build_repo(
+        tmp_path,
+        wallets=[
+            _wallet(1, name="Cash", initial_balance=1000.0),
+            _wallet(2, name="USD card", currency="USD", initial_balance=10.0),
+        ],
+        transfers=[
+            _transfer(1, from_wallet_id=1, to_wallet_id=2, date="2026-01-05", amount_base=5000.0)
+        ],
+    )
+    try:
+        rust_wallets = repo.load_wallets()
+        rust_transfers = repo.load_transfers()
+
+        rust_core = records_wallets_module._RUST_RECORD_CORE
+        records_wallets_module._RUST_RECORD_CORE = None
+        try:
+            fallback_wallets = repo.load_wallets()
+            fallback_transfers = repo.load_transfers()
+        finally:
+            records_wallets_module._RUST_RECORD_CORE = rust_core
+
+        assert rust_wallets == fallback_wallets
+        assert [wallet.currency for wallet in rust_wallets] == ["KZT", "USD"]
+        assert rust_wallets[0].system is True
+        assert rust_transfers == fallback_transfers
+        assert rust_transfers[0].from_wallet_id == 1
+        assert rust_transfers[0].to_wallet_id == 2
+        assert rust_transfers[0].amount_base == 5000.0
+    finally:
+        repo.close()

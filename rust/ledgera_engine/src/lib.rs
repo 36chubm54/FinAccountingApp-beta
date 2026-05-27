@@ -304,7 +304,8 @@ fn wallet_balance_parts(
         conn.query_row(&sql, (&wallet_id, &date), |row| row.get::<_, i64>(0))
             .map_err(sqlite_err)?
     } else {
-        let sql = format!("SELECT COALESCE(SUM({signed_expr}), 0) FROM records WHERE wallet_id = ?1");
+        let sql =
+            format!("SELECT COALESCE(SUM({signed_expr}), 0) FROM records WHERE wallet_id = ?1");
         conn.query_row(&sql, [wallet_id], |row| row.get::<_, i64>(0))
             .map_err(sqlite_err)?
     };
@@ -336,7 +337,9 @@ fn wallet_balance_rows(
     if up_to_date.is_some() {
         sql.push_str(" AND r.date <= ?1");
     }
-    sql.push_str(" WHERE w.is_active = 1 GROUP BY w.id, w.name, w.currency, initial_minor ORDER BY w.id");
+    sql.push_str(
+        " WHERE w.is_active = 1 GROUP BY w.id, w.name, w.currency, initial_minor ORDER BY w.id",
+    );
 
     let mut stmt = conn.prepare(&sql).map_err(sqlite_err)?;
     let mapper = |row: &rusqlite::Row<'_>| -> rusqlite::Result<(i64, String, String, f64, f64)> {
@@ -390,10 +393,170 @@ fn cashflow_sum(
                AND transfer_id IS NULL \
                AND date >= ?2 AND date <= ?3"
         );
-        conn.query_row(&sql, (record_type, start_date, end_date), |row| row.get::<_, i64>(0))
-            .map_err(sqlite_err)?
+        conn.query_row(&sql, (record_type, start_date, end_date), |row| {
+            row.get::<_, i64>(0)
+        })
+        .map_err(sqlite_err)?
     };
     Ok(minor_to_money_value(minor_total))
+}
+
+fn money_value_from_sql_row(
+    row: &rusqlite::Row<'_>,
+    real_index: usize,
+    minor_index: usize,
+) -> rusqlite::Result<f64> {
+    let minor_value: Option<i64> = row.get(minor_index)?;
+    if let Some(minor) = minor_value {
+        Ok(minor_to_money_value(minor))
+    } else {
+        row.get::<_, f64>(real_index)
+    }
+}
+
+fn rate_value_from_sql_row(
+    row: &rusqlite::Row<'_>,
+    real_index: usize,
+    text_index: usize,
+) -> rusqlite::Result<f64> {
+    let rate_text = row.get::<_, Option<String>>(text_index)?;
+    if let Some(text) = rate_text {
+        if text.trim().is_empty() {
+            row.get::<_, f64>(real_index)
+        } else {
+            let scaled = parse_scaled_decimal(text.trim(), RATE_SCALE).map_err(|err| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    text_index,
+                    rusqlite::types::Type::Text,
+                    Box::new(std::io::Error::other(err.to_string())),
+                )
+            })?;
+            scaled_to_float(scaled, RATE_SCALE).map_err(|err| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    text_index,
+                    rusqlite::types::Type::Text,
+                    Box::new(std::io::Error::other(err.to_string())),
+                )
+            })
+        }
+    } else {
+        row.get::<_, f64>(real_index)
+    }
+}
+
+#[pyfunction]
+fn wallet_list_rows(py: Python<'_>, db_path: &str) -> PyResult<Vec<Py<PyAny>>> {
+    let conn = open_sqlite_connection(db_path)?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                id,
+                name,
+                currency,
+                initial_balance,
+                initial_balance_minor,
+                system,
+                allow_negative,
+                is_active
+             FROM wallets
+             ORDER BY id",
+        )
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                money_value_from_sql_row(row, 3, 4)?,
+                row.get::<_, i64>(5)? != 0,
+                row.get::<_, i64>(6)? != 0,
+                row.get::<_, i64>(7)? != 0,
+            ))
+        })
+        .map_err(sqlite_err)?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        let (wallet_id, name, currency, initial_balance, system, allow_negative, is_active) =
+            row.map_err(sqlite_err)?;
+        let payload = PyDict::new(py);
+        payload.set_item("id", wallet_id)?;
+        payload.set_item("name", name)?;
+        payload.set_item("currency", currency)?;
+        payload.set_item("initial_balance", initial_balance)?;
+        payload.set_item("system", system)?;
+        payload.set_item("allow_negative", allow_negative)?;
+        payload.set_item("is_active", is_active)?;
+        result.push(payload.into_any().unbind());
+    }
+    Ok(result)
+}
+
+#[pyfunction]
+fn transfer_list_rows(py: Python<'_>, db_path: &str) -> PyResult<Vec<Py<PyAny>>> {
+    let conn = open_sqlite_connection(db_path)?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                id,
+                from_wallet_id,
+                to_wallet_id,
+                date,
+                amount_original,
+                amount_original_minor,
+                currency,
+                rate_at_operation,
+                rate_at_operation_text,
+                amount_base,
+                amount_base_minor,
+                description
+             FROM transfers
+             ORDER BY id",
+        )
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+                money_value_from_sql_row(row, 4, 5)?,
+                row.get::<_, String>(6)?,
+                rate_value_from_sql_row(row, 7, 8)?,
+                money_value_from_sql_row(row, 9, 10)?,
+                row.get::<_, String>(11)?,
+            ))
+        })
+        .map_err(sqlite_err)?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        let (
+            transfer_id,
+            from_wallet_id,
+            to_wallet_id,
+            date,
+            amount_original,
+            currency,
+            rate_at_operation,
+            amount_base,
+            description,
+        ) = row.map_err(sqlite_err)?;
+        let payload = PyDict::new(py);
+        payload.set_item("id", transfer_id)?;
+        payload.set_item("from_wallet_id", from_wallet_id)?;
+        payload.set_item("to_wallet_id", to_wallet_id)?;
+        payload.set_item("date", date)?;
+        payload.set_item("amount_original", amount_original)?;
+        payload.set_item("currency", currency)?;
+        payload.set_item("rate_at_operation", rate_at_operation)?;
+        payload.set_item("amount_base", amount_base)?;
+        payload.set_item("description", description)?;
+        result.push(payload.into_any().unbind());
+    }
+    Ok(result)
 }
 
 fn record_row_dicts(
@@ -412,7 +575,9 @@ fn record_row_dicts(
         )
         .map_err(sqlite_err)?;
     let tag_rows = tag_stmt
-        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
         .map_err(sqlite_err)?;
     for row in tag_rows {
         let (record_id, tag_name) = row.map_err(sqlite_err)?;
@@ -423,42 +588,9 @@ fn record_row_dicts(
     let rows = stmt
         .query_map(params, |row| {
             let record_id: i64 = row.get(0)?;
-            let amount_original_minor: Option<i64> = row.get(7)?;
-            let amount_base_minor: Option<i64> = row.get(12)?;
-            let amount_original = if let Some(minor) = amount_original_minor {
-                minor_to_money_value(minor)
-            } else {
-                row.get::<_, f64>(6)?
-            };
-            let amount_base = if let Some(minor) = amount_base_minor {
-                minor_to_money_value(minor)
-            } else {
-                row.get::<_, f64>(11)?
-            };
-            let rate_text = row.get::<_, Option<String>>(10)?;
-            let rate_at_operation = if let Some(text) = rate_text {
-                if text.trim().is_empty() {
-                    row.get::<_, f64>(9)?
-                } else {
-                    let scaled =
-                        parse_scaled_decimal(text.trim(), RATE_SCALE).map_err(|err| {
-                            rusqlite::Error::FromSqlConversionFailure(
-                                10,
-                                rusqlite::types::Type::Text,
-                                Box::new(std::io::Error::other(err.to_string())),
-                            )
-                        })?;
-                    scaled_to_float(scaled, RATE_SCALE).map_err(|err| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            10,
-                            rusqlite::types::Type::Text,
-                            Box::new(std::io::Error::other(err.to_string())),
-                        )
-                    })?
-                }
-            } else {
-                row.get::<_, f64>(9)?
-            };
+            let amount_original = money_value_from_sql_row(row, 6, 7)?;
+            let amount_base = money_value_from_sql_row(row, 11, 12)?;
+            let rate_at_operation = rate_value_from_sql_row(row, 9, 10)?;
             Ok((
                 record_id,
                 row.get::<_, String>(1)?,
@@ -628,6 +760,8 @@ fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(wallet_balance_parts, m)?)?;
     m.add_function(wrap_pyfunction!(wallet_balance_rows, m)?)?;
     m.add_function(wrap_pyfunction!(cashflow_sum, m)?)?;
+    m.add_function(wrap_pyfunction!(wallet_list_rows, m)?)?;
+    m.add_function(wrap_pyfunction!(transfer_list_rows, m)?)?;
     m.add_function(wrap_pyfunction!(record_list_rows, m)?)?;
     m.add_function(wrap_pyfunction!(record_get_row, m)?)?;
     m.add_function(wrap_pyfunction!(record_rows_by_tag, m)?)?;
@@ -637,8 +771,8 @@ fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pyo3::types::PyString;
     use pyo3::Python;
+    use pyo3::types::PyString;
     use rusqlite::Connection;
     use std::fs;
     use std::path::PathBuf;
@@ -659,7 +793,23 @@ mod tests {
                 currency TEXT NOT NULL,
                 initial_balance REAL NOT NULL DEFAULT 0,
                 initial_balance_minor INTEGER DEFAULT NULL,
+                system INTEGER NOT NULL DEFAULT 0,
+                allow_negative INTEGER NOT NULL DEFAULT 0,
                 is_active INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE transfers (
+                id INTEGER PRIMARY KEY,
+                from_wallet_id INTEGER NOT NULL,
+                to_wallet_id INTEGER NOT NULL,
+                date TEXT NOT NULL,
+                amount_original REAL NOT NULL,
+                amount_original_minor INTEGER DEFAULT NULL,
+                currency TEXT NOT NULL,
+                rate_at_operation REAL NOT NULL,
+                rate_at_operation_text TEXT DEFAULT NULL,
+                amount_base REAL NOT NULL,
+                amount_base_minor INTEGER DEFAULT NULL,
+                description TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE records (
                 id INTEGER PRIMARY KEY,
@@ -674,20 +824,34 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO wallets (id, name, currency, initial_balance, initial_balance_minor, is_active)
-             VALUES (1, 'Cash', 'KZT', 1000.0, 100000, 1)",
+            "INSERT INTO wallets (
+                id, name, currency, initial_balance, initial_balance_minor, system, allow_negative, is_active
+             ) VALUES (1, 'Cash', 'KZT', 1000.0, 100000, 1, 0, 1)",
             [],
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO wallets (id, name, currency, initial_balance, initial_balance_minor, is_active)
-             VALUES (2, 'Card', 'KZT', 500.0, 50000, 1)",
+            "INSERT INTO wallets (
+                id, name, currency, initial_balance, initial_balance_minor, system, allow_negative, is_active
+             ) VALUES (2, 'Card', 'KZT', 500.0, 50000, 0, 1, 1)",
             [],
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO wallets (id, name, currency, initial_balance, initial_balance_minor, is_active)
-             VALUES (3, 'Inactive', 'KZT', 999.0, 99900, 0)",
+            "INSERT INTO wallets (
+                id, name, currency, initial_balance, initial_balance_minor, system, allow_negative, is_active
+             ) VALUES (3, 'Inactive', 'KZT', 999.0, 99900, 0, 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO transfers (
+                id, from_wallet_id, to_wallet_id, date, amount_original, amount_original_minor,
+                currency, rate_at_operation, rate_at_operation_text, amount_base, amount_base_minor, description
+             ) VALUES (
+                1, 1, 2, '2026-01-04', 300.0, 30000,
+                'KZT', 1.0, '1.000000', 300.0, 30000, 'Move to card'
+             )",
             [],
         )
         .unwrap();
@@ -788,8 +952,12 @@ mod tests {
 
             let zero_original = PyString::new(py, "0");
             assert_eq!(
-                build_rate(&zero_original.into_any(), &amount_base.clone().into_any(), "USD")
-                    .unwrap(),
+                build_rate(
+                    &zero_original.into_any(),
+                    &amount_base.clone().into_any(),
+                    "USD"
+                )
+                .unwrap(),
                 1.0
             );
 
@@ -879,8 +1047,14 @@ mod tests {
         let db_path = create_balance_test_db();
         let rows = wallet_balance_rows(&db_path, Some("2026-01-03")).unwrap();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0], (1, "Cash".to_owned(), "KZT".to_owned(), 1000.0, 150.0));
-        assert_eq!(rows[1], (2, "Card".to_owned(), "KZT".to_owned(), 500.0, -25.0));
+        assert_eq!(
+            rows[0],
+            (1, "Cash".to_owned(), "KZT".to_owned(), 1000.0, 150.0)
+        );
+        assert_eq!(
+            rows[1],
+            (2, "Card".to_owned(), "KZT".to_owned(), 500.0, -25.0)
+        );
         remove_test_db(&db_path);
     }
 
@@ -895,6 +1069,75 @@ mod tests {
             cashflow_sum(&db_path, "expense", "2026-01-01", "2026-01-31").unwrap(),
             75.0
         );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn test_wallet_list_rows_preserves_wallet_flags_and_minor_balance() {
+        Python::initialize();
+        let db_path = create_balance_test_db();
+        Python::attach(|py| {
+            let rows = wallet_list_rows(py, &db_path).unwrap();
+            let first = rows[0].bind(py);
+            assert_eq!(first.get_item("id").unwrap().extract::<i64>().unwrap(), 1);
+            assert!(first.get_item("system").unwrap().extract::<bool>().unwrap());
+            assert_eq!(
+                first
+                    .get_item("initial_balance")
+                    .unwrap()
+                    .extract::<f64>()
+                    .unwrap(),
+                1000.0
+            );
+            let second = rows[1].bind(py);
+            assert!(
+                second
+                    .get_item("allow_negative")
+                    .unwrap()
+                    .extract::<bool>()
+                    .unwrap()
+            );
+        });
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn test_transfer_list_rows_reads_money_and_rate_columns() {
+        Python::initialize();
+        let db_path = create_balance_test_db();
+        Python::attach(|py| {
+            let rows = transfer_list_rows(py, &db_path).unwrap();
+            assert_eq!(rows.len(), 1);
+            let row = rows[0].bind(py);
+            assert_eq!(
+                row.get_item("from_wallet_id")
+                    .unwrap()
+                    .extract::<i64>()
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                row.get_item("to_wallet_id")
+                    .unwrap()
+                    .extract::<i64>()
+                    .unwrap(),
+                2
+            );
+            assert_eq!(
+                row.get_item("amount_original")
+                    .unwrap()
+                    .extract::<f64>()
+                    .unwrap(),
+                300.0
+            );
+            assert_eq!(
+                row.get_item("rate_at_operation")
+                    .unwrap()
+                    .extract::<f64>()
+                    .unwrap(),
+                1.0
+            );
+        });
         remove_test_db(&db_path);
     }
 }
