@@ -21,7 +21,10 @@ money_diff_text = getattr(_ledgera_core, "money_diff_text", None)
 rate_diff_text = getattr(_ledgera_core, "rate_diff_text", None)
 quantize_money_text = getattr(_ledgera_core, "quantize_money_text", None)
 quantize_rate_text = getattr(_ledgera_core, "quantize_rate_text", None)
+mandatory_expense_row = getattr(_ledgera_core, "mandatory_expense_row", None)
+mandatory_expense_rows = getattr(_ledgera_core, "mandatory_expense_rows", None)
 transfer_list_rows = getattr(_ledgera_core, "transfer_list_rows", None)
+transfer_id_by_record_index = getattr(_ledgera_core, "transfer_id_by_record_index", None)
 wallet_list_rows = getattr(_ledgera_core, "wallet_list_rows", None)
 
 __all__ = [
@@ -56,8 +59,14 @@ if quantize_money_text is not None:
     __all__.append("quantize_money_text")
 if quantize_rate_text is not None:
     __all__.append("quantize_rate_text")
+if mandatory_expense_row is not None:
+    __all__.append("mandatory_expense_row")
+if mandatory_expense_rows is not None:
+    __all__.append("mandatory_expense_rows")
 if transfer_list_rows is not None:
     __all__.append("transfer_list_rows")
+if transfer_id_by_record_index is not None:
+    __all__.append("transfer_id_by_record_index")
 if wallet_list_rows is not None:
     __all__.append("wallet_list_rows")
 __doc__ = _ledgera_core.__doc__

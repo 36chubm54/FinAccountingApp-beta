@@ -559,6 +559,152 @@ fn transfer_list_rows(py: Python<'_>, db_path: &str) -> PyResult<Vec<Py<PyAny>>>
     Ok(result)
 }
 
+#[pyfunction]
+fn transfer_id_by_record_index(db_path: &str, index: i64) -> PyResult<Option<i64>> {
+    if index < 0 {
+        return Ok(None);
+    }
+    let conn = open_sqlite_connection(db_path)?;
+    conn.query_row(
+        "SELECT transfer_id
+         FROM records
+         ORDER BY id
+         LIMIT 1 OFFSET ?1",
+        [index],
+        |row| row.get::<_, Option<i64>>(0),
+    )
+    .optional()
+    .map_err(sqlite_err)
+    .map(|value| value.flatten())
+}
+
+fn mandatory_expense_select_sql(conn: &Connection, filter_by_id: bool) -> PyResult<String> {
+    let mut stmt = conn
+        .prepare("PRAGMA table_info(mandatory_expenses)")
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(sqlite_err)?;
+    let mut has_date = false;
+    let mut has_auto_pay = false;
+    for row in rows {
+        let name = row.map_err(sqlite_err)?;
+        if name == "date" {
+            has_date = true;
+        } else if name == "auto_pay" {
+            has_auto_pay = true;
+        }
+    }
+
+    let mut sql = String::from(
+        "SELECT
+            id,
+            wallet_id,
+            amount_original,
+            amount_original_minor,
+            currency,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_base,
+            amount_base_minor,
+            category,
+            description,
+            period",
+    );
+    if has_date {
+        sql.push_str(",\n            date");
+    } else {
+        sql.push_str(",\n            NULL AS date");
+    }
+    if has_auto_pay {
+        sql.push_str(",\n            auto_pay");
+    } else {
+        sql.push_str(",\n            0 AS auto_pay");
+    }
+    sql.push_str("\n         FROM mandatory_expenses");
+    if filter_by_id {
+        sql.push_str("\n         WHERE id = ?1");
+    }
+    sql.push_str("\n         ORDER BY id");
+    Ok(sql)
+}
+
+fn mandatory_expense_row_dicts(
+    py: Python<'_>,
+    conn: &Connection,
+    sql: &str,
+    params: &[&dyn rusqlite::ToSql],
+) -> PyResult<Vec<Py<PyAny>>> {
+    let mut stmt = conn.prepare(sql).map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map(params, |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                money_value_from_sql_row(row, 2, 3)?,
+                row.get::<_, String>(4)?,
+                rate_value_from_sql_row(row, 5, 6)?,
+                money_value_from_sql_row(row, 7, 8)?,
+                row.get::<_, String>(9)?,
+                row.get::<_, String>(10)?,
+                row.get::<_, String>(11)?,
+                row.get::<_, Option<String>>(12)?,
+                row.get::<_, i64>(13)? != 0,
+            ))
+        })
+        .map_err(sqlite_err)?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        let (
+            expense_id,
+            wallet_id,
+            amount_original,
+            currency,
+            rate_at_operation,
+            amount_base,
+            category,
+            description,
+            period,
+            date,
+            auto_pay,
+        ) = row.map_err(sqlite_err)?;
+        let payload = PyDict::new(py);
+        payload.set_item("id", expense_id)?;
+        payload.set_item("wallet_id", wallet_id)?;
+        payload.set_item("amount_original", amount_original)?;
+        payload.set_item("currency", currency)?;
+        payload.set_item("rate_at_operation", rate_at_operation)?;
+        payload.set_item("amount_base", amount_base)?;
+        payload.set_item("category", category)?;
+        payload.set_item("description", description)?;
+        payload.set_item("period", period)?;
+        payload.set_item("date", date.unwrap_or_default())?;
+        payload.set_item("auto_pay", auto_pay)?;
+        result.push(payload.into_any().unbind());
+    }
+    Ok(result)
+}
+
+#[pyfunction]
+fn mandatory_expense_rows(py: Python<'_>, db_path: &str) -> PyResult<Vec<Py<PyAny>>> {
+    let conn = open_sqlite_connection(db_path)?;
+    let sql = mandatory_expense_select_sql(&conn, false)?;
+    mandatory_expense_row_dicts(py, &conn, &sql, &[])
+}
+
+#[pyfunction]
+fn mandatory_expense_row(
+    py: Python<'_>,
+    db_path: &str,
+    expense_id: i64,
+) -> PyResult<Option<Py<PyAny>>> {
+    let conn = open_sqlite_connection(db_path)?;
+    let sql = mandatory_expense_select_sql(&conn, true)?;
+    let mut rows = mandatory_expense_row_dicts(py, &conn, &sql, &[&expense_id])?;
+    Ok(rows.pop())
+}
+
 fn record_row_dicts(
     py: Python<'_>,
     conn: &Connection,
@@ -762,6 +908,9 @@ fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(cashflow_sum, m)?)?;
     m.add_function(wrap_pyfunction!(wallet_list_rows, m)?)?;
     m.add_function(wrap_pyfunction!(transfer_list_rows, m)?)?;
+    m.add_function(wrap_pyfunction!(transfer_id_by_record_index, m)?)?;
+    m.add_function(wrap_pyfunction!(mandatory_expense_rows, m)?)?;
+    m.add_function(wrap_pyfunction!(mandatory_expense_row, m)?)?;
     m.add_function(wrap_pyfunction!(record_list_rows, m)?)?;
     m.add_function(wrap_pyfunction!(record_get_row, m)?)?;
     m.add_function(wrap_pyfunction!(record_rows_by_tag, m)?)?;
@@ -811,6 +960,22 @@ mod tests {
                 amount_base_minor INTEGER DEFAULT NULL,
                 description TEXT NOT NULL DEFAULT ''
             );
+            CREATE TABLE mandatory_expenses (
+                id INTEGER PRIMARY KEY,
+                wallet_id INTEGER NOT NULL,
+                amount_original REAL NOT NULL,
+                amount_original_minor INTEGER DEFAULT NULL,
+                currency TEXT NOT NULL,
+                rate_at_operation REAL NOT NULL,
+                rate_at_operation_text TEXT DEFAULT NULL,
+                amount_base REAL NOT NULL,
+                amount_base_minor INTEGER DEFAULT NULL,
+                category TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                period TEXT DEFAULT NULL,
+                date TEXT DEFAULT NULL,
+                auto_pay INTEGER NOT NULL DEFAULT 0
+            );
             CREATE TABLE records (
                 id INTEGER PRIMARY KEY,
                 type TEXT NOT NULL,
@@ -851,6 +1016,19 @@ mod tests {
              ) VALUES (
                 1, 1, 2, '2026-01-04', 300.0, 30000,
                 'KZT', 1.0, '1.000000', 300.0, 30000, 'Move to card'
+             )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO mandatory_expenses (
+                id, wallet_id, amount_original, amount_original_minor, currency,
+                rate_at_operation, rate_at_operation_text, amount_base, amount_base_minor,
+                category, description, period, date, auto_pay
+             ) VALUES (
+                1, 1, 40.0, 4000, 'KZT',
+                1.0, '1.000000', 40.0, 4000,
+                'Rent', 'Monthly rent', 'monthly', '2026-01-15', 1
              )",
             [],
         )
@@ -1137,6 +1315,46 @@ mod tests {
                     .unwrap(),
                 1.0
             );
+        });
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn test_transfer_id_by_record_index_reads_nullable_lookup() {
+        let db_path = create_balance_test_db();
+        assert_eq!(transfer_id_by_record_index(&db_path, 0).unwrap(), None);
+        assert_eq!(transfer_id_by_record_index(&db_path, 3).unwrap(), Some(1));
+        assert_eq!(transfer_id_by_record_index(&db_path, -1).unwrap(), None);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn test_mandatory_expense_rows_and_row_preserve_read_contract() {
+        Python::initialize();
+        let db_path = create_balance_test_db();
+        Python::attach(|py| {
+            let rows = mandatory_expense_rows(py, &db_path).unwrap();
+            assert_eq!(rows.len(), 1);
+            let row = rows[0].bind(py);
+            assert_eq!(
+                row.get_item("category")
+                    .unwrap()
+                    .extract::<String>()
+                    .unwrap(),
+                "Rent"
+            );
+            assert!(row.get_item("auto_pay").unwrap().extract::<bool>().unwrap());
+            let single = mandatory_expense_row(py, &db_path, 1).unwrap().unwrap();
+            assert_eq!(
+                single
+                    .bind(py)
+                    .get_item("date")
+                    .unwrap()
+                    .extract::<String>()
+                    .unwrap(),
+                "2026-01-15"
+            );
+            assert!(mandatory_expense_row(py, &db_path, 99).unwrap().is_none());
         });
         remove_test_db(&db_path);
     }

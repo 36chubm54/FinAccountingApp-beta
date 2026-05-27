@@ -14,6 +14,10 @@ SYSTEM_WALLET_ID = 1
 
 
 class _RustRecordCore(Protocol):
+    def mandatory_expense_row(self, db_path: str, expense_id: int) -> dict[str, object] | None: ...
+
+    def mandatory_expense_rows(self, db_path: str) -> list[dict[str, object]]: ...
+
     def record_get_row(self, db_path: str, record_id: int) -> dict[str, object] | None: ...
 
     def record_list_rows(
@@ -24,6 +28,8 @@ class _RustRecordCore(Protocol):
     def record_rows_by_tag(self, db_path: str, tag_name: str) -> list[dict[str, object]]: ...
 
     def transfer_list_rows(self, db_path: str) -> list[dict[str, object]]: ...
+
+    def transfer_id_by_record_index(self, db_path: str, index: int) -> int | None: ...
 
     def wallet_list_rows(self, db_path: str) -> list[dict[str, object]]: ...
 
@@ -65,6 +71,20 @@ class _RustWalletRow(TypedDict):
     system: bool
     allow_negative: bool
     is_active: bool
+
+
+class _RustMandatoryExpenseRow(TypedDict):
+    id: int
+    wallet_id: int
+    amount_original: float
+    currency: str
+    rate_at_operation: float
+    amount_base: float
+    category: str
+    description: str
+    period: str
+    date: str
+    auto_pay: bool
 
 
 def _load_rust_record_core() -> _RustRecordCore | None:
@@ -235,7 +255,26 @@ class SQLiteRecordsWalletsMixin:
             )
         return ExpenseRecord(**payload)
 
+    @staticmethod
+    def _mandatory_from_rust_row(row: _RustMandatoryExpenseRow) -> MandatoryExpenseRecord:
+        return MandatoryExpenseRecord(
+            id=int(row["id"]),
+            wallet_id=int(row["wallet_id"]),
+            amount_original=float(row["amount_original"]),
+            currency=str(row["currency"]),
+            rate_at_operation=float(row["rate_at_operation"]),
+            amount_base=float(row["amount_base"]),
+            category=str(row["category"]),
+            description=str(row["description"] or ""),
+            period=str(row["period"] or "monthly"),  # type: ignore[arg-type]
+            date=str(row["date"] or ""),
+            auto_pay=bool(row["auto_pay"]),
+        )
+
     def load_active_wallets(self) -> list[Wallet]:
+        db_path = getattr(self, "db_path", None)
+        if isinstance(db_path, str) and db_path and _record_core_has("wallet_list_rows"):
+            return [wallet for wallet in self.load_wallets() if wallet.is_active]
         rows = self._conn.execute(
             """
             SELECT
@@ -489,6 +528,11 @@ class SQLiteRecordsWalletsMixin:
     def get_transfer_id_by_record_index(self, index: int) -> int | None:
         if int(index) < 0:
             return None
+        db_path = getattr(self, "db_path", None)
+        if isinstance(db_path, str) and db_path and _record_core_has("transfer_id_by_record_index"):
+            return cast(_RustRecordCore, _RUST_RECORD_CORE).transfer_id_by_record_index(
+                db_path, int(index)
+            )
         row = self._conn.execute(
             """
             SELECT transfer_id
@@ -567,9 +611,25 @@ class SQLiteRecordsWalletsMixin:
             self._insert_mandatory_row(expense, wallet_id=wallet_id)
 
     def load_mandatory_expenses(self) -> list[MandatoryExpenseRecord]:
+        db_path = getattr(self, "db_path", None)
+        if isinstance(db_path, str) and db_path and _record_core_has("mandatory_expense_rows"):
+            return [
+                self._mandatory_from_rust_row(cast(_RustMandatoryExpenseRow, raw_row))
+                for raw_row in cast(_RustRecordCore, _RUST_RECORD_CORE).mandatory_expense_rows(
+                    db_path
+                )
+            ]
         return self._storage.get_mandatory_expenses()
 
     def get_mandatory_expense_by_id(self, expense_id: int) -> MandatoryExpenseRecord:
+        db_path = getattr(self, "db_path", None)
+        if isinstance(db_path, str) and db_path and _record_core_has("mandatory_expense_row"):
+            row = cast(_RustRecordCore, _RUST_RECORD_CORE).mandatory_expense_row(
+                db_path, int(expense_id)
+            )
+            if row is not None:
+                return self._mandatory_from_rust_row(cast(_RustMandatoryExpenseRow, row))
+            raise ValueError(f"Mandatory expense не найден: {expense_id}")
         row = self._conn.execute(
             """
             SELECT

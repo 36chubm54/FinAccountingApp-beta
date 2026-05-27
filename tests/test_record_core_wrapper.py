@@ -153,3 +153,124 @@ def test_sqlite_repo_load_wallets_and_transfers_match_python_fallback(tmp_path: 
         assert rust_transfers[0].amount_base == 5000.0
     finally:
         repo.close()
+
+
+def test_sqlite_repo_active_and_system_wallet_paths_match_python_fallback(tmp_path: Path) -> None:
+    repo = _build_repo(
+        tmp_path,
+        wallets=[
+            _wallet(1, name="Main", currency="USD", initial_balance=0.0),
+            _wallet(2, name="Archived", initial_balance=5.0, is_active=0),
+            _wallet(3, name="Cash", initial_balance=20.0),
+        ],
+    )
+    try:
+        rust_active = repo.load_active_wallets()
+        rust_system = repo.get_system_wallet()
+
+        rust_core = records_wallets_module._RUST_RECORD_CORE
+        records_wallets_module._RUST_RECORD_CORE = None
+        try:
+            fallback_active = repo.load_active_wallets()
+            fallback_system = repo.get_system_wallet()
+        finally:
+            records_wallets_module._RUST_RECORD_CORE = rust_core
+
+        assert rust_active == fallback_active
+        assert [wallet.id for wallet in rust_active] == [1, 3]
+        assert rust_system == fallback_system
+        assert rust_system.id == 1
+        assert rust_system.currency == "USD"
+    finally:
+        repo.close()
+
+
+def test_sqlite_repo_transfer_id_by_record_index_matches_python_fallback(tmp_path: Path) -> None:
+    repo = _build_repo(
+        tmp_path,
+        wallets=[_wallet(1, name="Cash", initial_balance=0.0), _wallet(2, name="Card")],
+        transfers=[
+            _transfer(7, from_wallet_id=1, to_wallet_id=2, date="2026-01-10", amount_base=50.0)
+        ],
+        records=[
+            _record(1, record_type="income", date="2026-01-01", wallet_id=1, amount_base=200.0),
+            _record(
+                2,
+                record_type="expense",
+                date="2026-01-10",
+                wallet_id=1,
+                amount_base=50.0,
+                category="Transfer",
+                transfer_id=7,
+            ),
+            _record(
+                3,
+                record_type="income",
+                date="2026-01-10",
+                wallet_id=2,
+                amount_base=50.0,
+                category="Transfer",
+                transfer_id=7,
+            ),
+        ],
+    )
+    try:
+        rust_none = repo.get_transfer_id_by_record_index(0)
+        rust_hit = repo.get_transfer_id_by_record_index(1)
+        rust_negative = repo.get_transfer_id_by_record_index(-1)
+
+        rust_core = records_wallets_module._RUST_RECORD_CORE
+        records_wallets_module._RUST_RECORD_CORE = None
+        try:
+            fallback_none = repo.get_transfer_id_by_record_index(0)
+            fallback_hit = repo.get_transfer_id_by_record_index(1)
+            fallback_negative = repo.get_transfer_id_by_record_index(-1)
+        finally:
+            records_wallets_module._RUST_RECORD_CORE = rust_core
+
+        assert rust_none is fallback_none is None
+        assert rust_hit == fallback_hit == 1
+        assert rust_negative is fallback_negative is None
+    finally:
+        repo.close()
+
+
+def test_sqlite_repo_mandatory_expense_paths_match_python_fallback(tmp_path: Path) -> None:
+    repo = _build_repo(
+        tmp_path,
+        wallets=[_wallet(1, name="Cash", initial_balance=0.0)],
+    )
+    try:
+        repo.save_mandatory_expense(
+            MandatoryExpenseRecord(
+                date="2026-01-15",
+                wallet_id=1,
+                amount_original=40.0,
+                currency="KZT",
+                rate_at_operation=1.0,
+                amount_base=40.0,
+                category="Rent",
+                description="Monthly rent",
+                period="monthly",
+                auto_pay=True,
+            )
+        )
+
+        rust_items = repo.load_mandatory_expenses()
+        rust_one = repo.get_mandatory_expense_by_id(rust_items[0].id)
+
+        rust_core = records_wallets_module._RUST_RECORD_CORE
+        records_wallets_module._RUST_RECORD_CORE = None
+        try:
+            fallback_items = repo.load_mandatory_expenses()
+            fallback_one = repo.get_mandatory_expense_by_id(rust_items[0].id)
+        finally:
+            records_wallets_module._RUST_RECORD_CORE = rust_core
+
+        assert rust_items == fallback_items
+        assert rust_one == fallback_one
+        assert rust_one.category == "Rent"
+        assert rust_one.auto_pay is True
+        assert str(rust_one.date) == "2026-01-15"
+    finally:
+        repo.close()
