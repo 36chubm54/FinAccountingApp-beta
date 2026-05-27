@@ -1,15 +1,53 @@
 from __future__ import annotations
 
+import importlib
 import sqlite3
-from typing import Any
+from typing import Any, Protocol, TypedDict, cast
 
-from domain.records import MandatoryExpenseRecord, Record
+from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 from domain.transfers import Transfer
 from domain.wallets import Wallet
 from utils.finance.money import to_money_float
 from utils.records.tags import normalize_tag_name
 
 SYSTEM_WALLET_ID = 1
+
+
+class _RustRecordCore(Protocol):
+    def record_list_rows(
+        self,
+        db_path: str,
+    ) -> list[dict[str, object]]: ...
+
+
+class _RustRecordRow(TypedDict):
+    id: int
+    type: str
+    date: str
+    wallet_id: int
+    transfer_id: int | None
+    related_debt_id: int | None
+    amount_original: float
+    currency: str
+    rate_at_operation: float
+    amount_base: float
+    category: str
+    description: str
+    period: str | None
+    tags: list[str]
+
+
+def _load_rust_record_core() -> _RustRecordCore | None:
+    try:
+        module = importlib.import_module("ledgera_core.ledgera_core")
+    except Exception:
+        return None
+    if not callable(getattr(module, "record_list_rows", None)):
+        return None
+    return cast(_RustRecordCore, module)
+
+
+_RUST_RECORD_CORE = _load_rust_record_core()
 
 
 class SQLiteRecordsWalletsMixin:
@@ -269,6 +307,43 @@ class SQLiteRecordsWalletsMixin:
             self._replace_record_tags_many({int(record_id): tuple(record.tags)})
 
     def load_all(self) -> list[Record]:
+        db_path = str(getattr(self, "db_path", ""))
+        if _RUST_RECORD_CORE is not None and db_path:
+            records: list[Record] = []
+            for raw_row in _RUST_RECORD_CORE.record_list_rows(db_path):
+                row = cast(_RustRecordRow, raw_row)
+                record_id = int(row["id"])
+                record_type = str(row["type"])
+                payload = {
+                    "id": record_id,
+                    "date": str(row["date"]),
+                    "wallet_id": int(row["wallet_id"]),
+                    "transfer_id": (
+                        int(row["transfer_id"]) if row["transfer_id"] is not None else None
+                    ),
+                    "related_debt_id": (
+                        int(row["related_debt_id"]) if row["related_debt_id"] is not None else None
+                    ),
+                    "amount_original": float(row["amount_original"]),
+                    "currency": str(row["currency"]),
+                    "rate_at_operation": float(row["rate_at_operation"]),
+                    "amount_base": float(row["amount_base"]),
+                    "category": str(row["category"]),
+                    "description": str(row["description"] or ""),
+                    "tags": tuple(str(tag) for tag in cast(list[object], row["tags"])),
+                }
+                if record_type == "income":
+                    records.append(IncomeRecord(**payload))
+                elif record_type == "mandatory_expense":
+                    records.append(
+                        MandatoryExpenseRecord(
+                            **payload,
+                            period=str(row["period"] or "monthly"),  # type: ignore[arg-type]
+                        )
+                    )
+                else:
+                    records.append(ExpenseRecord(**payload))
+            return records
         rows = self._records_base_rows()
         tags_map = self._record_tags_map([int(row["id"]) for row in rows])
         return [self._record_from_row(row, tags=tags_map.get(int(row["id"]), ())) for row in rows]

@@ -1,6 +1,8 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use rusqlite::{Connection, OptionalExtension};
+use std::collections::HashMap;
 
 const MONEY_SCALE: u32 = 2;
 const RATE_SCALE: u32 = 6;
@@ -394,6 +396,144 @@ fn cashflow_sum(
     Ok(minor_to_money_value(minor_total))
 }
 
+#[pyfunction]
+fn record_list_rows(py: Python<'_>, db_path: &str) -> PyResult<Vec<Py<PyAny>>> {
+    let conn = open_sqlite_connection(db_path)?;
+    let mut tags_by_record: HashMap<i64, Vec<String>> = HashMap::new();
+    let mut tag_stmt = conn
+        .prepare(
+            "SELECT rt.record_id, t.name
+             FROM record_tags AS rt
+             JOIN tags AS t ON t.id = rt.tag_id
+             ORDER BY rt.record_id, t.name COLLATE NOCASE, t.name",
+        )
+        .map_err(sqlite_err)?;
+    let tag_rows = tag_stmt
+        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+        .map_err(sqlite_err)?;
+    for row in tag_rows {
+        let (record_id, tag_name) = row.map_err(sqlite_err)?;
+        tags_by_record.entry(record_id).or_default().push(tag_name);
+    }
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                id,
+                type,
+                date,
+                wallet_id,
+                transfer_id,
+                related_debt_id,
+                amount_original,
+                amount_original_minor,
+                currency,
+                rate_at_operation,
+                rate_at_operation_text,
+                amount_base,
+                amount_base_minor,
+                category,
+                description,
+                period
+             FROM records
+             ORDER BY id",
+        )
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([], |row| {
+            let record_id: i64 = row.get(0)?;
+            let amount_original_minor: Option<i64> = row.get(7)?;
+            let amount_base_minor: Option<i64> = row.get(12)?;
+            let amount_original = if let Some(minor) = amount_original_minor {
+                minor_to_money_value(minor)
+            } else {
+                row.get::<_, f64>(6)?
+            };
+            let amount_base = if let Some(minor) = amount_base_minor {
+                minor_to_money_value(minor)
+            } else {
+                row.get::<_, f64>(11)?
+            };
+            let rate_text = row.get::<_, Option<String>>(10)?;
+            let rate_at_operation = if let Some(text) = rate_text {
+                if text.trim().is_empty() {
+                    row.get::<_, f64>(9)?
+                } else {
+                    let scaled =
+                        parse_scaled_decimal(text.trim(), RATE_SCALE).map_err(|err| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                10,
+                                rusqlite::types::Type::Text,
+                                Box::new(std::io::Error::other(err.to_string())),
+                            )
+                        })?;
+                    scaled_to_float(scaled, RATE_SCALE).map_err(|err| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            10,
+                            rusqlite::types::Type::Text,
+                            Box::new(std::io::Error::other(err.to_string())),
+                        )
+                    })?
+                }
+            } else {
+                row.get::<_, f64>(9)?
+            };
+            Ok((
+                record_id,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, Option<i64>>(4)?,
+                row.get::<_, Option<i64>>(5)?,
+                amount_original,
+                row.get::<_, String>(8)?,
+                rate_at_operation,
+                amount_base,
+                row.get::<_, String>(13)?,
+                row.get::<_, String>(14)?,
+                row.get::<_, Option<String>>(15)?,
+            ))
+        })
+        .map_err(sqlite_err)?;
+
+    let mut result: Vec<Py<PyAny>> = Vec::new();
+    for row in rows {
+        let (
+            record_id,
+            record_type,
+            date,
+            wallet_id,
+            transfer_id,
+            related_debt_id,
+            amount_original,
+            currency,
+            rate_at_operation,
+            amount_base,
+            category,
+            description,
+            period,
+        ) = row.map_err(sqlite_err)?;
+        let tags = tags_by_record.remove(&record_id).unwrap_or_default();
+        let payload = PyDict::new(py);
+        payload.set_item("id", record_id)?;
+        payload.set_item("type", record_type)?;
+        payload.set_item("date", date)?;
+        payload.set_item("wallet_id", wallet_id)?;
+        payload.set_item("transfer_id", transfer_id)?;
+        payload.set_item("related_debt_id", related_debt_id)?;
+        payload.set_item("amount_original", amount_original)?;
+        payload.set_item("currency", currency)?;
+        payload.set_item("rate_at_operation", rate_at_operation)?;
+        payload.set_item("amount_base", amount_base)?;
+        payload.set_item("category", category)?;
+        payload.set_item("description", description)?;
+        payload.set_item("period", period)?;
+        payload.set_item("tags", tags)?;
+        result.push(payload.into_any().unbind());
+    }
+    Ok(result)
+}
+
 #[pymodule]
 fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(convert_amount, m)?)?;
@@ -412,6 +552,7 @@ fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(wallet_balance_parts, m)?)?;
     m.add_function(wrap_pyfunction!(wallet_balance_rows, m)?)?;
     m.add_function(wrap_pyfunction!(cashflow_sum, m)?)?;
+    m.add_function(wrap_pyfunction!(record_list_rows, m)?)?;
     Ok(())
 }
 
