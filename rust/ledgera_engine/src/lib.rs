@@ -6,6 +6,8 @@ use std::collections::HashMap;
 
 const MONEY_SCALE: u32 = 2;
 const RATE_SCALE: u32 = 6;
+type WalletBalanceRow = (i64, String, String, f64, f64);
+
 fn pow10(power: u32) -> PyResult<i128> {
     10_i128
         .checked_pow(power)
@@ -318,10 +320,7 @@ fn wallet_balance_parts(
 }
 
 #[pyfunction]
-fn wallet_balance_rows(
-    db_path: &str,
-    up_to_date: Option<&str>,
-) -> PyResult<Vec<(i64, String, String, f64, f64)>> {
+fn wallet_balance_rows(db_path: &str, up_to_date: Option<&str>) -> PyResult<Vec<WalletBalanceRow>> {
     let conn = open_sqlite_connection(db_path)?;
     let signed_expr = signed_minor_amount_expr("r.amount_base", "r.type");
     let mut sql = format!(
@@ -342,7 +341,7 @@ fn wallet_balance_rows(
     );
 
     let mut stmt = conn.prepare(&sql).map_err(sqlite_err)?;
-    let mapper = |row: &rusqlite::Row<'_>| -> rusqlite::Result<(i64, String, String, f64, f64)> {
+    let mapper = |row: &rusqlite::Row<'_>| -> rusqlite::Result<WalletBalanceRow> {
         let initial_minor: i64 = row.get(3)?;
         let delta_minor: i64 = row.get(4)?;
         Ok((

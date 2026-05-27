@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import importlib
 import sqlite3
-from typing import Any, Protocol, TypedDict, cast
+from typing import Any, TypedDict, cast
 
+from bridge.ledgera_bridge import RustRepositoryReadCore, get_repository_read_core
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 from domain.transfers import Transfer
 from domain.wallets import Wallet
@@ -11,27 +11,6 @@ from utils.finance.money import to_money_float
 from utils.records.tags import normalize_tag_name
 
 SYSTEM_WALLET_ID = 1
-
-
-class _RustRecordCore(Protocol):
-    def mandatory_expense_row(self, db_path: str, expense_id: int) -> dict[str, object] | None: ...
-
-    def mandatory_expense_rows(self, db_path: str) -> list[dict[str, object]]: ...
-
-    def record_get_row(self, db_path: str, record_id: int) -> dict[str, object] | None: ...
-
-    def record_list_rows(
-        self,
-        db_path: str,
-    ) -> list[dict[str, object]]: ...
-
-    def record_rows_by_tag(self, db_path: str, tag_name: str) -> list[dict[str, object]]: ...
-
-    def transfer_list_rows(self, db_path: str) -> list[dict[str, object]]: ...
-
-    def transfer_id_by_record_index(self, db_path: str, index: int) -> int | None: ...
-
-    def wallet_list_rows(self, db_path: str) -> list[dict[str, object]]: ...
 
 
 class _RustRecordRow(TypedDict):
@@ -87,17 +66,7 @@ class _RustMandatoryExpenseRow(TypedDict):
     auto_pay: bool
 
 
-def _load_rust_record_core() -> _RustRecordCore | None:
-    try:
-        module = importlib.import_module("ledgera_core.ledgera_core")
-    except Exception:
-        return None
-    if not callable(getattr(module, "record_list_rows", None)):
-        return None
-    return cast(_RustRecordCore, module)
-
-
-_RUST_RECORD_CORE = _load_rust_record_core()
+_RUST_RECORD_CORE = get_repository_read_core()
 
 
 def _record_core_has(name: str) -> bool:
@@ -366,7 +335,9 @@ class SQLiteRecordsWalletsMixin:
         if isinstance(db_path, str) and db_path and _record_core_has("wallet_list_rows"):
             return [
                 self._wallet_from_rust_row(cast(_RustWalletRow, raw_row))
-                for raw_row in cast(_RustRecordCore, _RUST_RECORD_CORE).wallet_list_rows(db_path)
+                for raw_row in cast(RustRepositoryReadCore, _RUST_RECORD_CORE).wallet_list_rows(
+                    db_path
+                )
             ]
         return self._storage.get_wallets()
 
@@ -400,7 +371,9 @@ class SQLiteRecordsWalletsMixin:
         if isinstance(db_path, str) and db_path and _record_core_has("transfer_list_rows"):
             return [
                 self._transfer_from_rust_row(cast(_RustTransferRow, raw_row))
-                for raw_row in cast(_RustRecordCore, _RUST_RECORD_CORE).transfer_list_rows(db_path)
+                for raw_row in cast(RustRepositoryReadCore, _RUST_RECORD_CORE).transfer_list_rows(
+                    db_path
+                )
             ]
         return self._storage.get_transfers()
 
@@ -530,7 +503,7 @@ class SQLiteRecordsWalletsMixin:
             return None
         db_path = getattr(self, "db_path", None)
         if isinstance(db_path, str) and db_path and _record_core_has("transfer_id_by_record_index"):
-            return cast(_RustRecordCore, _RUST_RECORD_CORE).transfer_id_by_record_index(
+            return cast(RustRepositoryReadCore, _RUST_RECORD_CORE).transfer_id_by_record_index(
                 db_path, int(index)
             )
         row = self._conn.execute(
@@ -615,16 +588,16 @@ class SQLiteRecordsWalletsMixin:
         if isinstance(db_path, str) and db_path and _record_core_has("mandatory_expense_rows"):
             return [
                 self._mandatory_from_rust_row(cast(_RustMandatoryExpenseRow, raw_row))
-                for raw_row in cast(_RustRecordCore, _RUST_RECORD_CORE).mandatory_expense_rows(
-                    db_path
-                )
+                for raw_row in cast(
+                    RustRepositoryReadCore, _RUST_RECORD_CORE
+                ).mandatory_expense_rows(db_path)
             ]
         return self._storage.get_mandatory_expenses()
 
     def get_mandatory_expense_by_id(self, expense_id: int) -> MandatoryExpenseRecord:
         db_path = getattr(self, "db_path", None)
         if isinstance(db_path, str) and db_path and _record_core_has("mandatory_expense_row"):
-            row = cast(_RustRecordCore, _RUST_RECORD_CORE).mandatory_expense_row(
+            row = cast(RustRepositoryReadCore, _RUST_RECORD_CORE).mandatory_expense_row(
                 db_path, int(expense_id)
             )
             if row is not None:

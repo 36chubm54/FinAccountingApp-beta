@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import importlib
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Final, Protocol, cast
+from typing import Final
+
+from bridge.ledgera_bridge import get_money_core
 
 MONEY_SCALE: Final[int] = 2
 RATE_SCALE: Final[int] = 6
@@ -11,55 +12,7 @@ RATE_QUANT: Final[Decimal] = Decimal("0.000001")
 MINOR_FACTOR: Final[int] = 100
 
 
-class _RustMoneyCore(Protocol):
-    def build_rate(self, amount_original: object, amount_base: object, currency: str) -> float: ...
-
-    def minor_to_money(self, value: object) -> float: ...
-
-    def money_diff_text(self, left: object, right: object) -> str: ...
-
-    def money_abs(self, value: object) -> float: ...
-
-    def quantize_money_text(self, value: object) -> str: ...
-
-    def quantize_rate_text(self, value: object) -> str: ...
-
-    def rate_diff_text(self, left: object, right: object) -> str: ...
-
-    def rate_to_text(self, value: object) -> str: ...
-
-    def to_minor_units(self, value: object) -> int: ...
-
-    def to_money_float(self, value: object) -> float: ...
-
-    def to_rate_float(self, value: object) -> float: ...
-
-
-def _load_rust_money_core() -> _RustMoneyCore | None:
-    try:
-        module = importlib.import_module("ledgera_core.ledgera_core")
-    except Exception:
-        return None
-
-    required = (
-        "build_rate",
-        "minor_to_money",
-        "money_diff_text",
-        "money_abs",
-        "quantize_money_text",
-        "quantize_rate_text",
-        "rate_diff_text",
-        "rate_to_text",
-        "to_minor_units",
-        "to_money_float",
-        "to_rate_float",
-    )
-    if not all(callable(getattr(module, name, None)) for name in required):
-        return None
-    return cast(_RustMoneyCore, module)
-
-
-_RUST_MONEY_CORE = _load_rust_money_core()
+_RUST_MONEY_CORE = get_money_core()
 
 
 def to_decimal(value: object, default: str = "0") -> Decimal:
