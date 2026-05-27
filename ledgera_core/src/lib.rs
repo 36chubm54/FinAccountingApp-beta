@@ -1,5 +1,6 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use rusqlite::{Connection, OptionalExtension};
 
 const MONEY_SCALE: u32 = 2;
 const RATE_SCALE: u32 = 6;
@@ -103,6 +104,10 @@ fn scaled_to_text(value: i128, scale: u32) -> PyResult<String> {
         "{sign}{integer}.{fraction:0width$}",
         width = scale as usize
     ))
+}
+
+fn minor_to_money_value(value: i64) -> f64 {
+    value as f64 / 100.0
 }
 
 fn round_div_half_up(numerator: i128, denominator: i128) -> PyResult<i128> {
@@ -241,6 +246,154 @@ fn rate_diff_text(left: &Bound<'_, PyAny>, right: &Bound<'_, PyAny>) -> PyResult
     )
 }
 
+fn minor_amount_expr(column: &str) -> String {
+    format!(
+        "CASE \
+         WHEN {column}_minor IS NOT NULL \
+         AND ({column}_minor != 0 OR ROUND({column}, 2) = 0) \
+         THEN {column}_minor \
+         ELSE CAST(ROUND({column} * 100.0) AS INTEGER) \
+         END"
+    )
+}
+
+fn signed_minor_amount_expr(column: &str, type_column: &str) -> String {
+    let amount_expr = minor_amount_expr(column);
+    format!("CASE WHEN {type_column} = 'income' THEN {amount_expr} ELSE -{amount_expr} END")
+}
+
+fn sqlite_err(err: rusqlite::Error) -> PyErr {
+    PyValueError::new_err(format!("sqlite error: {err}"))
+}
+
+fn open_sqlite_connection(db_path: &str) -> PyResult<Connection> {
+    Connection::open(db_path).map_err(sqlite_err)
+}
+
+#[pyfunction]
+fn wallet_balance_parts(
+    db_path: &str,
+    wallet_id: i64,
+    up_to_date: Option<&str>,
+) -> PyResult<Option<(f64, String, f64)>> {
+    let conn = open_sqlite_connection(db_path)?;
+    let wallet_row = conn
+        .query_row(
+            "SELECT \
+                COALESCE(initial_balance_minor, CAST(ROUND(initial_balance * 100.0) AS INTEGER), 0), \
+                currency \
+             FROM wallets \
+             WHERE id = ?1 AND is_active = 1",
+            [wallet_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(sqlite_err)?;
+    let Some((initial_minor, currency)) = wallet_row else {
+        return Ok(None);
+    };
+
+    let signed_expr = signed_minor_amount_expr("amount_base", "type");
+    let delta_minor = if let Some(date) = up_to_date {
+        let sql = format!(
+            "SELECT COALESCE(SUM({signed_expr}), 0) \
+             FROM records WHERE wallet_id = ?1 AND date <= ?2"
+        );
+        conn.query_row(&sql, (&wallet_id, &date), |row| row.get::<_, i64>(0))
+            .map_err(sqlite_err)?
+    } else {
+        let sql = format!("SELECT COALESCE(SUM({signed_expr}), 0) FROM records WHERE wallet_id = ?1");
+        conn.query_row(&sql, [wallet_id], |row| row.get::<_, i64>(0))
+            .map_err(sqlite_err)?
+    };
+
+    Ok(Some((
+        minor_to_money_value(initial_minor),
+        currency,
+        minor_to_money_value(delta_minor),
+    )))
+}
+
+#[pyfunction]
+fn wallet_balance_rows(
+    db_path: &str,
+    up_to_date: Option<&str>,
+) -> PyResult<Vec<(i64, String, String, f64, f64)>> {
+    let conn = open_sqlite_connection(db_path)?;
+    let signed_expr = signed_minor_amount_expr("r.amount_base", "r.type");
+    let mut sql = format!(
+        "SELECT \
+            w.id, \
+            w.name, \
+            w.currency, \
+            COALESCE(w.initial_balance_minor, CAST(ROUND(w.initial_balance * 100.0) AS INTEGER), 0) AS initial_minor, \
+            COALESCE(SUM({signed_expr}), 0) AS delta_minor \
+         FROM wallets AS w \
+         LEFT JOIN records AS r ON r.wallet_id = w.id"
+    );
+    if up_to_date.is_some() {
+        sql.push_str(" AND r.date <= ?1");
+    }
+    sql.push_str(" WHERE w.is_active = 1 GROUP BY w.id, w.name, w.currency, initial_minor ORDER BY w.id");
+
+    let mut stmt = conn.prepare(&sql).map_err(sqlite_err)?;
+    let mapper = |row: &rusqlite::Row<'_>| -> rusqlite::Result<(i64, String, String, f64, f64)> {
+        let initial_minor: i64 = row.get(3)?;
+        let delta_minor: i64 = row.get(4)?;
+        Ok((
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            minor_to_money_value(initial_minor),
+            minor_to_money_value(delta_minor),
+        ))
+    };
+    let mapped = if let Some(date) = up_to_date {
+        stmt.query_map([date], mapper).map_err(sqlite_err)?
+    } else {
+        stmt.query_map([], mapper).map_err(sqlite_err)?
+    };
+
+    let mut rows = Vec::new();
+    for row in mapped {
+        rows.push(row.map_err(sqlite_err)?);
+    }
+    Ok(rows)
+}
+
+#[pyfunction]
+fn cashflow_sum(
+    db_path: &str,
+    record_type: &str,
+    start_date: &str,
+    end_date: &str,
+) -> PyResult<f64> {
+    let conn = open_sqlite_connection(db_path)?;
+    let amount_expr = minor_amount_expr("amount_base");
+    let minor_total = if record_type == "expense" {
+        let sql = format!(
+            "SELECT COALESCE(SUM({amount_expr}), 0) \
+             FROM records \
+             WHERE type IN ('expense', 'mandatory_expense') \
+               AND transfer_id IS NULL \
+               AND date >= ?1 AND date <= ?2"
+        );
+        conn.query_row(&sql, (start_date, end_date), |row| row.get::<_, i64>(0))
+            .map_err(sqlite_err)?
+    } else {
+        let sql = format!(
+            "SELECT COALESCE(SUM({amount_expr}), 0) \
+             FROM records \
+             WHERE type = ?1 \
+               AND transfer_id IS NULL \
+               AND date >= ?2 AND date <= ?3"
+        );
+        conn.query_row(&sql, (record_type, start_date, end_date), |row| row.get::<_, i64>(0))
+            .map_err(sqlite_err)?
+    };
+    Ok(minor_to_money_value(minor_total))
+}
+
 #[pymodule]
 fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(convert_amount, m)?)?;
@@ -256,6 +409,9 @@ fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rate_to_text, m)?)?;
     m.add_function(wrap_pyfunction!(money_diff_text, m)?)?;
     m.add_function(wrap_pyfunction!(rate_diff_text, m)?)?;
+    m.add_function(wrap_pyfunction!(wallet_balance_parts, m)?)?;
+    m.add_function(wrap_pyfunction!(wallet_balance_rows, m)?)?;
+    m.add_function(wrap_pyfunction!(cashflow_sum, m)?)?;
     Ok(())
 }
 
@@ -264,6 +420,94 @@ mod tests {
     use super::*;
     use pyo3::types::PyString;
     use pyo3::Python;
+    use rusqlite::Connection;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn create_balance_test_db() -> String {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("ledgera_balance_test_{unique}.db"));
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE wallets (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                currency TEXT NOT NULL,
+                initial_balance REAL NOT NULL DEFAULT 0,
+                initial_balance_minor INTEGER DEFAULT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE records (
+                id INTEGER PRIMARY KEY,
+                type TEXT NOT NULL,
+                date TEXT NOT NULL,
+                wallet_id INTEGER NOT NULL,
+                transfer_id INTEGER DEFAULT NULL,
+                amount_base REAL NOT NULL,
+                amount_base_minor INTEGER DEFAULT NULL
+            );
+            ",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO wallets (id, name, currency, initial_balance, initial_balance_minor, is_active)
+             VALUES (1, 'Cash', 'KZT', 1000.0, 100000, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO wallets (id, name, currency, initial_balance, initial_balance_minor, is_active)
+             VALUES (2, 'Card', 'KZT', 500.0, 50000, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO wallets (id, name, currency, initial_balance, initial_balance_minor, is_active)
+             VALUES (3, 'Inactive', 'KZT', 999.0, 99900, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO records (id, type, date, wallet_id, transfer_id, amount_base, amount_base_minor)
+             VALUES (1, 'income', '2026-01-01', 1, NULL, 200.0, 20000)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO records (id, type, date, wallet_id, transfer_id, amount_base, amount_base_minor)
+             VALUES (2, 'expense', '2026-01-02', 1, NULL, 50.0, 5000)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO records (id, type, date, wallet_id, transfer_id, amount_base, amount_base_minor)
+             VALUES (3, 'mandatory_expense', '2026-01-03', 2, NULL, 25.0, 2500)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO records (id, type, date, wallet_id, transfer_id, amount_base, amount_base_minor)
+             VALUES (4, 'expense', '2026-01-04', 1, 1, 300.0, 30000)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO records (id, type, date, wallet_id, transfer_id, amount_base, amount_base_minor)
+             VALUES (5, 'income', '2026-01-04', 2, 1, 300.0, 30000)",
+            [],
+        )
+        .unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    fn remove_test_db(path: &str) {
+        let _ = fs::remove_file(PathBuf::from(path));
+    }
 
     #[test]
     fn test_convert_amount() {
@@ -399,5 +643,39 @@ mod tests {
                 "1.000001"
             );
         });
+    }
+
+    #[test]
+    fn test_wallet_balance_parts_reads_sqlite_balance_state() {
+        let db_path = create_balance_test_db();
+        let result = wallet_balance_parts(&db_path, 1, None).unwrap().unwrap();
+        assert_eq!(result.0, 1000.0);
+        assert_eq!(result.1, "KZT");
+        assert_eq!(result.2, -150.0);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn test_wallet_balance_rows_returns_active_wallets_only() {
+        let db_path = create_balance_test_db();
+        let rows = wallet_balance_rows(&db_path, Some("2026-01-03")).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], (1, "Cash".to_owned(), "KZT".to_owned(), 1000.0, 150.0));
+        assert_eq!(rows[1], (2, "Card".to_owned(), "KZT".to_owned(), 500.0, -25.0));
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn test_cashflow_sum_excludes_transfer_linked_records() {
+        let db_path = create_balance_test_db();
+        assert_eq!(
+            cashflow_sum(&db_path, "income", "2026-01-01", "2026-01-31").unwrap(),
+            200.0
+        );
+        assert_eq!(
+            cashflow_sum(&db_path, "expense", "2026-01-01", "2026-01-31").unwrap(),
+            75.0
+        );
+        remove_test_db(&db_path);
     }
 }

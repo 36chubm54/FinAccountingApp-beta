@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass
+from typing import Protocol, cast
 
 from app.data.protocols import SqlQueryRepository
 from services.support.currency import convert_money_to_base
@@ -26,6 +28,34 @@ class CashflowResult:
     cashflow: float
 
 
+class _RustBalanceCore(Protocol):
+    def cashflow_sum(
+        self, db_path: str, record_type: str, start_date: str, end_date: str
+    ) -> float: ...
+
+    def wallet_balance_parts(
+        self, db_path: str, wallet_id: int, up_to_date: str | None = None
+    ) -> tuple[float, str, float] | None: ...
+
+    def wallet_balance_rows(
+        self, db_path: str, up_to_date: str | None = None
+    ) -> list[tuple[int, str, str, float, float]]: ...
+
+
+def _load_rust_balance_core() -> _RustBalanceCore | None:
+    try:
+        module = importlib.import_module("ledgera_core.ledgera_core")
+    except Exception:
+        return None
+    required = ("cashflow_sum", "wallet_balance_parts", "wallet_balance_rows")
+    if not all(callable(getattr(module, name, None)) for name in required):
+        return None
+    return cast(_RustBalanceCore, module)
+
+
+_RUST_BALANCE_CORE = _load_rust_balance_core()
+
+
 class BalanceService:
     """
     Read-only analytical service.
@@ -42,6 +72,13 @@ class BalanceService:
         Balance of a single wallet up to `date` (inclusive).
         If `date` is None, balance is computed over the full history.
         """
+        if self._can_use_rust():
+            rust_core = cast(_RustBalanceCore, _RUST_BALANCE_CORE)
+            parts = rust_core.wallet_balance_parts(self._db_path(), int(wallet_id), date)
+            if parts is None:
+                return 0.0
+            initial_amount, currency, delta = parts
+            return convert_money_to_base(initial_amount, currency, self._currency) + delta
         initial = self._get_initial_balance(wallet_id)
         delta = self._sum_signed_records(wallet_id=wallet_id, up_to_date=date)
         return initial + delta
@@ -51,6 +88,24 @@ class BalanceService:
         Balance snapshot for every active wallet up to `date`.
         Returns a list sorted by wallet_id.
         """
+        if self._can_use_rust():
+            rust_core = cast(_RustBalanceCore, _RUST_BALANCE_CORE)
+            result: list[WalletBalance] = []
+            for wallet_id, name, currency, initial_amount, delta in rust_core.wallet_balance_rows(
+                self._db_path(), date
+            ):
+                result.append(
+                    WalletBalance(
+                        wallet_id=int(wallet_id),
+                        name=str(name),
+                        currency=str(currency),
+                        balance=convert_money_to_base(
+                            float(initial_amount), str(currency), self._currency
+                        )
+                        + float(delta),
+                    )
+                )
+            return result
         wallets = self._repo.query_all(
             f"""
             SELECT id, name, currency,
@@ -99,11 +154,25 @@ class BalanceService:
 
     def get_income(self, start_date: str, end_date: str) -> float:
         """Total income (excluding transfers) for [start_date, end_date]."""
+        if self._can_use_rust():
+            rust_core = cast(_RustBalanceCore, _RUST_BALANCE_CORE)
+            return rust_core.cashflow_sum(self._db_path(), "income", str(start_date), str(end_date))
         return self._sum_by_type("income", start_date, end_date)
 
     def get_expenses(self, start_date: str, end_date: str) -> float:
         """Total expenses (excluding transfers) for [start_date, end_date]."""
+        if self._can_use_rust():
+            rust_core = cast(_RustBalanceCore, _RUST_BALANCE_CORE)
+            return rust_core.cashflow_sum(
+                self._db_path(), "expense", str(start_date), str(end_date)
+            )
         return self._sum_by_type("expense", start_date, end_date)
+
+    def _db_path(self) -> str:
+        return str(getattr(self._repo, "db_path", ""))
+
+    def _can_use_rust(self) -> bool:
+        return _RUST_BALANCE_CORE is not None and bool(self._db_path())
 
     def _get_initial_balance(self, wallet_id: int) -> float:
         row = self._repo.query_one(

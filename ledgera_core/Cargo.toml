@@ -1,6 +1,6 @@
 [package]
 name = "ledgera_core"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -10,3 +10,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = { version = "0.28.3", features = ["extension-module"] }
+rusqlite = { version = "0.37.0", features = ["bundled"] }
