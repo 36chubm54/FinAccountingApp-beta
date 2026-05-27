@@ -14,10 +14,14 @@ SYSTEM_WALLET_ID = 1
 
 
 class _RustRecordCore(Protocol):
+    def record_get_row(self, db_path: str, record_id: int) -> dict[str, object] | None: ...
+
     def record_list_rows(
         self,
         db_path: str,
     ) -> list[dict[str, object]]: ...
+
+    def record_rows_by_tag(self, db_path: str, tag_name: str) -> list[dict[str, object]]: ...
 
 
 class _RustRecordRow(TypedDict):
@@ -146,6 +150,34 @@ class SQLiteRecordsWalletsMixin:
     def _renormalize_current_ids(self) -> None: ...
 
     def has_system_wallet_row(self) -> bool: ...
+
+    @staticmethod
+    def _record_from_rust_row(row: _RustRecordRow) -> Record:
+        record_type = str(row["type"])
+        payload = {
+            "id": int(row["id"]),
+            "date": str(row["date"]),
+            "wallet_id": int(row["wallet_id"]),
+            "transfer_id": int(row["transfer_id"]) if row["transfer_id"] is not None else None,
+            "related_debt_id": (
+                int(row["related_debt_id"]) if row["related_debt_id"] is not None else None
+            ),
+            "amount_original": float(row["amount_original"]),
+            "currency": str(row["currency"]),
+            "rate_at_operation": float(row["rate_at_operation"]),
+            "amount_base": float(row["amount_base"]),
+            "category": str(row["category"]),
+            "description": str(row["description"] or ""),
+            "tags": tuple(str(tag) for tag in cast(list[object], row["tags"])),
+        }
+        if record_type == "income":
+            return IncomeRecord(**payload)
+        if record_type == "mandatory_expense":
+            return MandatoryExpenseRecord(
+                **payload,
+                period=str(row["period"] or "monthly"),  # type: ignore[arg-type]
+            )
+        return ExpenseRecord(**payload)
 
     def load_active_wallets(self) -> list[Wallet]:
         rows = self._conn.execute(
@@ -309,41 +341,10 @@ class SQLiteRecordsWalletsMixin:
     def load_all(self) -> list[Record]:
         db_path = str(getattr(self, "db_path", ""))
         if _RUST_RECORD_CORE is not None and db_path:
-            records: list[Record] = []
-            for raw_row in _RUST_RECORD_CORE.record_list_rows(db_path):
-                row = cast(_RustRecordRow, raw_row)
-                record_id = int(row["id"])
-                record_type = str(row["type"])
-                payload = {
-                    "id": record_id,
-                    "date": str(row["date"]),
-                    "wallet_id": int(row["wallet_id"]),
-                    "transfer_id": (
-                        int(row["transfer_id"]) if row["transfer_id"] is not None else None
-                    ),
-                    "related_debt_id": (
-                        int(row["related_debt_id"]) if row["related_debt_id"] is not None else None
-                    ),
-                    "amount_original": float(row["amount_original"]),
-                    "currency": str(row["currency"]),
-                    "rate_at_operation": float(row["rate_at_operation"]),
-                    "amount_base": float(row["amount_base"]),
-                    "category": str(row["category"]),
-                    "description": str(row["description"] or ""),
-                    "tags": tuple(str(tag) for tag in cast(list[object], row["tags"])),
-                }
-                if record_type == "income":
-                    records.append(IncomeRecord(**payload))
-                elif record_type == "mandatory_expense":
-                    records.append(
-                        MandatoryExpenseRecord(
-                            **payload,
-                            period=str(row["period"] or "monthly"),  # type: ignore[arg-type]
-                        )
-                    )
-                else:
-                    records.append(ExpenseRecord(**payload))
-            return records
+            return [
+                self._record_from_rust_row(cast(_RustRecordRow, raw_row))
+                for raw_row in _RUST_RECORD_CORE.record_list_rows(db_path)
+            ]
         rows = self._records_base_rows()
         tags_map = self._record_tags_map([int(row["id"]) for row in rows])
         return [self._record_from_row(row, tags=tags_map.get(int(row["id"]), ())) for row in rows]
@@ -353,6 +354,12 @@ class SQLiteRecordsWalletsMixin:
 
     def get_by_id(self, record_id: int) -> Record:
         record_id = int(record_id)
+        db_path = str(getattr(self, "db_path", ""))
+        if _RUST_RECORD_CORE is not None and db_path:
+            row = _RUST_RECORD_CORE.record_get_row(db_path, record_id)
+            if row is not None:
+                return self._record_from_rust_row(cast(_RustRecordRow, row))
+            raise ValueError(f"Record not found: {record_id}")
         row = self._conn.execute(
             """
             SELECT
@@ -386,6 +393,12 @@ class SQLiteRecordsWalletsMixin:
         tag_name = normalize_tag_name(name)
         if not tag_name:
             return []
+        db_path = str(getattr(self, "db_path", ""))
+        if _RUST_RECORD_CORE is not None and db_path:
+            return [
+                self._record_from_rust_row(cast(_RustRecordRow, raw_row))
+                for raw_row in _RUST_RECORD_CORE.record_rows_by_tag(db_path, tag_name)
+            ]
         rows = self._conn.execute(
             f"""
             SELECT {self._select_record_columns()}

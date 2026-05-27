@@ -396,9 +396,12 @@ fn cashflow_sum(
     Ok(minor_to_money_value(minor_total))
 }
 
-#[pyfunction]
-fn record_list_rows(py: Python<'_>, db_path: &str) -> PyResult<Vec<Py<PyAny>>> {
-    let conn = open_sqlite_connection(db_path)?;
+fn record_row_dicts(
+    py: Python<'_>,
+    conn: &Connection,
+    sql: &str,
+    params: &[&dyn rusqlite::ToSql],
+) -> PyResult<Vec<Py<PyAny>>> {
     let mut tags_by_record: HashMap<i64, Vec<String>> = HashMap::new();
     let mut tag_stmt = conn
         .prepare(
@@ -416,31 +419,9 @@ fn record_list_rows(py: Python<'_>, db_path: &str) -> PyResult<Vec<Py<PyAny>>> {
         tags_by_record.entry(record_id).or_default().push(tag_name);
     }
 
-    let mut stmt = conn
-        .prepare(
-            "SELECT
-                id,
-                type,
-                date,
-                wallet_id,
-                transfer_id,
-                related_debt_id,
-                amount_original,
-                amount_original_minor,
-                currency,
-                rate_at_operation,
-                rate_at_operation_text,
-                amount_base,
-                amount_base_minor,
-                category,
-                description,
-                period
-             FROM records
-             ORDER BY id",
-        )
-        .map_err(sqlite_err)?;
+    let mut stmt = conn.prepare(sql).map_err(sqlite_err)?;
     let rows = stmt
-        .query_map([], |row| {
+        .query_map(params, |row| {
             let record_id: i64 = row.get(0)?;
             let amount_original_minor: Option<i64> = row.get(7)?;
             let amount_base_minor: Option<i64> = row.get(12)?;
@@ -534,6 +515,101 @@ fn record_list_rows(py: Python<'_>, db_path: &str) -> PyResult<Vec<Py<PyAny>>> {
     Ok(result)
 }
 
+#[pyfunction]
+fn record_list_rows(py: Python<'_>, db_path: &str) -> PyResult<Vec<Py<PyAny>>> {
+    let conn = open_sqlite_connection(db_path)?;
+    record_row_dicts(
+        py,
+        &conn,
+        "SELECT
+            id,
+            type,
+            date,
+            wallet_id,
+            transfer_id,
+            related_debt_id,
+            amount_original,
+            amount_original_minor,
+            currency,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_base,
+            amount_base_minor,
+            category,
+            description,
+            period
+         FROM records
+         ORDER BY id",
+        &[],
+    )
+}
+
+#[pyfunction]
+fn record_get_row(py: Python<'_>, db_path: &str, record_id: i64) -> PyResult<Option<Py<PyAny>>> {
+    let conn = open_sqlite_connection(db_path)?;
+    let mut rows = record_row_dicts(
+        py,
+        &conn,
+        "SELECT
+            id,
+            type,
+            date,
+            wallet_id,
+            transfer_id,
+            related_debt_id,
+            amount_original,
+            amount_original_minor,
+            currency,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_base,
+            amount_base_minor,
+            category,
+            description,
+            period
+         FROM records
+         WHERE id = ?1",
+        &[&record_id],
+    )?;
+    Ok(rows.pop())
+}
+
+#[pyfunction]
+fn record_rows_by_tag(py: Python<'_>, db_path: &str, tag_name: &str) -> PyResult<Vec<Py<PyAny>>> {
+    let conn = open_sqlite_connection(db_path)?;
+    record_row_dicts(
+        py,
+        &conn,
+        "SELECT
+            id,
+            type,
+            date,
+            wallet_id,
+            transfer_id,
+            related_debt_id,
+            amount_original,
+            amount_original_minor,
+            currency,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_base,
+            amount_base_minor,
+            category,
+            description,
+            period
+         FROM records
+         WHERE EXISTS (
+            SELECT 1
+            FROM record_tags AS rt
+            JOIN tags AS t ON t.id = rt.tag_id
+            WHERE rt.record_id = records.id
+              AND lower(t.name) = lower(?1)
+         )
+         ORDER BY id",
+        &[&tag_name],
+    )
+}
+
 #[pymodule]
 fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(convert_amount, m)?)?;
@@ -553,6 +629,8 @@ fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(wallet_balance_rows, m)?)?;
     m.add_function(wrap_pyfunction!(cashflow_sum, m)?)?;
     m.add_function(wrap_pyfunction!(record_list_rows, m)?)?;
+    m.add_function(wrap_pyfunction!(record_get_row, m)?)?;
+    m.add_function(wrap_pyfunction!(record_rows_by_tag, m)?)?;
     Ok(())
 }
 

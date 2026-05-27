@@ -11,7 +11,9 @@ from .ledgera_core import (
 )
 
 cashflow_sum = getattr(_ledgera_core, "cashflow_sum", None)
+record_get_row = getattr(_ledgera_core, "record_get_row", None)
 record_list_rows = getattr(_ledgera_core, "record_list_rows", None)
+record_rows_by_tag = getattr(_ledgera_core, "record_rows_by_tag", None)
 wallet_balance_parts = getattr(_ledgera_core, "wallet_balance_parts", None)
 wallet_balance_rows = getattr(_ledgera_core, "wallet_balance_rows", None)
 rate_to_text = getattr(_ledgera_core, "rate_to_text", None)
@@ -32,8 +34,12 @@ __all__ = [
 ]
 if cashflow_sum is not None:
     __all__.append("cashflow_sum")
+if record_get_row is not None:
+    __all__.append("record_get_row")
 if record_list_rows is not None:
     __all__.append("record_list_rows")
+if record_rows_by_tag is not None:
+    __all__.append("record_rows_by_tag")
 if wallet_balance_parts is not None:
     __all__.append("wallet_balance_parts")
 if wallet_balance_rows is not None:

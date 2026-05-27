@@ -84,3 +84,38 @@ def test_sqlite_repo_load_all_rust_path_matches_python_fallback(tmp_path: Path) 
         assert rust_records[3].tags == ("rent",)
     finally:
         repo.close()
+
+
+def test_sqlite_repo_get_by_id_and_get_records_by_tag_match_python_fallback(tmp_path: Path) -> None:
+    repo = _build_repo(
+        tmp_path,
+        wallets=[_wallet(1, name="Cash", initial_balance=0.0)],
+        records=[
+            _record(1, record_type="income", date="2026-01-01", wallet_id=1, amount_base=200.0),
+            _record(2, record_type="expense", date="2026-01-02", wallet_id=1, amount_base=50.0),
+            _record(3, record_type="expense", date="2026-01-03", wallet_id=1, amount_base=30.0),
+        ],
+    )
+    try:
+        repo.replace_record_tags(1, ("salary", "work"))
+        repo.replace_record_tags(2, ("food",))
+        repo.replace_record_tags(3, ("food", "home"))
+
+        rust_record = repo.get_by_id(2)
+        rust_food = repo.get_records_by_tag("food")
+
+        rust_core = records_wallets_module._RUST_RECORD_CORE
+        records_wallets_module._RUST_RECORD_CORE = None
+        try:
+            fallback_record = repo.get_by_id(2)
+            fallback_food = repo.get_records_by_tag("food")
+        finally:
+            records_wallets_module._RUST_RECORD_CORE = rust_core
+
+        assert rust_record == fallback_record
+        assert rust_record.tags == ("food",)
+        assert rust_food == fallback_food
+        assert [record.id for record in rust_food] == [2, 3]
+        assert rust_food[1].tags == ("food", "home")
+    finally:
+        repo.close()
