@@ -246,6 +246,11 @@ class SQLiteRecordsWalletsMixin:
             return False
         if getattr(self._conn, "in_transaction", False):
             return False
+        checkpoint = getattr(self, "_rust_read_total_changes_checkpoint", None)
+        if checkpoint is None:
+            self._rust_read_total_changes_checkpoint = int(self._conn.total_changes)
+        elif int(self._conn.total_changes) != int(checkpoint):
+            return False
         return _record_core_has(name)
 
     def load_active_wallets(self) -> list[Wallet]:
