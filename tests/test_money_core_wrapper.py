@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
 from decimal import Decimal
+
+os.environ.setdefault("LEDGERA_ENABLE_RUST_CORE", "1")
 
 from utils.finance import money
 

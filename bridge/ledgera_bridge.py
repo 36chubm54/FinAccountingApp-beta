@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 from types import ModuleType
 from typing import Protocol, cast
 
@@ -62,6 +63,8 @@ class RustRepositoryReadCore(Protocol):
 
 
 _EXTENSION_IMPORT = "ledgera_core.ledgera_core"
+_ENABLE_RUST_CORE_ENV = "LEDGERA_ENABLE_RUST_CORE"
+_FORCE_PYTHON_FALLBACK_ENV = "LEDGERA_FORCE_PYTHON_FALLBACK"
 
 _MONEY_SYMBOLS = (
     "build_rate",
@@ -89,7 +92,19 @@ _REPOSITORY_SYMBOLS = (
 )
 
 
+def is_python_fallback_forced() -> bool:
+    value = os.environ.get(_FORCE_PYTHON_FALLBACK_ENV, "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def is_rust_core_enabled() -> bool:
+    value = os.environ.get(_ENABLE_RUST_CORE_ENV, "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def load_extension_module() -> ModuleType | None:
+    if is_python_fallback_forced() or not is_rust_core_enabled():
+        return None
     try:
         return importlib.import_module(_EXTENSION_IMPORT)
     except Exception:
@@ -128,5 +143,7 @@ __all__ = [
     "get_balance_core",
     "get_money_core",
     "get_repository_read_core",
+    "is_python_fallback_forced",
+    "is_rust_core_enabled",
     "load_extension_module",
 ]

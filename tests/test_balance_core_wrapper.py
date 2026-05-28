@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+os.environ.setdefault("LEDGERA_ENABLE_RUST_CORE", "1")
 
 from app.services import CurrencyService
 from services.analytics import balance as balance_module

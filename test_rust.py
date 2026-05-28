@@ -1,9 +1,11 @@
 import importlib
+import os
 import sys
 from pathlib import Path
 from typing import Protocol, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "rust" / "ledgera_engine" / "python"))
+os.environ.setdefault("LEDGERA_ENABLE_RUST_CORE", "1")
 
 _ledgera_bridge = importlib.import_module("bridge.ledgera_bridge")
 

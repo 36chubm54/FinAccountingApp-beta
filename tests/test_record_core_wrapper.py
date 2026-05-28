@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+os.environ.setdefault("LEDGERA_ENABLE_RUST_CORE", "1")
 
 from domain.records import MandatoryExpenseRecord
 from infrastructure.sqlite import records_wallets as records_wallets_module
