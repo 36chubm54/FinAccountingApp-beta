@@ -1,0 +1,13 @@
+[workspace]
+members = ["core", "storage", "ffi"]
+resolver = "3"
+
+[workspace.package]
+version = "0.7.0"
+edition = "2024"
+
+[workspace.dependencies]
+pyo3 = { version = "0.28.3", features = ["extension-module"] }
+rusqlite = { version = "0.37.0", features = ["bundled"] }
+ledgera_engine_core = { path = "core" }
+ledgera_engine_storage = { path = "storage" }

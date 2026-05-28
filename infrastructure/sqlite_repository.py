@@ -45,6 +45,7 @@ class SQLiteRecordRepository(
         self._storage.initialize_schema(schema_path)
         self._conn = self._storage._conn
         self._normalize_existing_ids_from_one_if_needed()
+        self._rust_read_total_changes_checkpoint = int(self._conn.total_changes)
 
     def close(self) -> None:
         self._storage.close()
@@ -398,6 +399,9 @@ class SQLiteRecordRepository(
             debt_payments=debt_payments,
         )
         self._normalize_tag_ids()
+        # Rust read helpers use separate SQLite connections, so normalization
+        # must be visible outside the current Python connection immediately.
+        self._conn.commit()
 
     @staticmethod
     def _select_record_columns() -> str:
