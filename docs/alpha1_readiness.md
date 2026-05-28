@@ -16,7 +16,7 @@ The Rust engine is available through `bridge.ledgera_bridge`, but app runtime do
 - Money helpers have Rust/Python parity coverage.
 - Balance read paths have Rust/Python parity coverage.
 - SQLite read paths for records, wallets, transfers, and mandatory expenses have Rust/Python parity coverage.
-- Root CI covers Ubuntu and Windows with `cargo check`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `maturin develop`, targeted `pytest`, and `pyright`.
+- Root CI covers Ubuntu and Windows with `cargo check`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `maturin build` + wheel install, targeted `pytest`, and `pyright`.
 - App packaging workflows build the Rust extension before PyInstaller.
 
 ## Runtime Flags

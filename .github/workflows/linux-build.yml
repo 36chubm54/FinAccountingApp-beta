@@ -47,7 +47,9 @@ jobs:
 
       - name: Build Rust extension for app pipeline
         working-directory: rust/ledgera_engine
-        run: maturin develop
+        run: |
+          maturin build --out dist/wheels
+          python -c "import glob, subprocess, sys; wheels = glob.glob('dist/wheels/*.whl'); assert wheels, 'No wheel built'; subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--ignore-installed', '--no-deps', wheels[0]])"
 
       - name: Install nFPM
         run: npm install -g @goreleaser/nfpm
