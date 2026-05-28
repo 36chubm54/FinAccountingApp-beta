@@ -36,7 +36,13 @@ def build_common_datas(root: Path) -> list[tuple[str, str]]:
 
 
 def build_common_hiddenimports() -> list[str]:
-    return collect_submodules("keyring.backends")
+    hiddenimports = collect_submodules("keyring.backends")
+    hiddenimports += collect_submodules("bridge")
+    hiddenimports += [
+        "ledgera_core",
+        "ledgera_core.ledgera_core",
+    ]
+    return hiddenimports
 
 
 def collect_optional_metadata(*package_names: str) -> list[tuple[str, str]]:
