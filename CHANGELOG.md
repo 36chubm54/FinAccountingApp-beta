@@ -7,6 +7,32 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [3.0.0-alpha.1] - 2026-05-28
+
+### Added
+
+- Added the initial Rust engine workspace under `rust/ledgera_engine` with `core`, `storage`, and `ffi` crates.
+- Added the PyO3-backed `ledgera_core` extension and the Python bridge package `bridge.ledgera_bridge`.
+- Added Rust-backed parity helpers for money math, balance reads, and selected read-only SQLite repository paths.
+- Added alpha.1 CI gates for Rust check/test/clippy, wheel build, targeted parity pytest, forced Python fallback pytest, and pyright.
+
+### Changed
+
+- Kept Rust runtime usage opt-in through `LEDGERA_ENABLE_RUST_CORE=1`; Python remains the default app runtime path.
+- Centralized Rust extension loading and capability checks behind `bridge.ledgera_bridge`.
+- Updated Windows and Linux packaging workflows to build and install the Rust extension wheel before PyInstaller.
+
+### Fixed
+
+- Replaced `maturin develop` in CI with `maturin build` plus wheel installation so GitHub Actions does not require an activated virtualenv.
+- Kept transaction-sensitive and Python-normalized repository reads on the Python SQLite connection to avoid stale reads from Rust's separate SQLite connection.
+- Silenced pyright source warnings for the compiled `ledgera_core.ledgera_core` extension imports.
+
+### Deferred
+
+- Rust-owned SQLite write paths, WAL bootstrap, migrations, and ID normalization remain out of alpha.1 scope.
+- Kotlin/Native FFI, sync, mobile UI, and broader domain-engine migration remain scheduled for later v3 milestones.
+
 ## [Unreleased]
 
 ### Changed

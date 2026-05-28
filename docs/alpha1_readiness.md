@@ -25,6 +25,25 @@ The Rust engine is available through `bridge.ledgera_bridge`, but app runtime do
 - `LEDGERA_FORCE_PYTHON_FALLBACK=1` forces Python fallback and skips importing the Rust extension.
 - If both variables are set, forced Python fallback wins.
 
+## Read Path Constraints
+
+- Rust repository readers are read-only in alpha.1.
+- Python remains the owner of SQLite mutations, ID normalization, tag updates, debt-payment remapping, and transaction-local visibility.
+- Repository Rust reads are skipped when the current Python SQLite connection is inside a transaction or has performed writes after repository startup.
+- `get_transfer_id_by_record_index(...)` intentionally remains on the Python SQLite connection because it depends on Python-side normalized transfer IDs.
+- These constraints are compatibility boundaries, not final v3 architecture. They should be revisited when `storage` owns write paths and normalization.
+
+## Validation Evidence
+
+- `cargo check --workspace`
+- `cargo test --workspace`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `maturin build --out dist/wheels`
+- Rust-enabled seam pytest: bridge, money, balance, record wrapper, and `ledgera_core` package tests
+- Forced Python fallback pytest for the Rust-backed wrapper slice
+- Full pytest with `LEDGERA_ENABLE_RUST_CORE=1`: `848 passed, 185 skipped`
+- `npx -y pyright`: `0 errors, 0 warnings`
+
 ## Deferred
 
 - Move mutation/write paths such as `RecordEngine::add` into Rust.
