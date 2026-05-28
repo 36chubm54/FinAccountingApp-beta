@@ -1,5 +1,5 @@
-from . import ledgera_core as _ledgera_core
-from .ledgera_core import (
+from . import ledgera_core as _ledgera_core  # pyright: ignore[reportMissingModuleSource]
+from .ledgera_core import (  # pyright: ignore[reportMissingModuleSource]
     build_rate,
     calculate_daily_burn,
     convert_amount,

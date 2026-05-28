@@ -398,6 +398,9 @@ class SQLiteRecordRepository(
             debt_payments=debt_payments,
         )
         self._normalize_tag_ids()
+        # Rust read helpers use separate SQLite connections, so normalization
+        # must be visible outside the current Python connection immediately.
+        self._conn.commit()
 
     @staticmethod
     def _select_record_columns() -> str:
