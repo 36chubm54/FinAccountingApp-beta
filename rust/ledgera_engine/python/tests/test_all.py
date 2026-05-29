@@ -11,6 +11,29 @@ class _LedgeraCoreModule(Protocol):
 
     def calculate_daily_burn(self, total_spent: float, days_passed: int) -> float: ...
 
+    def currency_default_rates_for_base(
+        self, base_currency: str, rates: dict[str, float]
+    ) -> dict[str, float]: ...
+
+    def currency_rate_for(
+        self, currency: str, base_currency: str, rates: dict[str, float]
+    ) -> float: ...
+
+    def currency_resolve_provider_order(
+        self,
+        base_currency: str,
+        provider_mode: str,
+        primary_provider: str,
+        fallback_provider: str,
+        commercial_fallback_provider: str,
+        enable_cbr: bool,
+        provider_order: list[str] | None = None,
+    ) -> list[str]: ...
+
+    def metrics_tag_coverage(
+        self, db_path: str, start_date: str, end_date: str
+    ) -> dict[str, object]: ...
+
     def minor_to_money(self, value: object) -> float: ...
 
     def money_diff_text(self, left: object, right: object) -> str: ...
@@ -33,6 +56,12 @@ class _LedgeraCoreModule(Protocol):
 
 
 ledgera_core = cast(_LedgeraCoreModule, _ledgera_core)
+
+
+def _assert_callable_export(name: str) -> None:
+    export = getattr(_ledgera_core, name, None)
+    if not callable(export):
+        pytest.skip(f"ledgera_core extension does not expose alpha.2 export: {name}")
 
 
 def test_convert_amount():
@@ -64,3 +93,29 @@ def test_decimal_parity_text_helpers():
     assert ledgera_core.rate_to_text("1.2") == "1.200000"
     assert ledgera_core.money_diff_text("10.005", "1.00") == "9.01"
     assert ledgera_core.rate_diff_text("1.2345675", "0.2345674") == "1.000001"
+
+
+def test_currency_parity_helpers():
+    _assert_callable_export("currency_rate_for")
+    _assert_callable_export("currency_default_rates_for_base")
+    _assert_callable_export("currency_resolve_provider_order")
+
+    default_rates = {"USD": 500.0, "EUR": 590.0, "RUB": 6.5}
+    assert ledgera_core.currency_rate_for("KZT", "KZT", default_rates) == pytest.approx(1.0)
+    assert ledgera_core.currency_rate_for("usd", "KZT", default_rates) == pytest.approx(500.0)
+    with pytest.raises(ValueError, match="Currency is required"):
+        ledgera_core.currency_rate_for("", "KZT", default_rates)
+    with pytest.raises(ValueError, match="unsupported currency"):
+        ledgera_core.currency_rate_for(" usd ", "KZT", default_rates)
+    assert ledgera_core.currency_default_rates_for_base("USD", default_rates)[
+        "KZT"
+    ] == pytest.approx(0.002)
+    assert ledgera_core.currency_resolve_provider_order(
+        "KZT",
+        "personal",
+        "nbk",
+        "exchange_rate",
+        "exchange_rate",
+        False,
+        None,
+    ) == ["nbk", "exchange_rate", "static"]

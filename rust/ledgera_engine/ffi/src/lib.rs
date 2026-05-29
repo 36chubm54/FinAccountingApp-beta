@@ -1,13 +1,25 @@
 use ledgera_engine_storage::{
-    MandatoryExpenseRow, RecordRow, TransferRow, WalletRow, cashflow_sum as storage_cashflow_sum,
+    CategoryMetricRow, MandatoryExpenseRow, MonthlyCashflowRow, MonthlyCumulativeRow,
+    MonthlySummaryRow, NetWorthDeltaRow, RecordRow, TagCoverageRow, TagMetricRow, TransferRow,
+    WalletBalanceRow, WalletRow, cashflow_sum as storage_cashflow_sum,
     mandatory_expense_row as storage_mandatory_expense_row,
     mandatory_expense_rows as storage_mandatory_expense_rows,
-    record_get_row as storage_record_get_row, record_list_rows as storage_record_list_rows,
-    record_rows_by_tag as storage_record_rows_by_tag,
+    metrics_burn_rate as storage_metrics_burn_rate,
+    metrics_income_by_category as storage_metrics_income_by_category,
+    metrics_monthly_summary as storage_metrics_monthly_summary,
+    metrics_savings_rate as storage_metrics_savings_rate,
+    metrics_spending_by_category as storage_metrics_spending_by_category,
+    metrics_spending_by_tag as storage_metrics_spending_by_tag,
+    metrics_tag_coverage as storage_metrics_tag_coverage, record_get_row as storage_record_get_row,
+    record_list_rows as storage_record_list_rows, record_rows_by_tag as storage_record_rows_by_tag,
+    timeline_cumulative_income_expense as storage_timeline_cumulative_income_expense,
+    timeline_monthly_cashflow as storage_timeline_monthly_cashflow,
+    timeline_net_worth_monthly_deltas as storage_timeline_net_worth_monthly_deltas,
     transfer_id_by_record_index as storage_transfer_id_by_record_index,
-    transfer_list_rows as storage_transfer_list_rows, wallet_balance_parts as storage_wallet_balance_parts,
-    wallet_balance_rows as storage_wallet_balance_rows, wallet_list_rows as storage_wallet_list_rows,
-    WalletBalanceRow,
+    transfer_list_rows as storage_transfer_list_rows,
+    wallet_balance_parts as storage_wallet_balance_parts,
+    wallet_balance_rows as storage_wallet_balance_rows,
+    wallet_list_rows as storage_wallet_list_rows,
 };
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -119,10 +131,7 @@ fn wallet_balance_parts(
 }
 
 #[pyfunction]
-fn wallet_balance_rows(
-    db_path: &str,
-    up_to_date: Option<&str>,
-) -> PyResult<Vec<WalletBalanceRow>> {
+fn wallet_balance_rows(db_path: &str, up_to_date: Option<&str>) -> PyResult<Vec<WalletBalanceRow>> {
     storage_wallet_balance_rows(db_path, up_to_date).map_err(core_err)
 }
 
@@ -197,6 +206,65 @@ fn record_to_dict(py: Python<'_>, row: RecordRow) -> PyResult<Py<PyAny>> {
     Ok(payload.into_any().unbind())
 }
 
+fn category_metric_to_dict(py: Python<'_>, row: CategoryMetricRow) -> PyResult<Py<PyAny>> {
+    let payload = PyDict::new(py);
+    payload.set_item("category", row.category)?;
+    payload.set_item("total_base", row.total_base)?;
+    payload.set_item("record_count", row.record_count)?;
+    Ok(payload.into_any().unbind())
+}
+
+fn tag_metric_to_dict(py: Python<'_>, row: TagMetricRow) -> PyResult<Py<PyAny>> {
+    let payload = PyDict::new(py);
+    payload.set_item("tag", row.tag)?;
+    payload.set_item("color", row.color)?;
+    payload.set_item("total_base", row.total_base)?;
+    payload.set_item("record_count", row.record_count)?;
+    Ok(payload.into_any().unbind())
+}
+
+fn tag_coverage_to_dict(py: Python<'_>, row: TagCoverageRow) -> PyResult<Py<PyAny>> {
+    let payload = PyDict::new(py);
+    payload.set_item("tagged_count", row.tagged_count)?;
+    payload.set_item("total_count", row.total_count)?;
+    payload.set_item("coverage_pct", row.coverage_pct)?;
+    Ok(payload.into_any().unbind())
+}
+
+fn monthly_summary_to_dict(py: Python<'_>, row: MonthlySummaryRow) -> PyResult<Py<PyAny>> {
+    let payload = PyDict::new(py);
+    payload.set_item("month", row.month)?;
+    payload.set_item("income", row.income)?;
+    payload.set_item("expenses", row.expenses)?;
+    payload.set_item("cashflow", row.cashflow)?;
+    payload.set_item("savings_rate", row.savings_rate)?;
+    Ok(payload.into_any().unbind())
+}
+
+fn monthly_cashflow_to_dict(py: Python<'_>, row: MonthlyCashflowRow) -> PyResult<Py<PyAny>> {
+    let payload = PyDict::new(py);
+    payload.set_item("month", row.month)?;
+    payload.set_item("income", row.income)?;
+    payload.set_item("expenses", row.expenses)?;
+    payload.set_item("cashflow", row.cashflow)?;
+    Ok(payload.into_any().unbind())
+}
+
+fn monthly_cumulative_to_dict(py: Python<'_>, row: MonthlyCumulativeRow) -> PyResult<Py<PyAny>> {
+    let payload = PyDict::new(py);
+    payload.set_item("month", row.month)?;
+    payload.set_item("cumulative_income", row.cumulative_income)?;
+    payload.set_item("cumulative_expenses", row.cumulative_expenses)?;
+    Ok(payload.into_any().unbind())
+}
+
+fn net_worth_delta_to_dict(py: Python<'_>, row: NetWorthDeltaRow) -> PyResult<Py<PyAny>> {
+    let payload = PyDict::new(py);
+    payload.set_item("month", row.month)?;
+    payload.set_item("running_delta", row.running_delta)?;
+    Ok(payload.into_any().unbind())
+}
+
 #[pyfunction]
 fn wallet_list_rows(py: Python<'_>, db_path: &str) -> PyResult<Vec<Py<PyAny>>> {
     storage_wallet_list_rows(db_path)
@@ -267,6 +335,167 @@ fn record_rows_by_tag(py: Python<'_>, db_path: &str, tag_name: &str) -> PyResult
         .collect()
 }
 
+#[pyfunction]
+fn metrics_savings_rate(db_path: &str, start_date: &str, end_date: &str) -> PyResult<f64> {
+    storage_metrics_savings_rate(db_path, start_date, end_date).map_err(core_err)
+}
+
+#[pyfunction]
+fn metrics_burn_rate(db_path: &str, start_date: &str, end_date: &str, days: i64) -> PyResult<f64> {
+    storage_metrics_burn_rate(db_path, start_date, end_date, days).map_err(core_err)
+}
+
+#[pyfunction]
+fn metrics_spending_by_category(
+    py: Python<'_>,
+    db_path: &str,
+    start_date: &str,
+    end_date: &str,
+    limit: Option<i64>,
+) -> PyResult<Vec<Py<PyAny>>> {
+    storage_metrics_spending_by_category(db_path, start_date, end_date, limit)
+        .map_err(core_err)?
+        .into_iter()
+        .map(|row| category_metric_to_dict(py, row))
+        .collect()
+}
+
+#[pyfunction]
+fn metrics_income_by_category(
+    py: Python<'_>,
+    db_path: &str,
+    start_date: &str,
+    end_date: &str,
+    limit: Option<i64>,
+) -> PyResult<Vec<Py<PyAny>>> {
+    storage_metrics_income_by_category(db_path, start_date, end_date, limit)
+        .map_err(core_err)?
+        .into_iter()
+        .map(|row| category_metric_to_dict(py, row))
+        .collect()
+}
+
+#[pyfunction]
+fn metrics_spending_by_tag(
+    py: Python<'_>,
+    db_path: &str,
+    start_date: &str,
+    end_date: &str,
+    limit: Option<i64>,
+) -> PyResult<Vec<Py<PyAny>>> {
+    storage_metrics_spending_by_tag(db_path, start_date, end_date, limit)
+        .map_err(core_err)?
+        .into_iter()
+        .map(|row| tag_metric_to_dict(py, row))
+        .collect()
+}
+
+#[pyfunction]
+fn metrics_tag_coverage(
+    py: Python<'_>,
+    db_path: &str,
+    start_date: &str,
+    end_date: &str,
+) -> PyResult<Py<PyAny>> {
+    storage_metrics_tag_coverage(db_path, start_date, end_date)
+        .map_err(core_err)
+        .and_then(|row| tag_coverage_to_dict(py, row))
+}
+
+#[pyfunction]
+fn metrics_monthly_summary(
+    py: Python<'_>,
+    db_path: &str,
+    start_date: Option<&str>,
+    end_date: Option<&str>,
+) -> PyResult<Vec<Py<PyAny>>> {
+    storage_metrics_monthly_summary(db_path, start_date, end_date)
+        .map_err(core_err)?
+        .into_iter()
+        .map(|row| monthly_summary_to_dict(py, row))
+        .collect()
+}
+
+#[pyfunction]
+fn timeline_monthly_cashflow(
+    py: Python<'_>,
+    db_path: &str,
+    start_date: Option<&str>,
+    end_date: Option<&str>,
+) -> PyResult<Vec<Py<PyAny>>> {
+    storage_timeline_monthly_cashflow(db_path, start_date, end_date)
+        .map_err(core_err)?
+        .into_iter()
+        .map(|row| monthly_cashflow_to_dict(py, row))
+        .collect()
+}
+
+#[pyfunction]
+fn timeline_cumulative_income_expense(py: Python<'_>, db_path: &str) -> PyResult<Vec<Py<PyAny>>> {
+    storage_timeline_cumulative_income_expense(db_path)
+        .map_err(core_err)?
+        .into_iter()
+        .map(|row| monthly_cumulative_to_dict(py, row))
+        .collect()
+}
+
+#[pyfunction]
+fn timeline_net_worth_monthly_deltas(py: Python<'_>, db_path: &str) -> PyResult<Vec<Py<PyAny>>> {
+    storage_timeline_net_worth_monthly_deltas(db_path)
+        .map_err(core_err)?
+        .into_iter()
+        .map(|row| net_worth_delta_to_dict(py, row))
+        .collect()
+}
+
+#[pyfunction]
+fn currency_rate_for(
+    currency: &str,
+    base_currency: &str,
+    rates: &Bound<'_, PyAny>,
+) -> PyResult<f64> {
+    let rates_map = rates.extract::<std::collections::HashMap<String, f64>>()?;
+    ledgera_engine_core::currency_rate_for(currency, base_currency, &rates_map).map_err(core_err)
+}
+
+#[pyfunction]
+fn currency_default_rates_for_base(
+    py: Python<'_>,
+    base_currency: &str,
+    rates: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyAny>> {
+    let rates_map = rates.extract::<std::collections::HashMap<String, f64>>()?;
+    let payload = PyDict::new(py);
+    for (code, rate) in
+        ledgera_engine_core::currency_default_rates_for_base(base_currency, &rates_map)
+            .map_err(core_err)?
+    {
+        payload.set_item(code, rate)?;
+    }
+    Ok(payload.into_any().unbind())
+}
+
+#[pyfunction]
+fn currency_resolve_provider_order(
+    base_currency: &str,
+    provider_mode: &str,
+    primary_provider: &str,
+    fallback_provider: &str,
+    commercial_fallback_provider: &str,
+    enable_cbr: bool,
+    provider_order: Option<Vec<String>>,
+) -> PyResult<Vec<String>> {
+    Ok(ledgera_engine_core::currency_resolve_provider_order(
+        base_currency,
+        provider_mode,
+        primary_provider,
+        fallback_provider,
+        commercial_fallback_provider,
+        enable_cbr,
+        provider_order,
+    ))
+}
+
 #[pymodule]
 fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(convert_amount, m)?)?;
@@ -293,5 +522,18 @@ fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(record_list_rows, m)?)?;
     m.add_function(wrap_pyfunction!(record_get_row, m)?)?;
     m.add_function(wrap_pyfunction!(record_rows_by_tag, m)?)?;
+    m.add_function(wrap_pyfunction!(metrics_savings_rate, m)?)?;
+    m.add_function(wrap_pyfunction!(metrics_burn_rate, m)?)?;
+    m.add_function(wrap_pyfunction!(metrics_spending_by_category, m)?)?;
+    m.add_function(wrap_pyfunction!(metrics_income_by_category, m)?)?;
+    m.add_function(wrap_pyfunction!(metrics_spending_by_tag, m)?)?;
+    m.add_function(wrap_pyfunction!(metrics_tag_coverage, m)?)?;
+    m.add_function(wrap_pyfunction!(metrics_monthly_summary, m)?)?;
+    m.add_function(wrap_pyfunction!(timeline_monthly_cashflow, m)?)?;
+    m.add_function(wrap_pyfunction!(timeline_cumulative_income_expense, m)?)?;
+    m.add_function(wrap_pyfunction!(timeline_net_worth_monthly_deltas, m)?)?;
+    m.add_function(wrap_pyfunction!(currency_rate_for, m)?)?;
+    m.add_function(wrap_pyfunction!(currency_default_rates_for_base, m)?)?;
+    m.add_function(wrap_pyfunction!(currency_resolve_provider_order, m)?)?;
     Ok(())
 }
