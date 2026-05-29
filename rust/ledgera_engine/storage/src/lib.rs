@@ -127,11 +127,21 @@ pub struct MetricsPeriodSnapshot {
     pub monthly_cashflow: Vec<MonthlyCashflowRow>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct MetricsRefreshSnapshot {
+    pub savings_rate: f64,
+    pub burn_rate: f64,
+    pub spending_by_category: Vec<CategoryMetricRow>,
+    pub income_by_category: Vec<CategoryMetricRow>,
+    pub spending_by_tag: Vec<TagMetricRow>,
+    pub monthly_summary: Vec<MonthlySummaryRow>,
+}
+
 mod metrics;
 mod timeline;
 
 pub use metrics::{
-    metrics_period_snapshot,
+    metrics_period_snapshot, metrics_refresh_snapshot,
     metrics_burn_rate, metrics_income_by_category, metrics_monthly_summary, metrics_savings_rate,
     metrics_spending_by_category, metrics_spending_by_tag, metrics_tag_coverage,
 };

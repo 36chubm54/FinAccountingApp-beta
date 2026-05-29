@@ -24,6 +24,7 @@ metrics_income_by_category = getattr(_ledgera_core, "metrics_income_by_category"
 metrics_monthly_summary = getattr(_ledgera_core, "metrics_monthly_summary", None)
 metrics_period_snapshot = getattr(_ledgera_core, "metrics_period_snapshot", None)
 metrics_period_snapshot_compact = getattr(_ledgera_core, "metrics_period_snapshot_compact", None)
+metrics_refresh_snapshot_compact = getattr(_ledgera_core, "metrics_refresh_snapshot_compact", None)
 metrics_savings_rate = getattr(_ledgera_core, "metrics_savings_rate", None)
 metrics_spending_by_category = getattr(_ledgera_core, "metrics_spending_by_category", None)
 metrics_spending_by_tag = getattr(_ledgera_core, "metrics_spending_by_tag", None)
@@ -80,6 +81,8 @@ if metrics_period_snapshot is not None:
     __all__.append("metrics_period_snapshot")
 if metrics_period_snapshot_compact is not None:
     __all__.append("metrics_period_snapshot_compact")
+if metrics_refresh_snapshot_compact is not None:
+    __all__.append("metrics_refresh_snapshot_compact")
 if metrics_savings_rate is not None:
     __all__.append("metrics_savings_rate")
 if metrics_spending_by_category is not None:

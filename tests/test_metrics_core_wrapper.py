@@ -143,6 +143,151 @@ def test_period_snapshot_service_rust_path_matches_python_fallback(tmp_path: Pat
         repo.close()
 
 
+def test_refresh_snapshot_service_rust_path_matches_python_fallback(tmp_path: Path) -> None:
+    repo = _build_metrics_repo(tmp_path)
+    try:
+        rust_snapshot = PeriodAnalyticsSnapshotService(repo).get_refresh_snapshot(
+            "2026-01-01",
+            "2026-02-28",
+            category_limit=10,
+            tag_limit=10,
+        )
+
+        snapshot_rust_core = period_snapshot_module._RUST_METRICS_CORE
+        metrics_rust_core = metrics_module._RUST_METRICS_CORE
+        period_snapshot_module._RUST_METRICS_CORE = None
+        metrics_module._RUST_METRICS_CORE = None
+        try:
+            fallback_snapshot = PeriodAnalyticsSnapshotService(repo).get_refresh_snapshot(
+                "2026-01-01",
+                "2026-02-28",
+                category_limit=10,
+                tag_limit=10,
+            )
+        finally:
+            period_snapshot_module._RUST_METRICS_CORE = snapshot_rust_core
+            metrics_module._RUST_METRICS_CORE = metrics_rust_core
+
+        assert rust_snapshot == fallback_snapshot
+    finally:
+        repo.close()
+
+
+def test_refresh_snapshot_matches_fallback_for_equal_category_totals(tmp_path: Path) -> None:
+    db_path = tmp_path / "metrics_ties.db"
+    _init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        _insert_wallet(conn, 1)
+        _insert_record(
+            conn,
+            record_type="expense",
+            date="2026-01-01",
+            wallet_id=1,
+            amount_base=100.0,
+            category="B",
+        )
+        _insert_record(
+            conn,
+            record_type="expense",
+            date="2026-01-02",
+            wallet_id=1,
+            amount_base=100.0,
+            category="A",
+        )
+        _insert_record(
+            conn,
+            record_type="income",
+            date="2026-01-03",
+            wallet_id=1,
+            amount_base=100.0,
+            category="Y",
+        )
+        _insert_record(
+            conn,
+            record_type="income",
+            date="2026-01-04",
+            wallet_id=1,
+            amount_base=100.0,
+            category="X",
+        )
+    finally:
+        conn.close()
+
+    repo = SQLiteRecordRepository(str(db_path), schema_path=_schema_path())
+    try:
+        rust_snapshot = PeriodAnalyticsSnapshotService(repo).get_refresh_snapshot(
+            "2026-01-01",
+            "2026-01-31",
+        )
+        snapshot_rust_core = period_snapshot_module._RUST_METRICS_CORE
+        metrics_rust_core = metrics_module._RUST_METRICS_CORE
+        period_snapshot_module._RUST_METRICS_CORE = None
+        metrics_module._RUST_METRICS_CORE = None
+        try:
+            fallback_snapshot = PeriodAnalyticsSnapshotService(repo).get_refresh_snapshot(
+                "2026-01-01",
+                "2026-01-31",
+            )
+        finally:
+            period_snapshot_module._RUST_METRICS_CORE = snapshot_rust_core
+            metrics_module._RUST_METRICS_CORE = metrics_rust_core
+
+        assert rust_snapshot == fallback_snapshot
+    finally:
+        repo.close()
+
+
+def test_refresh_snapshot_no_tags_fast_path_matches_python_fallback(tmp_path: Path) -> None:
+    db_path = tmp_path / "metrics_no_tags.db"
+    _init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        _insert_wallet(conn, 1)
+        _insert_record(
+            conn,
+            record_type="income",
+            date="2026-01-01",
+            wallet_id=1,
+            amount_base=500.0,
+            category="Salary",
+        )
+        _insert_record(
+            conn,
+            record_type="expense",
+            date="2026-01-02",
+            wallet_id=1,
+            amount_base=100.0,
+            category="Food",
+        )
+    finally:
+        conn.close()
+
+    repo = SQLiteRecordRepository(str(db_path), schema_path=_schema_path())
+    try:
+        rust_snapshot = PeriodAnalyticsSnapshotService(repo).get_refresh_snapshot(
+            "2026-01-01",
+            "2026-01-31",
+        )
+        snapshot_rust_core = period_snapshot_module._RUST_METRICS_CORE
+        metrics_rust_core = metrics_module._RUST_METRICS_CORE
+        period_snapshot_module._RUST_METRICS_CORE = None
+        metrics_module._RUST_METRICS_CORE = None
+        try:
+            fallback_snapshot = PeriodAnalyticsSnapshotService(repo).get_refresh_snapshot(
+                "2026-01-01",
+                "2026-01-31",
+            )
+        finally:
+            period_snapshot_module._RUST_METRICS_CORE = snapshot_rust_core
+            metrics_module._RUST_METRICS_CORE = metrics_rust_core
+
+        assert rust_snapshot == fallback_snapshot
+        assert rust_snapshot.spending_by_tag == []
+    finally:
+        repo.close()
+
+
 def test_metrics_service_rust_path_matches_fallback_for_edge_cases(tmp_path: Path) -> None:
     db_path = tmp_path / "metrics_edges.db"
     _init_db(db_path)

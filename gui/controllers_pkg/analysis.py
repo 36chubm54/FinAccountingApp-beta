@@ -10,6 +10,7 @@ from services.analytics.balance import BalanceService, CashflowResult, WalletBal
 from services.analytics.dashboard import DashboardService
 from services.analytics.metrics import MetricsService
 from services.analytics.period_snapshot import (
+    AnalyticsRefreshSnapshot,
     PeriodAnalyticsSnapshot,
     PeriodAnalyticsSnapshotService,
 )
@@ -69,7 +70,7 @@ class ControllerAnalysisFacade:
             SqlQueryRepository,
             self._require_repository_capability(
                 SqlQueryRepository,
-                "Analytics Snapshot Engine is supported only for repositories with SQL query capabilities", # noqa: E501
+                "Analytics Snapshot Engine is supported only for repositories with SQL query capabilities",  # noqa: E501
             ),
         )
         return PeriodAnalyticsSnapshotService(repo)
@@ -133,6 +134,21 @@ class ControllerAnalysisFacade:
         tag_limit: int | None = None,
     ) -> PeriodAnalyticsSnapshot:
         return self._period_snapshot_service().get_period_snapshot(
+            start_date,
+            end_date,
+            category_limit=category_limit,
+            tag_limit=tag_limit,
+        )
+
+    def get_refresh_snapshot(
+        self,
+        start_date: str,
+        end_date: str,
+        *,
+        category_limit: int | None = None,
+        tag_limit: int | None = None,
+    ) -> AnalyticsRefreshSnapshot:
+        return self._period_snapshot_service().get_refresh_snapshot(
             start_date,
             end_date,
             category_limit=category_limit,

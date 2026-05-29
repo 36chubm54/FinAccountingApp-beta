@@ -1,3 +1,6 @@
+import os
+import sqlite3
+from pathlib import Path
 from typing import Protocol, cast
 
 import ledgera_core as _ledgera_core
@@ -45,6 +48,16 @@ class _LedgeraCoreModule(Protocol):
     ) -> dict[str, object]: ...
 
     def metrics_period_snapshot_compact(
+        self,
+        db_path: str,
+        start_date: str,
+        end_date: str,
+        days: int,
+        category_limit: int | None = None,
+        tag_limit: int | None = None,
+    ) -> tuple[object, ...]: ...
+
+    def metrics_refresh_snapshot_compact(
         self,
         db_path: str,
         start_date: str,
@@ -142,3 +155,66 @@ def test_currency_parity_helpers():
         False,
         None,
     ) == ["nbk", "exchange_rate", "static"]
+
+
+def test_metrics_refresh_snapshot_compact_smoke():
+    _assert_callable_export("metrics_refresh_snapshot_compact")
+    db_dir = Path.cwd() / "tests" / "_tmp"
+    db_dir.mkdir(exist_ok=True)
+    db_path = db_dir / f"refresh_snapshot_{os.getpid()}.db"
+    db_path.unlink(missing_ok=True)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE records (
+                id INTEGER PRIMARY KEY,
+                type TEXT NOT NULL,
+                date TEXT NOT NULL,
+                transfer_id INTEGER,
+                amount_base REAL NOT NULL,
+                amount_base_minor INTEGER,
+                category TEXT NOT NULL
+            );
+            CREATE TABLE tags (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                color TEXT
+            );
+            CREATE TABLE record_tags (
+                record_id INTEGER NOT NULL,
+                tag_id INTEGER NOT NULL
+            );
+            """
+        )
+        conn.executemany(
+            "INSERT INTO records "
+            "(type, date, transfer_id, amount_base, amount_base_minor, category) "
+            "VALUES (?, ?, NULL, ?, ?, ?)",
+            [
+                ("income", "2026-01-01", 100.0, 10000, "Salary"),
+                ("expense", "2026-01-02", 25.0, 2500, "Food"),
+                ("mandatory_expense", "2026-01-03", 10.0, 1000, "Rent"),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    snapshot = ledgera_core.metrics_refresh_snapshot_compact(
+        str(db_path),
+        "2026-01-01",
+        "2026-01-31",
+        31,
+        None,
+        None,
+    )
+
+    assert snapshot[0] == pytest.approx(65.0)
+    assert snapshot[1] == pytest.approx(1.13)
+    assert snapshot[2] == [("Food", 25.0, 1), ("Rent", 10.0, 1)]
+    assert snapshot[3] == [("Salary", 100.0, 1)]
+    assert snapshot[4] == []
+    assert snapshot[5] == [("2026-01", 100.0, 35.0, 65.0, 65.0)]
+    ledgera_core.storage_clear_read_cache()
+    db_path.unlink(missing_ok=True)

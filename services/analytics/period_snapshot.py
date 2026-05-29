@@ -28,6 +28,16 @@ class PeriodAnalyticsSnapshot:
     monthly_cashflow: list[MonthlyCashflow]
 
 
+@dataclass(frozen=True)
+class AnalyticsRefreshSnapshot:
+    savings_rate: float
+    burn_rate: float
+    spending_by_category: list[CategorySpend]
+    income_by_category: list[CategorySpend]
+    spending_by_tag: list[TagSpend]
+    monthly_summary: list[MonthlySummary]
+
+
 _RUST_METRICS_CORE = get_metrics_core()
 
 _CompactSnapshot = tuple[
@@ -39,6 +49,14 @@ _CompactSnapshot = tuple[
     tuple[int, int, float],
     list[tuple[str, float, float, float, float]],
     list[tuple[str, float, float, float]],
+]
+_CompactRefreshSnapshot = tuple[
+    float,
+    float,
+    list[tuple[str, float, int]],
+    list[tuple[str, float, int]],
+    list[tuple[str, str, float, int]],
+    list[tuple[str, float, float, float, float]],
 ]
 
 
@@ -113,6 +131,52 @@ class PeriodAnalyticsSnapshotService:
             monthly_cashflow=timeline.get_monthly_cashflow(start_date, end_date),
         )
 
+    def get_refresh_snapshot(
+        self,
+        start_date: str,
+        end_date: str,
+        *,
+        category_limit: int | None = None,
+        tag_limit: int | None = None,
+    ) -> AnalyticsRefreshSnapshot:
+        if self._can_use_rust():
+            days = self._days_in_range(start_date, end_date)
+            if days > 0:
+                rust_core = cast(RustMetricsCore, _RUST_METRICS_CORE)
+                compact_snapshot = getattr(rust_core, "metrics_refresh_snapshot_compact", None)
+                if callable(compact_snapshot):
+                    return self._from_rust_refresh_compact_payload(
+                        cast(
+                            _CompactRefreshSnapshot,
+                            compact_snapshot(
+                                self._db_path(),
+                                str(start_date),
+                                str(end_date),
+                                int(days),
+                                category_limit,
+                                tag_limit,
+                            ),
+                        )
+                    )
+
+        metrics = MetricsService(self._repo)
+        return AnalyticsRefreshSnapshot(
+            savings_rate=metrics.get_savings_rate(start_date, end_date),
+            burn_rate=metrics.get_burn_rate(start_date, end_date),
+            spending_by_category=metrics.get_spending_by_category(
+                start_date,
+                end_date,
+                limit=category_limit,
+            ),
+            income_by_category=metrics.get_income_by_category(
+                start_date,
+                end_date,
+                limit=category_limit,
+            ),
+            spending_by_tag=metrics.get_spending_by_tag(start_date, end_date, limit=tag_limit),
+            monthly_summary=metrics.get_monthly_summary(start_date, end_date),
+        )
+
     def _from_rust_compact_payload(self, payload: _CompactSnapshot) -> PeriodAnalyticsSnapshot:
         (
             savings_rate,
@@ -175,6 +239,57 @@ class PeriodAnalyticsSnapshotService:
                     cashflow=float(cashflow),
                 )
                 for month, income, expenses, cashflow in monthly_cashflow
+            ],
+        )
+
+    def _from_rust_refresh_compact_payload(
+        self, payload: _CompactRefreshSnapshot
+    ) -> AnalyticsRefreshSnapshot:
+        (
+            savings_rate,
+            burn_rate,
+            spending_by_category,
+            income_by_category,
+            spending_by_tag,
+            monthly_summary,
+        ) = payload
+        return AnalyticsRefreshSnapshot(
+            savings_rate=float(savings_rate),
+            burn_rate=float(burn_rate),
+            spending_by_category=[
+                CategorySpend(
+                    category=str(category),
+                    total_base=float(total_base),
+                    record_count=int(record_count),
+                )
+                for category, total_base, record_count in spending_by_category
+            ],
+            income_by_category=[
+                CategorySpend(
+                    category=str(category),
+                    total_base=float(total_base),
+                    record_count=int(record_count),
+                )
+                for category, total_base, record_count in income_by_category
+            ],
+            spending_by_tag=[
+                TagSpend(
+                    tag=str(tag),
+                    color=str(color or ""),
+                    total_base=float(total_base),
+                    record_count=int(record_count),
+                )
+                for tag, color, total_base, record_count in spending_by_tag
+            ],
+            monthly_summary=[
+                MonthlySummary(
+                    month=str(month),
+                    income=float(income),
+                    expenses=float(expenses),
+                    cashflow=float(cashflow),
+                    savings_rate=float(monthly_savings_rate),
+                )
+                for month, income, expenses, cashflow, monthly_savings_rate in monthly_summary
             ],
         )
 

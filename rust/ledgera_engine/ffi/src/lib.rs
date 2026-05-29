@@ -5,6 +5,7 @@ use ledgera_engine_storage::{
     mandatory_expense_row as storage_mandatory_expense_row,
     mandatory_expense_rows as storage_mandatory_expense_rows,
     metrics_period_snapshot as storage_metrics_period_snapshot,
+    metrics_refresh_snapshot as storage_metrics_refresh_snapshot,
     metrics_burn_rate as storage_metrics_burn_rate,
     metrics_income_by_category as storage_metrics_income_by_category,
     metrics_monthly_summary as storage_metrics_monthly_summary,
@@ -40,6 +41,14 @@ type CompactMetricsPeriodSnapshot = (
     (i64, i64, f64),
     CompactMonthlySummaryRows,
     CompactMonthlyCashflowRows,
+);
+type CompactMetricsRefreshSnapshot = (
+    f64,
+    f64,
+    CompactCategoryRows,
+    CompactCategoryRows,
+    CompactTagRows,
+    CompactMonthlySummaryRows,
 );
 
 fn core_err(err: String) -> PyErr {
@@ -561,6 +570,58 @@ fn metrics_period_snapshot_compact(
 }
 
 #[pyfunction]
+fn metrics_refresh_snapshot_compact(
+    db_path: &str,
+    start_date: &str,
+    end_date: &str,
+    days: i64,
+    category_limit: Option<i64>,
+    tag_limit: Option<i64>,
+) -> PyResult<CompactMetricsRefreshSnapshot> {
+    let snapshot = storage_metrics_refresh_snapshot(
+        db_path,
+        start_date,
+        end_date,
+        days,
+        category_limit,
+        tag_limit,
+    )
+    .map_err(core_err)?;
+    Ok((
+        snapshot.savings_rate,
+        snapshot.burn_rate,
+        snapshot
+            .spending_by_category
+            .into_iter()
+            .map(|row| (row.category, row.total_base, row.record_count))
+            .collect(),
+        snapshot
+            .income_by_category
+            .into_iter()
+            .map(|row| (row.category, row.total_base, row.record_count))
+            .collect(),
+        snapshot
+            .spending_by_tag
+            .into_iter()
+            .map(|row| (row.tag, row.color, row.total_base, row.record_count))
+            .collect(),
+        snapshot
+            .monthly_summary
+            .into_iter()
+            .map(|row| {
+                (
+                    row.month,
+                    row.income,
+                    row.expenses,
+                    row.cashflow,
+                    row.savings_rate,
+                )
+            })
+            .collect(),
+    ))
+}
+
+#[pyfunction]
 fn metrics_monthly_summary(
     py: Python<'_>,
     db_path: &str,
@@ -694,6 +755,7 @@ fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(metrics_tag_coverage, m)?)?;
     m.add_function(wrap_pyfunction!(metrics_period_snapshot, m)?)?;
     m.add_function(wrap_pyfunction!(metrics_period_snapshot_compact, m)?)?;
+    m.add_function(wrap_pyfunction!(metrics_refresh_snapshot_compact, m)?)?;
     m.add_function(wrap_pyfunction!(metrics_monthly_summary, m)?)?;
     m.add_function(wrap_pyfunction!(timeline_monthly_cashflow, m)?)?;
     m.add_function(wrap_pyfunction!(timeline_cumulative_income_expense, m)?)?;

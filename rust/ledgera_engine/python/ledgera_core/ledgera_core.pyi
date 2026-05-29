@@ -45,6 +45,21 @@ def metrics_period_snapshot_compact(
     list[tuple[str, float, float, float, float]],
     list[tuple[str, float, float, float]],
 ]: ...
+def metrics_refresh_snapshot_compact(
+    db_path: str,
+    start_date: str,
+    end_date: str,
+    days: int,
+    category_limit: int | None = None,
+    tag_limit: int | None = None,
+) -> tuple[
+    float,
+    float,
+    list[tuple[str, float, int]],
+    list[tuple[str, float, int]],
+    list[tuple[str, str, float, int]],
+    list[tuple[str, float, float, float, float]],
+]: ...
 def metrics_savings_rate(db_path: str, start_date: str, end_date: str) -> float: ...
 def metrics_spending_by_category(
     db_path: str, start_date: str, end_date: str, limit: int | None = None

@@ -104,6 +104,23 @@ class RustMetricsCore(Protocol):
         list[tuple[str, float, float, float]],
     ]: ...
 
+    def metrics_refresh_snapshot_compact(
+        self,
+        db_path: str,
+        start_date: str,
+        end_date: str,
+        days: int,
+        category_limit: int | None = None,
+        tag_limit: int | None = None,
+    ) -> tuple[
+        float,
+        float,
+        list[tuple[str, float, int]],
+        list[tuple[str, float, int]],
+        list[tuple[str, str, float, int]],
+        list[tuple[str, float, float, float, float]],
+    ]: ...
+
     def metrics_savings_rate(self, db_path: str, start_date: str, end_date: str) -> float: ...
 
     def metrics_spending_by_category(
@@ -188,6 +205,7 @@ _METRICS_SYMBOLS = (
     "metrics_monthly_summary",
     "metrics_period_snapshot",
     "metrics_period_snapshot_compact",
+    "metrics_refresh_snapshot_compact",
     "metrics_savings_rate",
     "metrics_spending_by_category",
     "metrics_spending_by_tag",

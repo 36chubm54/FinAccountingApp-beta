@@ -120,6 +120,7 @@ def test_bridge_returns_typed_cores_when_symbols_are_complete(monkeypatch) -> No
         "metrics_monthly_summary",
         "metrics_period_snapshot",
         "metrics_period_snapshot_compact",
+        "metrics_refresh_snapshot_compact",
         "metrics_savings_rate",
         "metrics_spending_by_category",
         "metrics_spending_by_tag",

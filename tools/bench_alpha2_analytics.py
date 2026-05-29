@@ -15,6 +15,7 @@ from infrastructure.sqlite_repository import SQLiteRecordRepository  # noqa: E40
 
 SCHEMA_PATH = ROOT / "db" / "schema.sql"
 TMP_ROOT = ROOT / "tests" / "_tmp"
+RUST_ENGINE_ROOT = ROOT / "rust" / "ledgera_engine"
 
 
 def _remove_if_unlocked(path: Path) -> None:
@@ -90,31 +91,76 @@ def _clear_rust_storage_cache(ledgera_bridge) -> None:
         storage_control.storage_clear_read_cache()
 
 
-def _analytics_load(snapshot_service) -> tuple[object, ...]:
-    snapshot = snapshot_service.get_period_snapshot(
+def _latest_rust_source_mtime() -> float | None:
+    source_roots = [
+        RUST_ENGINE_ROOT / "core" / "src",
+        RUST_ENGINE_ROOT / "storage" / "src",
+        RUST_ENGINE_ROOT / "ffi" / "src",
+    ]
+    mtimes = [
+        path.stat().st_mtime
+        for root in source_roots
+        if root.exists()
+        for path in root.rglob("*.rs")
+    ]
+    return max(mtimes) if mtimes else None
+
+
+def _warn_if_extension_looks_stale(extension_path: object) -> None:
+    if not extension_path:
+        return
+    extension_file = Path(str(extension_path))
+    if not extension_file.exists():
+        return
+    latest_source_mtime = _latest_rust_source_mtime()
+    if latest_source_mtime is None:
+        return
+    extension_mtime = extension_file.stat().st_mtime
+    print(f"extension_mtime: {time.ctime(extension_mtime)}")
+    print(f"latest_rust_source_mtime: {time.ctime(latest_source_mtime)}")
+    if extension_mtime < latest_source_mtime:
+        print(
+            "warning: installed ledgera_core extension looks older than Rust sources; "
+            "run maturin build and reinstall the wheel before trusting benchmark results."
+        )
+
+
+def _analytics_load(
+    snapshot_service,
+    *,
+    category_limit: int | None,
+    tag_limit: int | None,
+) -> tuple[object, ...]:
+    snapshot = snapshot_service.get_refresh_snapshot(
         "2026-01-01",
         "2026-12-31",
-        category_limit=10,
-        tag_limit=10,
+        category_limit=category_limit,
+        tag_limit=tag_limit,
     )
     return (
         snapshot.spending_by_category,
         snapshot.income_by_category,
         snapshot.spending_by_tag,
-        snapshot.tag_coverage,
         snapshot.savings_rate,
         snapshot.burn_rate,
         snapshot.monthly_summary,
-        snapshot.monthly_cashflow,
     )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Alpha.2 analytics bridge benchmark")
-    parser.add_argument("--rows", type=int, default=10_000)
-    parser.add_argument("--iterations", type=int, default=25)
+    parser.add_argument("--rows", type=int, default=50_000)
+    parser.add_argument("--iterations", type=int, default=10)
     parser.add_argument("--backend", choices=("rust", "python", "both"), default="both")
+    parser.add_argument(
+        "--limit-mode",
+        choices=("gui", "top10"),
+        default="gui",
+        help="Use gui for the real analytics refresh path, or top10 for bounded-list diagnostics.",
+    )
     args = parser.parse_args()
+    category_limit = 10 if args.limit_mode == "top10" else None
+    tag_limit = 10 if args.limit_mode == "top10" else None
 
     if args.backend == "python":
         os.environ["LEDGERA_FORCE_PYTHON_FALLBACK"] = "1"
@@ -146,17 +192,29 @@ def main() -> None:
                 )
             print(f"backend: {_backend_label(metrics_module, timeline_module)}")
             print(f"extension: {extension_path or 'unavailable'}")
-            print(f"fixture: rows={args.rows}, iterations={args.iterations}")
+            _warn_if_extension_looks_stale(extension_path)
+            print(
+                "fixture: "
+                f"rows={args.rows}, iterations={args.iterations}, limit_mode={args.limit_mode}"
+            )
             current_elapsed = _time_call(
                 "current analytics path (cold services)",
                 args.iterations,
-                lambda: _analytics_load(PeriodAnalyticsSnapshotService(repo)),
+                lambda: _analytics_load(
+                    PeriodAnalyticsSnapshotService(repo),
+                    category_limit=category_limit,
+                    tag_limit=tag_limit,
+                ),
             )
             warm_snapshot = PeriodAnalyticsSnapshotService(repo)
             _time_call(
                 "current analytics path (same service instance)",
                 args.iterations,
-                lambda: _analytics_load(warm_snapshot),
+                lambda: _analytics_load(
+                    warm_snapshot,
+                    category_limit=category_limit,
+                    tag_limit=tag_limit,
+                ),
             )
 
             if args.backend != "both":
@@ -172,7 +230,11 @@ def main() -> None:
                 fallback_elapsed = _time_call(
                     "python-fallback analytics path (cold services)",
                     args.iterations,
-                    lambda: _analytics_load(PeriodAnalyticsSnapshotService(repo)),
+                    lambda: _analytics_load(
+                        PeriodAnalyticsSnapshotService(repo),
+                        category_limit=category_limit,
+                        tag_limit=tag_limit,
+                    ),
                 )
             finally:
                 setattr(metrics_module, "_RUST_METRICS_CORE", rust_core)  # noqa: B010
