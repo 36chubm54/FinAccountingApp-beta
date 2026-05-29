@@ -4,16 +4,11 @@ import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
 from tkinter import ttk
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 
-class AnalyticsController(Protocol):
-    def get_total_balance(self, date: str | None = None) -> float: ...
-
-    def get_savings_rate(self, start_date: str, end_date: str) -> float: ...
-
-    def get_burn_rate(self, start_date: str, end_date: str) -> float: ...
-
+@runtime_checkable
+class AnalyticsSnapshotController(Protocol):
     def get_period_snapshot(
         self,
         start_date: str,
@@ -31,6 +26,14 @@ class AnalyticsController(Protocol):
         category_limit: int | None = None,
         tag_limit: int | None = None,
     ) -> Any: ...
+
+
+class AnalyticsController(Protocol):
+    def get_total_balance(self, date: str | None = None) -> float: ...
+
+    def get_savings_rate(self, start_date: str, end_date: str) -> float: ...
+
+    def get_burn_rate(self, start_date: str, end_date: str) -> float: ...
 
     def get_average_monthly_income(self, year: int, *, up_to_date: str | None = None) -> float: ...
 
