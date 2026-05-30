@@ -1,7 +1,17 @@
 use ledgera_engine_storage::{
     CategoryMetricRow, MandatoryExpenseRow, MonthlyCashflowRow, MonthlyCumulativeRow,
     MonthlySummaryRow, NetWorthDeltaRow, RecordRow, TagCoverageRow, TagMetricRow, TransferRow,
-    WalletBalanceRow, WalletRow, cashflow_sum as storage_cashflow_sum,
+    WalletBalanceRow, WalletRow, budget_batch_spent_minor as storage_budget_batch_spent_minor,
+    budget_overlap_exists as storage_budget_overlap_exists,
+    budget_spent_minor as storage_budget_spent_minor, cashflow_sum as storage_cashflow_sum,
+    debt_payment_total_minor as storage_debt_payment_total_minor,
+    debt_recalculate_payload as storage_debt_recalculate_payload,
+    debt_validate_payment_amount as storage_debt_validate_payment_amount,
+    distribution_available_months as storage_distribution_available_months,
+    distribution_history_months as storage_distribution_history_months,
+    distribution_monthly_payload as storage_distribution_monthly_payload,
+    distribution_net_income_for_period as storage_distribution_net_income_for_period,
+    distribution_validate_structure as storage_distribution_validate_structure,
     mandatory_expense_row as storage_mandatory_expense_row,
     mandatory_expense_rows as storage_mandatory_expense_rows,
     metrics_period_snapshot as storage_metrics_period_snapshot,
@@ -288,6 +298,74 @@ fn net_worth_delta_to_dict(py: Python<'_>, row: NetWorthDeltaRow) -> PyResult<Py
     let payload = PyDict::new(py);
     payload.set_item("month", row.month)?;
     payload.set_item("running_delta", row.running_delta)?;
+    Ok(payload.into_any().unbind())
+}
+
+fn distribution_validation_to_dict(
+    py: Python<'_>,
+    row: ledgera_engine_storage::DistributionValidationRow,
+) -> PyResult<Py<PyAny>> {
+    let payload = PyDict::new(py);
+    payload.set_item("level", row.level)?;
+    payload.set_item("message", row.message)?;
+    Ok(payload.into_any().unbind())
+}
+
+fn distribution_subitem_to_dict(
+    py: Python<'_>,
+    row: ledgera_engine_storage::DistributionSubitemPayload,
+) -> PyResult<Py<PyAny>> {
+    let payload = PyDict::new(py);
+    payload.set_item("id", row.id)?;
+    payload.set_item("item_id", row.item_id)?;
+    payload.set_item("name", row.name)?;
+    payload.set_item("sort_order", row.sort_order)?;
+    payload.set_item("pct", row.pct)?;
+    payload.set_item("pct_minor", row.pct_minor)?;
+    payload.set_item("is_active", row.is_active)?;
+    payload.set_item("amount_base", row.amount_base)?;
+    payload.set_item("amount_minor", row.amount_minor)?;
+    Ok(payload.into_any().unbind())
+}
+
+fn distribution_item_to_dict(
+    py: Python<'_>,
+    row: ledgera_engine_storage::DistributionItemPayload,
+) -> PyResult<Py<PyAny>> {
+    let subitems = row
+        .subitems
+        .into_iter()
+        .map(|subitem| distribution_subitem_to_dict(py, subitem))
+        .collect::<PyResult<Vec<_>>>()?;
+    let payload = PyDict::new(py);
+    payload.set_item("id", row.id)?;
+    payload.set_item("name", row.name)?;
+    payload.set_item("group_name", row.group_name)?;
+    payload.set_item("sort_order", row.sort_order)?;
+    payload.set_item("pct", row.pct)?;
+    payload.set_item("pct_minor", row.pct_minor)?;
+    payload.set_item("is_active", row.is_active)?;
+    payload.set_item("amount_base", row.amount_base)?;
+    payload.set_item("amount_minor", row.amount_minor)?;
+    payload.set_item("subitems", subitems)?;
+    Ok(payload.into_any().unbind())
+}
+
+fn distribution_monthly_to_dict(
+    py: Python<'_>,
+    row: ledgera_engine_storage::DistributionMonthlyPayload,
+) -> PyResult<Py<PyAny>> {
+    let items = row
+        .items
+        .into_iter()
+        .map(|item| distribution_item_to_dict(py, item))
+        .collect::<PyResult<Vec<_>>>()?;
+    let payload = PyDict::new(py);
+    payload.set_item("month", row.month)?;
+    payload.set_item("net_income_base", row.net_income_base)?;
+    payload.set_item("net_income_minor", row.net_income_minor)?;
+    payload.set_item("is_negative", row.is_negative)?;
+    payload.set_item("items", items)?;
     Ok(payload.into_any().unbind())
 }
 
@@ -721,6 +799,127 @@ fn currency_resolve_provider_order(
     ))
 }
 
+#[pyfunction]
+fn distribution_net_income_for_period(
+    db_path: &str,
+    start_date: &str,
+    end_date: &str,
+) -> PyResult<(f64, i64)> {
+    storage_distribution_net_income_for_period(db_path, start_date, end_date).map_err(core_err)
+}
+
+#[pyfunction]
+fn distribution_available_months(db_path: &str) -> PyResult<Vec<String>> {
+    storage_distribution_available_months(db_path).map_err(core_err)
+}
+
+#[pyfunction]
+fn distribution_history_months(
+    db_path: &str,
+    start_month: &str,
+    end_month: &str,
+) -> PyResult<Vec<String>> {
+    storage_distribution_history_months(db_path, start_month, end_month).map_err(core_err)
+}
+
+#[pyfunction]
+fn distribution_validate_structure(py: Python<'_>, db_path: &str) -> PyResult<Vec<Py<PyAny>>> {
+    storage_distribution_validate_structure(db_path)
+        .map_err(core_err)?
+        .into_iter()
+        .map(|row| distribution_validation_to_dict(py, row))
+        .collect()
+}
+
+#[pyfunction]
+fn distribution_monthly_payload(
+    py: Python<'_>,
+    db_path: &str,
+    month: &str,
+    start_date: &str,
+    end_date: &str,
+) -> PyResult<Py<PyAny>> {
+    storage_distribution_monthly_payload(db_path, month, start_date, end_date)
+        .map_err(core_err)
+        .and_then(|row| distribution_monthly_to_dict(py, row))
+}
+
+#[pyfunction]
+fn budget_spent_minor(
+    db_path: &str,
+    scope_type: &str,
+    scope_value: &str,
+    start_date: &str,
+    end_date: &str,
+    include_mandatory: bool,
+) -> PyResult<i64> {
+    storage_budget_spent_minor(
+        db_path,
+        scope_type,
+        scope_value,
+        start_date,
+        end_date,
+        include_mandatory,
+    )
+    .map_err(core_err)
+}
+
+#[pyfunction]
+fn budget_batch_spent_minor(
+    db_path: &str,
+    budgets: Vec<(i64, String, String, String, String, bool)>,
+) -> PyResult<Vec<(i64, i64)>> {
+    storage_budget_batch_spent_minor(db_path, &budgets).map_err(core_err)
+}
+
+#[pyfunction]
+fn budget_overlap_exists(
+    db_path: &str,
+    scope_type: &str,
+    scope_value: &str,
+    start_date: &str,
+    end_date: &str,
+    exclude_id: Option<i64>,
+) -> PyResult<bool> {
+    storage_budget_overlap_exists(
+        db_path,
+        scope_type,
+        scope_value,
+        start_date,
+        end_date,
+        exclude_id,
+    )
+    .map_err(core_err)
+}
+
+#[pyfunction]
+fn debt_payment_total_minor(db_path: &str, debt_id: i64) -> PyResult<i64> {
+    storage_debt_payment_total_minor(db_path, debt_id).map_err(core_err)
+}
+
+#[pyfunction]
+fn debt_recalculate_payload(
+    py: Python<'_>,
+    db_path: &str,
+    debt_id: i64,
+) -> PyResult<Py<PyAny>> {
+    let row = storage_debt_recalculate_payload(db_path, debt_id).map_err(core_err)?;
+    let payload = PyDict::new(py);
+    payload.set_item("remaining_amount_minor", row.remaining_amount_minor)?;
+    payload.set_item("status", row.status)?;
+    payload.set_item("closed_at", row.closed_at)?;
+    Ok(payload.into_any().unbind())
+}
+
+#[pyfunction]
+fn debt_validate_payment_amount(
+    remaining_amount_minor: i64,
+    payment_amount_minor: i64,
+) -> PyResult<i64> {
+    storage_debt_validate_payment_amount(remaining_amount_minor, payment_amount_minor)
+        .map_err(core_err)
+}
+
 #[pymodule]
 fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(convert_amount, m)?)?;
@@ -763,6 +962,17 @@ fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(currency_rate_for, m)?)?;
     m.add_function(wrap_pyfunction!(currency_default_rates_for_base, m)?)?;
     m.add_function(wrap_pyfunction!(currency_resolve_provider_order, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_net_income_for_period, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_available_months, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_history_months, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_validate_structure, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_monthly_payload, m)?)?;
+    m.add_function(wrap_pyfunction!(budget_spent_minor, m)?)?;
+    m.add_function(wrap_pyfunction!(budget_batch_spent_minor, m)?)?;
+    m.add_function(wrap_pyfunction!(budget_overlap_exists, m)?)?;
+    m.add_function(wrap_pyfunction!(debt_payment_total_minor, m)?)?;
+    m.add_function(wrap_pyfunction!(debt_recalculate_payload, m)?)?;
+    m.add_function(wrap_pyfunction!(debt_validate_payment_amount, m)?)?;
     m.add_function(wrap_pyfunction!(storage_clear_read_cache, m)?)?;
     Ok(())
 }

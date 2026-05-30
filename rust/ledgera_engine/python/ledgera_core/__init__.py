@@ -16,9 +16,22 @@ from .ledgera_core import (  # pyright: ignore[reportMissingModuleSource]
 )
 
 cashflow_sum = getattr(_ledgera_core, "cashflow_sum", None)
+budget_batch_spent_minor = getattr(_ledgera_core, "budget_batch_spent_minor", None)
+budget_overlap_exists = getattr(_ledgera_core, "budget_overlap_exists", None)
+budget_spent_minor = getattr(_ledgera_core, "budget_spent_minor", None)
 currency_default_rates_for_base = getattr(_ledgera_core, "currency_default_rates_for_base", None)
 currency_rate_for = getattr(_ledgera_core, "currency_rate_for", None)
 currency_resolve_provider_order = getattr(_ledgera_core, "currency_resolve_provider_order", None)
+debt_payment_total_minor = getattr(_ledgera_core, "debt_payment_total_minor", None)
+debt_recalculate_payload = getattr(_ledgera_core, "debt_recalculate_payload", None)
+debt_validate_payment_amount = getattr(_ledgera_core, "debt_validate_payment_amount", None)
+distribution_available_months = getattr(_ledgera_core, "distribution_available_months", None)
+distribution_history_months = getattr(_ledgera_core, "distribution_history_months", None)
+distribution_monthly_payload = getattr(_ledgera_core, "distribution_monthly_payload", None)
+distribution_net_income_for_period = getattr(
+    _ledgera_core, "distribution_net_income_for_period", None
+)
+distribution_validate_structure = getattr(_ledgera_core, "distribution_validate_structure", None)
 metrics_burn_rate = getattr(_ledgera_core, "metrics_burn_rate", None)
 metrics_income_by_category = getattr(_ledgera_core, "metrics_income_by_category", None)
 metrics_monthly_summary = getattr(_ledgera_core, "metrics_monthly_summary", None)
@@ -65,12 +78,34 @@ __all__ = [
 ]
 if cashflow_sum is not None:
     __all__.append("cashflow_sum")
+if budget_batch_spent_minor is not None:
+    __all__.append("budget_batch_spent_minor")
+if budget_overlap_exists is not None:
+    __all__.append("budget_overlap_exists")
+if budget_spent_minor is not None:
+    __all__.append("budget_spent_minor")
 if currency_default_rates_for_base is not None:
     __all__.append("currency_default_rates_for_base")
 if currency_rate_for is not None:
     __all__.append("currency_rate_for")
 if currency_resolve_provider_order is not None:
     __all__.append("currency_resolve_provider_order")
+if debt_payment_total_minor is not None:
+    __all__.append("debt_payment_total_minor")
+if debt_recalculate_payload is not None:
+    __all__.append("debt_recalculate_payload")
+if debt_validate_payment_amount is not None:
+    __all__.append("debt_validate_payment_amount")
+if distribution_available_months is not None:
+    __all__.append("distribution_available_months")
+if distribution_history_months is not None:
+    __all__.append("distribution_history_months")
+if distribution_monthly_payload is not None:
+    __all__.append("distribution_monthly_payload")
+if distribution_net_income_for_period is not None:
+    __all__.append("distribution_net_income_for_period")
+if distribution_validate_structure is not None:
+    __all__.append("distribution_validate_structure")
 if metrics_burn_rate is not None:
     __all__.append("metrics_burn_rate")
 if metrics_income_by_category is not None:

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Any, cast
 
 from app.data.protocols import DebtRepositoryProtocol
 from app.use_cases_pkg.support import wallet_balance_base, wallet_by_id
+from bridge.ledgera_bridge import RustDebtCore, get_debt_core
 from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
 from domain.records import ExpenseRecord, IncomeRecord, Record
 from services.planning.debts.helpers import (
@@ -12,6 +14,12 @@ from services.planning.debts.helpers import (
     validate_payment_amount,
 )
 from utils.finance.money import minor_to_money, to_minor_units, to_money_float
+
+_RUST_DEBT_CORE = get_debt_core()
+
+
+def _payload_int(payload: dict[str, object], key: str, default: int = 0) -> int:
+    return int(cast(Any, payload.get(key, default)))
 
 
 class DebtService:
@@ -72,7 +80,7 @@ class DebtService:
         description: str = "",
     ) -> DebtPayment:
         debt = self._repo.get_debt_by_id(int(debt_id))
-        payment_amount_minor = validate_payment_amount(debt, amount_base)
+        payment_amount_minor = self._validate_payment_amount(debt, amount_base)
         payment_date_text = normalize_date(payment_date)
         record = self._build_payment_record(
             debt=debt,
@@ -116,7 +124,7 @@ class DebtService:
         payment_date: str,
     ) -> DebtPayment:
         debt = self._repo.get_debt_by_id(int(debt_id))
-        payment_amount_minor = validate_payment_amount(debt, amount_base)
+        payment_amount_minor = self._validate_payment_amount(debt, amount_base)
         payment_date_text = normalize_date(payment_date)
 
         with self._repo.transaction():
@@ -200,6 +208,24 @@ class DebtService:
 
     def recalculate_debt(self, debt_id: int) -> Debt:
         debt = self._repo.get_debt_by_id(int(debt_id))
+        db_path = self._db_path()
+        if _RUST_DEBT_CORE is not None and db_path:
+            try:
+                rust_core = cast(RustDebtCore, _RUST_DEBT_CORE)
+                payload = rust_core.debt_recalculate_payload(db_path, int(debt_id))
+                recalculated = replace(
+                    debt,
+                    remaining_amount_minor=_payload_int(payload, "remaining_amount_minor"),
+                    status=DebtStatus(str(payload.get("status", DebtStatus.OPEN.value))),
+                    closed_at=(
+                        None if payload.get("closed_at") is None else str(payload.get("closed_at"))
+                    ),
+                )
+                self._repo.save_debt(recalculated)
+                return self._repo.get_debt_by_id(int(debt_id))
+            except Exception:
+                pass
+
         payments = self._repo.load_debt_payments(int(debt_id))
         paid_minor = sum(int(payment.principal_paid_minor) for payment in payments)
         remaining_minor = max(0, int(debt.total_amount_minor) - paid_minor)
@@ -335,6 +361,26 @@ class DebtService:
         projected_balance = to_money_float(balance - to_money_float(amount_base))
         if projected_balance < 0:
             raise ValueError("Insufficient funds in wallet")
+
+    def _db_path(self) -> str | None:
+        db_path = getattr(self._repo, "db_path", None)
+        return db_path if isinstance(db_path, str) and db_path else None
+
+    def _validate_payment_amount(self, debt: Debt, amount_base: float) -> int:
+        amount_minor = to_minor_units(amount_base)
+        if _RUST_DEBT_CORE is not None:
+            try:
+                rust_core = cast(RustDebtCore, _RUST_DEBT_CORE)
+                return int(
+                    rust_core.debt_validate_payment_amount(
+                        int(debt.remaining_amount_minor),
+                        amount_minor,
+                    )
+                )
+            except Exception as exc:
+                if exc.__class__.__name__ == "ValueError":
+                    raise
+        return validate_payment_amount(debt, amount_base)
 
     def _latest_debt_id(self) -> int:
         row = self._repo.query_one("SELECT id FROM debts ORDER BY id DESC LIMIT 1")

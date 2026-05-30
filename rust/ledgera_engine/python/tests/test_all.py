@@ -33,6 +33,30 @@ class _LedgeraCoreModule(Protocol):
         provider_order: list[str] | None = None,
     ) -> list[str]: ...
 
+    def budget_spent_minor(
+        self,
+        db_path: str,
+        scope_type: str,
+        scope_value: str,
+        start_date: str,
+        end_date: str,
+        include_mandatory: bool,
+    ) -> int: ...
+
+    def debt_recalculate_payload(self, db_path: str, debt_id: int) -> dict[str, object]: ...
+
+    def debt_validate_payment_amount(
+        self, remaining_amount_minor: int, payment_amount_minor: int
+    ) -> int: ...
+
+    def distribution_available_months(self, db_path: str) -> list[str]: ...
+
+    def distribution_monthly_payload(
+        self, db_path: str, month: str, start_date: str, end_date: str
+    ) -> dict[str, object]: ...
+
+    def distribution_validate_structure(self, db_path: str) -> list[dict[str, object]]: ...
+
     def metrics_tag_coverage(
         self, db_path: str, start_date: str, end_date: str
     ) -> dict[str, object]: ...
@@ -216,5 +240,123 @@ def test_metrics_refresh_snapshot_compact_smoke():
     assert snapshot[3] == [("Salary", 100.0, 1)]
     assert snapshot[4] == []
     assert snapshot[5] == [("2026-01", 100.0, 35.0, 65.0, 65.0)]
+    ledgera_core.storage_clear_read_cache()
+    db_path.unlink(missing_ok=True)
+
+
+def test_planning_parity_exports_smoke():
+    _assert_callable_export("distribution_available_months")
+    _assert_callable_export("distribution_monthly_payload")
+    _assert_callable_export("distribution_validate_structure")
+    _assert_callable_export("budget_spent_minor")
+    _assert_callable_export("debt_recalculate_payload")
+    _assert_callable_export("debt_validate_payment_amount")
+
+    db_dir = Path.cwd() / "tests" / "_tmp"
+    db_dir.mkdir(exist_ok=True)
+    db_path = db_dir / f"planning_{os.getpid()}.db"
+    db_path.unlink(missing_ok=True)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE records (
+                id INTEGER PRIMARY KEY,
+                type TEXT NOT NULL,
+                date TEXT NOT NULL,
+                transfer_id INTEGER,
+                amount_base REAL NOT NULL,
+                amount_base_minor INTEGER,
+                category TEXT NOT NULL
+            );
+            CREATE TABLE distribution_items (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                group_name TEXT NOT NULL DEFAULT '',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                pct REAL NOT NULL DEFAULT 0,
+                pct_minor INTEGER NOT NULL DEFAULT 0,
+                is_active INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE distribution_subitems (
+                id INTEGER PRIMARY KEY,
+                item_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                pct REAL NOT NULL DEFAULT 0,
+                pct_minor INTEGER NOT NULL DEFAULT 0,
+                is_active INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE budgets (
+                id INTEGER PRIMARY KEY,
+                scope_type TEXT NOT NULL,
+                scope_value TEXT NOT NULL,
+                start_date TEXT NOT NULL,
+                end_date TEXT NOT NULL
+            );
+            CREATE TABLE debts (
+                id INTEGER PRIMARY KEY,
+                total_amount_minor INTEGER NOT NULL
+            );
+            CREATE TABLE debt_payments (
+                id INTEGER PRIMARY KEY,
+                debt_id INTEGER NOT NULL,
+                principal_paid_minor INTEGER NOT NULL,
+                payment_date TEXT NOT NULL
+            );
+            CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+            CREATE TABLE record_tags (record_id INTEGER NOT NULL, tag_id INTEGER NOT NULL);
+            """
+        )
+        conn.execute(
+            "INSERT INTO records (type, date, transfer_id, amount_base, amount_base_minor, category) "
+            "VALUES ('income', '2026-03-01', NULL, 100.0, 10000, 'Salary')"
+        )
+        conn.execute(
+            "INSERT INTO records (type, date, transfer_id, amount_base, amount_base_minor, category) "
+            "VALUES ('expense', '2026-03-02', NULL, 25.0, 2500, 'Food')"
+        )
+        conn.execute(
+            "INSERT INTO distribution_items "
+            "(id, name, group_name, sort_order, pct, pct_minor, is_active) "
+            "VALUES (1, 'Needs', '', 0, 100.0, 10000, 1)"
+        )
+        conn.execute(
+            "INSERT INTO distribution_subitems "
+            "(id, item_id, name, sort_order, pct, pct_minor, is_active) "
+            "VALUES (1, 1, 'Food', 0, 100.0, 10000, 1)"
+        )
+        conn.execute("INSERT INTO debts (id, total_amount_minor) VALUES (1, 10000)")
+        conn.execute(
+            "INSERT INTO debt_payments "
+            "(id, debt_id, principal_paid_minor, payment_date) "
+            "VALUES (1, 1, 2500, '2026-03-03')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert ledgera_core.distribution_available_months(str(db_path)) == ["2026-03"]
+    assert ledgera_core.distribution_validate_structure(str(db_path)) == []
+    distribution = ledgera_core.distribution_monthly_payload(
+        str(db_path),
+        "2026-03",
+        "2026-03-01",
+        "2026-03-31",
+    )
+    assert distribution["net_income_minor"] == 7500
+    assert (
+        ledgera_core.budget_spent_minor(
+            str(db_path),
+            "category",
+            "Food",
+            "2026-03-01",
+            "2026-03-31",
+            False,
+        )
+        == 2500
+    )
+    assert ledgera_core.debt_validate_payment_amount(7500, 2500) == 2500
+    assert ledgera_core.debt_recalculate_payload(str(db_path), 1)["remaining_amount_minor"] == 7500
     ledgera_core.storage_clear_read_cache()
     db_path.unlink(missing_ok=True)

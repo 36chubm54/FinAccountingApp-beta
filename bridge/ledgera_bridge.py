@@ -167,6 +167,64 @@ class RustCurrencyCore(Protocol):
     ) -> list[str]: ...
 
 
+class RustDistributionCore(Protocol):
+    def distribution_available_months(self, db_path: str) -> list[str]: ...
+
+    def distribution_history_months(
+        self, db_path: str, start_month: str, end_month: str
+    ) -> list[str]: ...
+
+    def distribution_monthly_payload(
+        self, db_path: str, month: str, start_date: str, end_date: str
+    ) -> dict[str, object]: ...
+
+    def distribution_net_income_for_period(
+        self, db_path: str, start_date: str, end_date: str
+    ) -> tuple[float, int]: ...
+
+    def distribution_validate_structure(self, db_path: str) -> list[dict[str, object]]: ...
+
+
+class RustBudgetPlanningCore(Protocol):
+    def budget_batch_spent_minor(
+        self, db_path: str, budgets: list[tuple[int, str, str, str, str, bool]]
+    ) -> list[tuple[int, int]]: ...
+
+    def budget_overlap_exists(
+        self,
+        db_path: str,
+        scope_type: str,
+        scope_value: str,
+        start_date: str,
+        end_date: str,
+        exclude_id: int | None = None,
+    ) -> bool: ...
+
+    def budget_spent_minor(
+        self,
+        db_path: str,
+        scope_type: str,
+        scope_value: str,
+        start_date: str,
+        end_date: str,
+        include_mandatory: bool,
+    ) -> int: ...
+
+
+class RustDebtCore(Protocol):
+    def debt_payment_total_minor(self, db_path: str, debt_id: int) -> int: ...
+
+    def debt_recalculate_payload(self, db_path: str, debt_id: int) -> dict[str, object]: ...
+
+    def debt_validate_payment_amount(
+        self, remaining_amount_minor: int, payment_amount_minor: int
+    ) -> int: ...
+
+
+class RustSyncCore(Protocol):
+    pass
+
+
 class RustStorageControlCore(Protocol):
     def storage_clear_read_cache(self) -> None: ...
 
@@ -222,6 +280,24 @@ _CURRENCY_SYMBOLS = (
     "currency_rate_for",
     "currency_resolve_provider_order",
 )
+_DISTRIBUTION_SYMBOLS = (
+    "distribution_available_months",
+    "distribution_history_months",
+    "distribution_monthly_payload",
+    "distribution_net_income_for_period",
+    "distribution_validate_structure",
+)
+_BUDGET_PLANNING_SYMBOLS = (
+    "budget_batch_spent_minor",
+    "budget_overlap_exists",
+    "budget_spent_minor",
+)
+_DEBT_SYMBOLS = (
+    "debt_payment_total_minor",
+    "debt_recalculate_payload",
+    "debt_validate_payment_amount",
+)
+_SYNC_SYMBOLS = ("sync_start_daemon", "sync_stop_daemon")
 
 
 def is_python_fallback_forced() -> bool:
@@ -289,6 +365,34 @@ def get_currency_core() -> RustCurrencyCore | None:
     return cast(RustCurrencyCore, module)
 
 
+def get_distribution_core() -> RustDistributionCore | None:
+    module = load_extension_module()
+    if not _has_symbols(module, _DISTRIBUTION_SYMBOLS):
+        return None
+    return cast(RustDistributionCore, module)
+
+
+def get_budget_planning_core() -> RustBudgetPlanningCore | None:
+    module = load_extension_module()
+    if not _has_symbols(module, _BUDGET_PLANNING_SYMBOLS):
+        return None
+    return cast(RustBudgetPlanningCore, module)
+
+
+def get_debt_core() -> RustDebtCore | None:
+    module = load_extension_module()
+    if not _has_symbols(module, _DEBT_SYMBOLS):
+        return None
+    return cast(RustDebtCore, module)
+
+
+def get_sync_core() -> RustSyncCore | None:
+    module = load_extension_module()
+    if not _has_symbols(module, _SYNC_SYMBOLS):
+        return None
+    return cast(RustSyncCore, module)
+
+
 def get_storage_control_core() -> RustStorageControlCore | None:
     module = load_extension_module()
     if not _has_symbols(module, _STORAGE_CONTROL_SYMBOLS):
@@ -299,17 +403,25 @@ def get_storage_control_core() -> RustStorageControlCore | None:
 __all__ = [
     "RustBalanceCore",
     "RustCurrencyCore",
+    "RustBudgetPlanningCore",
+    "RustDebtCore",
+    "RustDistributionCore",
     "RustMetricsCore",
     "RustMoneyCore",
     "RustRepositoryReadCore",
+    "RustSyncCore",
     "RustTimelineCore",
     "RustStorageControlCore",
     "get_balance_core",
+    "get_budget_planning_core",
     "get_currency_core",
+    "get_debt_core",
+    "get_distribution_core",
     "get_metrics_core",
     "get_money_core",
     "get_repository_read_core",
     "get_storage_control_core",
+    "get_sync_core",
     "get_timeline_core",
     "is_python_fallback_forced",
     "is_rust_core_enabled",

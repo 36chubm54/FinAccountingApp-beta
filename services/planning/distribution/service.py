@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date as dt_date
+from typing import Any, cast
 
 from app.data.protocols import DistributionRepositoryProtocol
+from bridge.ledgera_bridge import RustDistributionCore, get_distribution_core
 from domain.distribution import (
     DistributionItem,
     DistributionSubitem,
@@ -27,6 +29,16 @@ from services.planning.distribution.helpers import (
 )
 from services.support.sql_money import signed_minor_amount_expr
 from utils.finance.money import minor_to_money
+
+_RUST_DISTRIBUTION_CORE = get_distribution_core()
+
+
+def _payload_int(payload: dict[str, object], key: str, default: int = 0) -> int:
+    return int(cast(Any, payload.get(key, default)))
+
+
+def _payload_float(payload: dict[str, object], key: str, default: float = 0.0) -> float:
+    return float(cast(Any, payload.get(key, default)))
 
 
 class DistributionService:
@@ -294,6 +306,20 @@ class DistributionService:
         self._repo.commit()
 
     def validate(self) -> list[ValidationError]:
+        db_path = self._db_path()
+        if _RUST_DISTRIBUTION_CORE is not None and db_path:
+            try:
+                rust_core = cast(RustDistributionCore, _RUST_DISTRIBUTION_CORE)
+                return [
+                    ValidationError(
+                        level=str(row.get("level", "")),
+                        message=str(row.get("message", "")),
+                    )
+                    for row in rust_core.distribution_validate_structure(db_path)
+                ]
+            except Exception:
+                pass
+
         errors: list[ValidationError] = []
 
         row = self._repo.query_one(
@@ -338,6 +364,13 @@ class DistributionService:
 
     def get_net_income_for_month(self, month: str) -> tuple[float, int]:
         start_date, end_date = month_bounds(month)
+        db_path = self._db_path()
+        if _RUST_DISTRIBUTION_CORE is not None and db_path:
+            try:
+                rust_core = cast(RustDistributionCore, _RUST_DISTRIBUTION_CORE)
+                return rust_core.distribution_net_income_for_period(db_path, start_date, end_date)
+            except Exception:
+                pass
         row = self._repo.query_one(
             f"""
             SELECT COALESCE(SUM({signed_minor_amount_expr("amount_base")}), 0)
@@ -352,6 +385,22 @@ class DistributionService:
         return minor_to_money(net_minor), net_minor
 
     def get_monthly_distribution(self, month: str) -> MonthlyDistribution:
+        start_date, end_date = month_bounds(month)
+        db_path = self._db_path()
+        if _RUST_DISTRIBUTION_CORE is not None and db_path:
+            try:
+                rust_core = cast(RustDistributionCore, _RUST_DISTRIBUTION_CORE)
+                return self._monthly_distribution_from_payload(
+                    rust_core.distribution_monthly_payload(
+                        db_path,
+                        month,
+                        start_date,
+                        end_date,
+                    )
+                )
+            except Exception:
+                pass
+
         net_income_base, net_income_minor = self.get_net_income_for_month(month)
         item_results: list[ItemResult] = []
 
@@ -393,6 +442,18 @@ class DistributionService:
         month_bounds(end_month)
         if start_month > end_month:
             raise ValueError("start_month must be <= end_month")
+        db_path = self._db_path()
+        if _RUST_DISTRIBUTION_CORE is not None and db_path:
+            try:
+                rust_core = cast(RustDistributionCore, _RUST_DISTRIBUTION_CORE)
+                return [
+                    self.get_monthly_distribution(month)
+                    for month in rust_core.distribution_history_months(
+                        db_path, start_month, end_month
+                    )
+                ]
+            except Exception:
+                pass
         rows = self._repo.query_all(
             """
             SELECT DISTINCT substr(date, 1, 7) AS month
@@ -407,6 +468,13 @@ class DistributionService:
         return [self.get_monthly_distribution(str(row[0])) for row in rows]
 
     def get_available_months(self) -> list[str]:
+        db_path = self._db_path()
+        if _RUST_DISTRIBUTION_CORE is not None and db_path:
+            try:
+                rust_core = cast(RustDistributionCore, _RUST_DISTRIBUTION_CORE)
+                return rust_core.distribution_available_months(db_path)
+            except Exception:
+                pass
         rows = self._repo.query_all(
             """
             SELECT DISTINCT substr(date, 1, 7) AS month
@@ -698,6 +766,56 @@ class DistributionService:
                 sub_result = sub_results.get(subitem.id)
                 values[sub_key] = "-" if sub_result is None else fmt_amount(sub_result.amount_base)
         return values
+
+    def _db_path(self) -> str | None:
+        db_path = getattr(self._repo, "db_path", None)
+        return db_path if isinstance(db_path, str) and db_path else None
+
+    def _monthly_distribution_from_payload(self, payload: dict[str, object]) -> MonthlyDistribution:
+        item_results: list[ItemResult] = []
+        for item_payload in cast(list[dict[str, object]], payload.get("items", [])):
+            item = DistributionItem(
+                id=_payload_int(item_payload, "id"),
+                name=str(item_payload.get("name", "")),
+                group_name=str(item_payload.get("group_name", "")),
+                sort_order=_payload_int(item_payload, "sort_order"),
+                pct=_payload_float(item_payload, "pct"),
+                pct_minor=_payload_int(item_payload, "pct_minor"),
+                is_active=bool(item_payload.get("is_active", False)),
+            )
+            subitem_results: list[SubitemResult] = []
+            for subitem_payload in cast(list[dict[str, object]], item_payload.get("subitems", [])):
+                subitem = DistributionSubitem(
+                    id=_payload_int(subitem_payload, "id"),
+                    item_id=_payload_int(subitem_payload, "item_id"),
+                    name=str(subitem_payload.get("name", "")),
+                    sort_order=_payload_int(subitem_payload, "sort_order"),
+                    pct=_payload_float(subitem_payload, "pct"),
+                    pct_minor=_payload_int(subitem_payload, "pct_minor"),
+                    is_active=bool(subitem_payload.get("is_active", False)),
+                )
+                subitem_results.append(
+                    SubitemResult(
+                        subitem=subitem,
+                        amount_base=_payload_float(subitem_payload, "amount_base"),
+                        amount_minor=_payload_int(subitem_payload, "amount_minor"),
+                    )
+                )
+            item_results.append(
+                ItemResult(
+                    item=item,
+                    amount_base=_payload_float(item_payload, "amount_base"),
+                    amount_minor=_payload_int(item_payload, "amount_minor"),
+                    subitem_results=tuple(subitem_results),
+                )
+            )
+        return MonthlyDistribution(
+            month=str(payload.get("month", "")),
+            net_income_base=_payload_float(payload, "net_income_base"),
+            net_income_minor=_payload_int(payload, "net_income_minor"),
+            item_results=tuple(item_results),
+            is_negative=bool(payload.get("is_negative", False)),
+        )
 
     def _ensure_snapshot_schema(self) -> None:
         snapshot_columns = {

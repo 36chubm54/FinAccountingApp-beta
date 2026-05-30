@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import date as dt_date
+from typing import cast
 
 from app.data.protocols import BudgetRepositoryProtocol
+from bridge.ledgera_bridge import RustBudgetPlanningCore, get_budget_planning_core
 from domain.budget import Budget, BudgetResult, compute_pace_status
 from domain.validation import parse_ymd
 from services.planning.budget.helpers import (
@@ -14,6 +16,8 @@ from services.planning.budget.helpers import (
 from services.support.sql_money import minor_amount_expr
 from utils.finance.money import minor_to_money, to_minor_units, to_money_float
 from utils.records.tags import normalize_tag_name
+
+_RUST_BUDGET_CORE = get_budget_planning_core()
 
 
 class BudgetService:
@@ -162,7 +166,7 @@ class BudgetService:
             ),
             spending_params_for_budget(budget),
         )
-        spent_minor = int(row[0]) if row is not None else 0
+        spent_minor = self._spent_minor_for_budget(budget, type_filter=type_filter, row=row)
         spent_base = minor_to_money(spent_minor)
         limit_minor = budget.limit_base_minor
         usage_pct = round(spent_minor / limit_minor * 100.0, 1) if limit_minor > 0 else 0.0
@@ -196,22 +200,7 @@ class BudgetService:
         if not budgets:
             return []
 
-        spent_minor_by_budget: dict[int, int] = {budget.id: 0 for budget in budgets}
-        for budget in budgets:
-            type_filter = (
-                "type IN ('expense', 'mandatory_expense')"
-                if budget.include_mandatory
-                else "type = 'expense'"
-            )
-            row = self._repo.query_one(
-                spending_query_for_budget(
-                    budget,
-                    type_filter=type_filter,
-                    minor_expr=minor_amount_expr("amount_base"),
-                ),
-                spending_params_for_budget(budget),
-            )
-            spent_minor_by_budget[int(budget.id)] = int(row[0] or 0) if row is not None else 0
+        spent_minor_by_budget = self._batch_spent_minor_for_budgets(budgets)
 
         results: list[BudgetResult] = []
         for budget in budgets:
@@ -254,6 +243,22 @@ class BudgetService:
         end_date: str,
         exclude_id: int | None,
     ) -> None:
+        db_path = self._db_path()
+        if _RUST_BUDGET_CORE is not None and db_path:
+            try:
+                rust_core = cast(RustBudgetPlanningCore, _RUST_BUDGET_CORE)
+                if not rust_core.budget_overlap_exists(
+                    db_path,
+                    scope_type,
+                    scope_value,
+                    start_date,
+                    end_date,
+                    exclude_id,
+                ):
+                    return
+            except Exception:
+                pass
+
         params: list[object] = [scope_type, scope_value, end_date, start_date]
         exclude_clause = ""
         if exclude_id is not None:
@@ -276,6 +281,79 @@ class BudgetService:
             raise ValueError(
                 f"Budget for '{scope_value}' already exists for overlapping period {row[1]} - {row[2]}"  # noqa: E501
             )
+
+    def _db_path(self) -> str | None:
+        db_path = getattr(self._repo, "db_path", None)
+        return db_path if isinstance(db_path, str) and db_path else None
+
+    def _spent_minor_for_budget(
+        self,
+        budget: Budget,
+        *,
+        type_filter: str,
+        row: object,
+    ) -> int:
+        db_path = self._db_path()
+        if _RUST_BUDGET_CORE is not None and db_path:
+            try:
+                rust_core = cast(RustBudgetPlanningCore, _RUST_BUDGET_CORE)
+                return int(
+                    rust_core.budget_spent_minor(
+                        db_path,
+                        budget.scope_type,
+                        budget.scope_value,
+                        budget.start_date,
+                        budget.end_date,
+                        budget.include_mandatory,
+                    )
+                )
+            except Exception:
+                pass
+        _ = type_filter
+        return int(row[0]) if row is not None else 0  # type: ignore[index]
+
+    def _batch_spent_minor_for_budgets(self, budgets: list[Budget]) -> dict[int, int]:
+        db_path = self._db_path()
+        if _RUST_BUDGET_CORE is not None and db_path:
+            try:
+                rust_core = cast(RustBudgetPlanningCore, _RUST_BUDGET_CORE)
+                payload = [
+                    (
+                        int(budget.id),
+                        budget.scope_type,
+                        budget.scope_value,
+                        budget.start_date,
+                        budget.end_date,
+                        bool(budget.include_mandatory),
+                    )
+                    for budget in budgets
+                ]
+                return {
+                    int(budget_id): int(spent_minor)
+                    for budget_id, spent_minor in rust_core.budget_batch_spent_minor(
+                        db_path, payload
+                    )
+                }
+            except Exception:
+                pass
+
+        spent_minor_by_budget: dict[int, int] = {budget.id: 0 for budget in budgets}
+        for budget in budgets:
+            type_filter = (
+                "type IN ('expense', 'mandatory_expense')"
+                if budget.include_mandatory
+                else "type = 'expense'"
+            )
+            row = self._repo.query_one(
+                spending_query_for_budget(
+                    budget,
+                    type_filter=type_filter,
+                    minor_expr=minor_amount_expr("amount_base"),
+                ),
+                spending_params_for_budget(budget),
+            )
+            spent_minor_by_budget[int(budget.id)] = int(row[0] or 0) if row is not None else 0
+        return spent_minor_by_budget
 
     def _load_budget_by_id(self, budget_id: int) -> Budget:
         row = self._repo.query_one(

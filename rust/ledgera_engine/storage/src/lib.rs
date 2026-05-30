@@ -138,12 +138,21 @@ pub struct MetricsRefreshSnapshot {
 }
 
 mod metrics;
+mod planning;
 mod timeline;
 
 pub use metrics::{
     metrics_period_snapshot, metrics_refresh_snapshot,
     metrics_burn_rate, metrics_income_by_category, metrics_monthly_summary, metrics_savings_rate,
     metrics_spending_by_category, metrics_spending_by_tag, metrics_tag_coverage,
+};
+pub use planning::{
+    DebtRecalculatePayload, DistributionItemPayload, DistributionMonthlyPayload,
+    DistributionSubitemPayload, DistributionValidationRow, budget_batch_spent_minor,
+    budget_overlap_exists, budget_spent_minor, debt_payment_total_minor,
+    debt_recalculate_payload, debt_validate_payment_amount, distribution_available_months,
+    distribution_history_months, distribution_monthly_payload, distribution_net_income_for_period,
+    distribution_validate_structure,
 };
 pub use timeline::{
     timeline_cumulative_income_expense, timeline_monthly_cashflow,

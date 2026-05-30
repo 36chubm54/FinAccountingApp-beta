@@ -36,6 +36,10 @@ def test_bridge_returns_none_when_rust_core_is_not_enabled(monkeypatch) -> None:
     assert ledgera_bridge.get_metrics_core() is None
     assert ledgera_bridge.get_timeline_core() is None
     assert ledgera_bridge.get_currency_core() is None
+    assert ledgera_bridge.get_distribution_core() is None
+    assert ledgera_bridge.get_budget_planning_core() is None
+    assert ledgera_bridge.get_debt_core() is None
+    assert ledgera_bridge.get_sync_core() is None
     assert ledgera_bridge.get_storage_control_core() is None
 
 
@@ -54,6 +58,10 @@ def test_bridge_returns_none_when_extension_import_fails(monkeypatch) -> None:
     assert ledgera_bridge.get_metrics_core() is None
     assert ledgera_bridge.get_timeline_core() is None
     assert ledgera_bridge.get_currency_core() is None
+    assert ledgera_bridge.get_distribution_core() is None
+    assert ledgera_bridge.get_budget_planning_core() is None
+    assert ledgera_bridge.get_debt_core() is None
+    assert ledgera_bridge.get_sync_core() is None
     assert ledgera_bridge.get_storage_control_core() is None
 
 
@@ -73,6 +81,10 @@ def test_bridge_force_python_fallback_skips_extension_import(monkeypatch) -> Non
     assert ledgera_bridge.get_metrics_core() is None
     assert ledgera_bridge.get_timeline_core() is None
     assert ledgera_bridge.get_currency_core() is None
+    assert ledgera_bridge.get_distribution_core() is None
+    assert ledgera_bridge.get_budget_planning_core() is None
+    assert ledgera_bridge.get_debt_core() is None
+    assert ledgera_bridge.get_sync_core() is None
     assert ledgera_bridge.get_storage_control_core() is None
 
 
@@ -88,6 +100,10 @@ def test_bridge_capability_gating_requires_full_symbol_set(monkeypatch) -> None:
     assert ledgera_bridge.get_metrics_core() is None
     assert ledgera_bridge.get_timeline_core() is None
     assert ledgera_bridge.get_currency_core() is None
+    assert ledgera_bridge.get_distribution_core() is None
+    assert ledgera_bridge.get_budget_planning_core() is None
+    assert ledgera_bridge.get_debt_core() is None
+    assert ledgera_bridge.get_sync_core() is None
     assert ledgera_bridge.get_storage_control_core() is None
 
 
@@ -131,6 +147,17 @@ def test_bridge_returns_typed_cores_when_symbols_are_complete(monkeypatch) -> No
         "currency_default_rates_for_base",
         "currency_rate_for",
         "currency_resolve_provider_order",
+        "distribution_available_months",
+        "distribution_history_months",
+        "distribution_monthly_payload",
+        "distribution_net_income_for_period",
+        "distribution_validate_structure",
+        "budget_batch_spent_minor",
+        "budget_overlap_exists",
+        "budget_spent_minor",
+        "debt_payment_total_minor",
+        "debt_recalculate_payload",
+        "debt_validate_payment_amount",
         "storage_clear_read_cache",
     )
     monkeypatch.setenv("LEDGERA_ENABLE_RUST_CORE", "1")
@@ -143,4 +170,8 @@ def test_bridge_returns_typed_cores_when_symbols_are_complete(monkeypatch) -> No
     assert ledgera_bridge.get_metrics_core() is module
     assert ledgera_bridge.get_timeline_core() is module
     assert ledgera_bridge.get_currency_core() is module
+    assert ledgera_bridge.get_distribution_core() is module
+    assert ledgera_bridge.get_budget_planning_core() is module
+    assert ledgera_bridge.get_debt_core() is module
+    assert ledgera_bridge.get_sync_core() is None
     assert ledgera_bridge.get_storage_control_core() is module
