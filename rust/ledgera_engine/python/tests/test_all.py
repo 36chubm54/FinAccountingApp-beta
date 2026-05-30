@@ -43,6 +43,31 @@ class _LedgeraCoreModule(Protocol):
         include_mandatory: bool,
     ) -> int: ...
 
+    def budget_create(
+        self,
+        db_path: str,
+        category: str,
+        scope_type: str,
+        scope_value: str,
+        start_date: str,
+        end_date: str,
+        limit_base: float,
+        limit_base_minor: int,
+        include_mandatory: bool,
+    ) -> dict[str, object]: ...
+
+    def budget_delete(self, db_path: str, budget_id: int) -> None: ...
+
+    def budget_replace_rows(
+        self, db_path: str, rows: list[tuple[int, str, str, str, float, int, bool, str, str]]
+    ) -> None: ...
+
+    def budget_rows(self, db_path: str) -> list[dict[str, object]]: ...
+
+    def budget_update_limit(
+        self, db_path: str, budget_id: int, limit_base: float, limit_base_minor: int
+    ) -> dict[str, object]: ...
+
     def debt_recalculate_payload(self, db_path: str, debt_id: int) -> dict[str, object]: ...
 
     def debt_validate_payment_amount(
@@ -253,7 +278,12 @@ def test_planning_parity_exports_smoke():
     _assert_callable_export("distribution_create_item")
     _assert_callable_export("distribution_monthly_payload")
     _assert_callable_export("distribution_validate_structure")
+    _assert_callable_export("budget_create")
+    _assert_callable_export("budget_delete")
+    _assert_callable_export("budget_replace_rows")
+    _assert_callable_export("budget_rows")
     _assert_callable_export("budget_spent_minor")
+    _assert_callable_export("budget_update_limit")
     _assert_callable_export("debt_recalculate_payload")
     _assert_callable_export("debt_validate_payment_amount")
 
@@ -293,11 +323,15 @@ def test_planning_parity_exports_smoke():
                 is_active INTEGER NOT NULL DEFAULT 1
             );
             CREATE TABLE budgets (
-                id INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category TEXT NOT NULL,
                 scope_type TEXT NOT NULL,
                 scope_value TEXT NOT NULL,
                 start_date TEXT NOT NULL,
-                end_date TEXT NOT NULL
+                end_date TEXT NOT NULL,
+                limit_base REAL NOT NULL,
+                limit_base_minor INTEGER NOT NULL,
+                include_mandatory INTEGER NOT NULL
             );
             CREATE TABLE debts (
                 id INTEGER PRIMARY KEY,
@@ -314,11 +348,11 @@ def test_planning_parity_exports_smoke():
             """
         )
         conn.execute(
-            "INSERT INTO records (type, date, transfer_id, amount_base, amount_base_minor, category) "
+            "INSERT INTO records (type, date, transfer_id, amount_base, amount_base_minor, category) "  # noqa: E501
             "VALUES ('income', '2026-03-01', NULL, 100.0, 10000, 'Salary')"
         )
         conn.execute(
-            "INSERT INTO records (type, date, transfer_id, amount_base, amount_base_minor, category) "
+            "INSERT INTO records (type, date, transfer_id, amount_base, amount_base_minor, category) "  # noqa: E501
             "VALUES ('expense', '2026-03-02', NULL, 25.0, 2500, 'Food')"
         )
         conn.execute(
@@ -361,6 +395,23 @@ def test_planning_parity_exports_smoke():
         )
         == 2500
     )
+    budget = ledgera_core.budget_create(
+        str(db_path),
+        "Travel",
+        "category",
+        "Travel",
+        "2026-04-01",
+        "2026-04-30",
+        100.0,
+        10000,
+        False,
+    )
+    assert budget["id"] == 1
+    assert ledgera_core.budget_rows(str(db_path))[0]["category"] == "Travel"
+    updated_budget = ledgera_core.budget_update_limit(str(db_path), 1, 150.0, 15000)
+    assert updated_budget["limit_base_minor"] == 15000
+    ledgera_core.budget_delete(str(db_path), 1)
+    assert ledgera_core.budget_rows(str(db_path)) == []
     assert ledgera_core.debt_validate_payment_amount(7500, 2500) == 2500
     assert ledgera_core.debt_recalculate_payload(str(db_path), 1)["remaining_amount_minor"] == 7500
     ledgera_core.storage_clear_read_cache()

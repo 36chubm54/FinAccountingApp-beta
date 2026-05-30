@@ -1,10 +1,14 @@
 use ledgera_engine_storage::{
-    CategoryMetricRow, DistributionItemPayload, DistributionSubitemPayload,
-    FrozenDistributionPayload, MandatoryExpenseRow, MonthlyCashflowRow, MonthlyCumulativeRow,
-    MonthlySummaryRow, NetWorthDeltaRow, RecordRow, TagCoverageRow, TagMetricRow, TransferRow,
-    WalletBalanceRow, WalletRow, budget_batch_spent_minor as storage_budget_batch_spent_minor,
+    BudgetCreatePayload, BudgetPayload, CategoryMetricRow, DistributionItemPayload,
+    DistributionSubitemPayload, FrozenDistributionPayload, MandatoryExpenseRow, MonthlyCashflowRow,
+    MonthlyCumulativeRow, MonthlySummaryRow, NetWorthDeltaRow, RecordRow, TagCoverageRow,
+    TagMetricRow, TransferRow, WalletBalanceRow, WalletRow,
+    budget_batch_spent_minor as storage_budget_batch_spent_minor,
+    budget_create as storage_budget_create, budget_delete as storage_budget_delete,
     budget_overlap_exists as storage_budget_overlap_exists,
-    budget_spent_minor as storage_budget_spent_minor, cashflow_sum as storage_cashflow_sum,
+    budget_replace_rows as storage_budget_replace_rows, budget_rows as storage_budget_rows,
+    budget_spent_minor as storage_budget_spent_minor,
+    budget_update_limit as storage_budget_update_limit, cashflow_sum as storage_cashflow_sum,
     debt_payment_total_minor as storage_debt_payment_total_minor,
     debt_recalculate_payload as storage_debt_recalculate_payload,
     debt_validate_payment_amount as storage_debt_validate_payment_amount,
@@ -62,6 +66,7 @@ type CompactCategoryRows = Vec<(String, f64, i64)>;
 type CompactTagRows = Vec<(String, String, f64, i64)>;
 type CompactMonthlySummaryRows = Vec<(String, f64, f64, f64, f64)>;
 type CompactMonthlyCashflowRows = Vec<(String, f64, f64, f64)>;
+type BudgetRowPayload = (i64, String, String, String, f64, i64, bool, String, String);
 type FrozenDistributionRowPayload = (
     String,
     Vec<String>,
@@ -327,6 +332,34 @@ fn net_worth_delta_to_dict(py: Python<'_>, row: NetWorthDeltaRow) -> PyResult<Py
     payload.set_item("month", row.month)?;
     payload.set_item("running_delta", row.running_delta)?;
     Ok(payload.into_any().unbind())
+}
+
+fn budget_to_dict(py: Python<'_>, row: BudgetPayload) -> PyResult<Py<PyAny>> {
+    let payload = PyDict::new(py);
+    payload.set_item("id", row.id)?;
+    payload.set_item("category", row.category)?;
+    payload.set_item("start_date", row.start_date)?;
+    payload.set_item("end_date", row.end_date)?;
+    payload.set_item("limit_base", row.limit_base)?;
+    payload.set_item("limit_base_minor", row.limit_base_minor)?;
+    payload.set_item("include_mandatory", row.include_mandatory)?;
+    payload.set_item("scope_type", row.scope_type)?;
+    payload.set_item("scope_value", row.scope_value)?;
+    Ok(payload.into_any().unbind())
+}
+
+fn budget_tuple_to_payload(row: BudgetRowPayload) -> BudgetPayload {
+    BudgetPayload {
+        id: row.0,
+        category: row.1,
+        start_date: row.2,
+        end_date: row.3,
+        limit_base: row.4,
+        limit_base_minor: row.5,
+        include_mandatory: row.6,
+        scope_type: row.7,
+        scope_value: row.8,
+    }
 }
 
 fn distribution_validation_to_dict(
@@ -1140,6 +1173,70 @@ fn distribution_replace_frozen_rows(
 }
 
 #[pyfunction]
+fn budget_rows(py: Python<'_>, db_path: &str) -> PyResult<Vec<Py<PyAny>>> {
+    storage_budget_rows(db_path)
+        .map_err(core_err)?
+        .into_iter()
+        .map(|row| budget_to_dict(py, row))
+        .collect()
+}
+
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn budget_create(
+    py: Python<'_>,
+    db_path: &str,
+    category: &str,
+    scope_type: &str,
+    scope_value: &str,
+    start_date: &str,
+    end_date: &str,
+    limit_base: f64,
+    limit_base_minor: i64,
+    include_mandatory: bool,
+) -> PyResult<Py<PyAny>> {
+    storage_budget_create(
+        db_path,
+        BudgetCreatePayload {
+            category,
+            scope_type,
+            scope_value,
+            start_date,
+            end_date,
+            limit_base,
+            limit_base_minor,
+            include_mandatory,
+        },
+    )
+    .map_err(core_err)
+    .and_then(|row| budget_to_dict(py, row))
+}
+
+#[pyfunction]
+fn budget_delete(db_path: &str, budget_id: i64) -> PyResult<()> {
+    storage_budget_delete(db_path, budget_id).map_err(core_err)
+}
+
+#[pyfunction]
+fn budget_update_limit(
+    py: Python<'_>,
+    db_path: &str,
+    budget_id: i64,
+    limit_base: f64,
+    limit_base_minor: i64,
+) -> PyResult<Py<PyAny>> {
+    storage_budget_update_limit(db_path, budget_id, limit_base, limit_base_minor)
+        .map_err(core_err)
+        .and_then(|row| budget_to_dict(py, row))
+}
+
+#[pyfunction]
+fn budget_replace_rows(db_path: &str, rows: Vec<BudgetRowPayload>) -> PyResult<()> {
+    let payloads: Vec<_> = rows.into_iter().map(budget_tuple_to_payload).collect();
+    storage_budget_replace_rows(db_path, &payloads).map_err(core_err)
+}
+
+#[pyfunction]
 fn budget_spent_minor(
     db_path: &str,
     scope_type: &str,
@@ -1277,6 +1374,11 @@ fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(distribution_unfreeze_month, m)?)?;
     m.add_function(wrap_pyfunction!(distribution_frozen_rows, m)?)?;
     m.add_function(wrap_pyfunction!(distribution_replace_frozen_rows, m)?)?;
+    m.add_function(wrap_pyfunction!(budget_rows, m)?)?;
+    m.add_function(wrap_pyfunction!(budget_create, m)?)?;
+    m.add_function(wrap_pyfunction!(budget_delete, m)?)?;
+    m.add_function(wrap_pyfunction!(budget_update_limit, m)?)?;
+    m.add_function(wrap_pyfunction!(budget_replace_rows, m)?)?;
     m.add_function(wrap_pyfunction!(budget_spent_minor, m)?)?;
     m.add_function(wrap_pyfunction!(budget_batch_spent_minor, m)?)?;
     m.add_function(wrap_pyfunction!(budget_overlap_exists, m)?)?;

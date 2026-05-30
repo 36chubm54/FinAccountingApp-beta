@@ -60,6 +60,31 @@ pub struct FrozenDistributionPayload {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct BudgetPayload {
+    pub id: i64,
+    pub category: String,
+    pub start_date: String,
+    pub end_date: String,
+    pub limit_base: f64,
+    pub limit_base_minor: i64,
+    pub include_mandatory: bool,
+    pub scope_type: String,
+    pub scope_value: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BudgetCreatePayload<'a> {
+    pub category: &'a str,
+    pub scope_type: &'a str,
+    pub scope_value: &'a str,
+    pub start_date: &'a str,
+    pub end_date: &'a str,
+    pub limit_base: f64,
+    pub limit_base_minor: i64,
+    pub include_mandatory: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct DebtRecalculatePayload {
     pub remaining_amount_minor: i64,
     pub status: String,
@@ -157,6 +182,43 @@ fn distribution_item_exists(conn: &Connection, item_id: i64) -> StorageResult<bo
     conn.query_row(
         "SELECT 1 FROM distribution_items WHERE id = ?",
         [item_id],
+        |_| Ok(()),
+    )
+    .optional()
+    .map_err(sqlite_err)
+    .map(|row| row.is_some())
+}
+
+fn budget_from_conn(conn: &Connection, budget_id: i64) -> StorageResult<BudgetPayload> {
+    conn.query_row(
+        "SELECT id, category, start_date, end_date,
+                limit_base, limit_base_minor, include_mandatory, scope_type, scope_value
+         FROM budgets
+         WHERE id = ?",
+        [budget_id],
+        |row| {
+            Ok(BudgetPayload {
+                id: row.get(0)?,
+                category: row.get(1)?,
+                start_date: row.get(2)?,
+                end_date: row.get(3)?,
+                limit_base: row.get(4)?,
+                limit_base_minor: row.get(5)?,
+                include_mandatory: row.get(6)?,
+                scope_type: row.get(7)?,
+                scope_value: row.get(8)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(sqlite_err)?
+    .ok_or_else(|| format!("Budget not found: {budget_id}"))
+}
+
+fn budget_exists(conn: &Connection, budget_id: i64) -> StorageResult<bool> {
+    conn.query_row(
+        "SELECT 1 FROM budgets WHERE id = ?",
+        [budget_id],
         |_| Ok(()),
     )
     .optional()
@@ -968,6 +1030,142 @@ pub fn distribution_replace_frozen_rows(
     Ok(())
 }
 
+pub fn budget_rows(db_path: &str) -> StorageResult<Vec<BudgetPayload>> {
+    with_cached_read_connection(db_path, |conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, category, start_date, end_date,
+                        limit_base, limit_base_minor, include_mandatory, scope_type, scope_value
+                 FROM budgets
+                 ORDER BY start_date DESC, category ASC, id DESC",
+            )
+            .map_err(sqlite_err)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(BudgetPayload {
+                    id: row.get(0)?,
+                    category: row.get(1)?,
+                    start_date: row.get(2)?,
+                    end_date: row.get(3)?,
+                    limit_base: row.get(4)?,
+                    limit_base_minor: row.get(5)?,
+                    include_mandatory: row.get(6)?,
+                    scope_type: row.get(7)?,
+                    scope_value: row.get(8)?,
+                })
+            })
+            .map_err(sqlite_err)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_err)
+    })
+}
+
+pub fn budget_create(
+    db_path: &str,
+    payload: BudgetCreatePayload<'_>,
+) -> StorageResult<BudgetPayload> {
+    let mut conn = open_write_connection(db_path)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    tx.execute(
+        "INSERT INTO budgets (
+            category, scope_type, scope_value,
+            start_date, end_date, limit_base, limit_base_minor, include_mandatory
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        params![
+            payload.category,
+            payload.scope_type,
+            payload.scope_value,
+            payload.start_date,
+            payload.end_date,
+            payload.limit_base,
+            payload.limit_base_minor,
+            payload.include_mandatory
+        ],
+    )
+    .map_err(sqlite_err)?;
+    let budget_id = tx.last_insert_rowid();
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    let conn = open_write_connection(db_path)?;
+    budget_from_conn(&conn, budget_id)
+}
+
+pub fn budget_delete(db_path: &str, budget_id: i64) -> StorageResult<()> {
+    let mut conn = open_write_connection(db_path)?;
+    if !budget_exists(&conn, budget_id)? {
+        return Err(format!("Budget not found: {budget_id}"));
+    }
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    tx.execute("DELETE FROM budgets WHERE id = ?", [budget_id])
+        .map_err(sqlite_err)?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    Ok(())
+}
+
+pub fn budget_update_limit(
+    db_path: &str,
+    budget_id: i64,
+    limit_base: f64,
+    limit_base_minor: i64,
+) -> StorageResult<BudgetPayload> {
+    let mut conn = open_write_connection(db_path)?;
+    if !budget_exists(&conn, budget_id)? {
+        return Err(format!("Budget not found: {budget_id}"));
+    }
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    tx.execute(
+        "UPDATE budgets SET limit_base = ?, limit_base_minor = ? WHERE id = ?",
+        params![limit_base, limit_base_minor, budget_id],
+    )
+    .map_err(sqlite_err)?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    let conn = open_write_connection(db_path)?;
+    budget_from_conn(&conn, budget_id)
+}
+
+pub fn budget_replace_rows(db_path: &str, budgets: &[BudgetPayload]) -> StorageResult<()> {
+    let mut conn = open_write_connection(db_path)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    tx.execute("DELETE FROM budgets", []).map_err(sqlite_err)?;
+    let mut sorted = budgets.to_vec();
+    sorted.sort_by_key(|budget| budget.id);
+    for budget in &sorted {
+        tx.execute(
+            "INSERT INTO budgets (
+                id, category, start_date, end_date,
+                limit_base, limit_base_minor, include_mandatory, scope_type, scope_value
+             )
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                budget.id,
+                budget.category,
+                budget.start_date,
+                budget.end_date,
+                budget.limit_base,
+                budget.limit_base_minor,
+                budget.include_mandatory,
+                budget.scope_type,
+                budget.scope_value,
+            ],
+        )
+        .map_err(sqlite_err)?;
+    }
+    tx.execute("DELETE FROM sqlite_sequence WHERE name = ?", ["budgets"])
+        .map_err(sqlite_err)?;
+    if let Some(max_id) = budgets.iter().map(|budget| budget.id).max() {
+        tx.execute(
+            "INSERT INTO sqlite_sequence(name, seq) VALUES('budgets', ?)",
+            [max_id],
+        )
+        .map_err(sqlite_err)?;
+    }
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    Ok(())
+}
+
 pub fn budget_spent_minor(
     db_path: &str,
     scope_type: &str,
@@ -1171,6 +1369,17 @@ mod tests {
         let conn = Connection::open(db_path).expect("open test db");
         conn.execute_batch(
             "
+            CREATE TABLE budgets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category TEXT NOT NULL,
+                scope_type TEXT NOT NULL DEFAULT 'category',
+                scope_value TEXT NOT NULL DEFAULT '',
+                start_date TEXT NOT NULL,
+                end_date TEXT NOT NULL,
+                limit_base REAL NOT NULL,
+                limit_base_minor INTEGER NOT NULL DEFAULT 0,
+                include_mandatory INTEGER NOT NULL DEFAULT 0
+            );
             CREATE TABLE distribution_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
@@ -1294,6 +1503,116 @@ mod tests {
         );
         let rows = distribution_frozen_rows(&db_path, None, None).expect("frozen rows");
         assert_eq!(rows, vec![row]);
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn budget_crud_and_replace_rows_preserve_sequences() {
+        let db_path = test_db_path("budget_crud");
+        init_distribution_schema(&db_path);
+        let budget = budget_create(
+            &db_path,
+            BudgetCreatePayload {
+                category: "Food",
+                scope_type: "category",
+                scope_value: "Food",
+                start_date: "2026-03-01",
+                end_date: "2026-03-31",
+                limit_base: 1000.0,
+                limit_base_minor: 100000,
+                include_mandatory: true,
+            },
+        )
+        .expect("create budget");
+        assert_eq!(budget.id, 1);
+        assert_eq!(budget.limit_base_minor, 100000);
+        let updated =
+            budget_update_limit(&db_path, budget.id, 1250.0, 125000).expect("update limit");
+        assert_eq!(updated.limit_base, 1250.0);
+        assert_eq!(updated.limit_base_minor, 125000);
+        assert!(
+            budget_update_limit(&db_path, 999, 1.0, 100)
+                .expect_err("missing update")
+                .contains("Budget not found: 999")
+        );
+        budget_delete(&db_path, budget.id).expect("delete");
+        assert!(budget_rows(&db_path).expect("rows").is_empty());
+        assert!(
+            budget_delete(&db_path, budget.id)
+                .expect_err("missing delete")
+                .contains("Budget not found: 1")
+        );
+
+        let replacement = BudgetPayload {
+            id: 7,
+            category: "Travel".to_owned(),
+            start_date: "2026-04-01".to_owned(),
+            end_date: "2026-04-30".to_owned(),
+            limit_base: 500.0,
+            limit_base_minor: 50000,
+            include_mandatory: false,
+            scope_type: "category".to_owned(),
+            scope_value: "Travel".to_owned(),
+        };
+        budget_replace_rows(&db_path, &[replacement]).expect("replace");
+        let created = budget_create(
+            &db_path,
+            BudgetCreatePayload {
+                category: "Next",
+                scope_type: "category",
+                scope_value: "Next",
+                start_date: "2026-05-01",
+                end_date: "2026-05-31",
+                limit_base: 100.0,
+                limit_base_minor: 10000,
+                include_mandatory: false,
+            },
+        )
+        .expect("create after replace");
+        assert_eq!(created.id, 8);
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn budget_overlap_helper_matches_period_contract() {
+        let db_path = test_db_path("budget_overlap");
+        init_distribution_schema(&db_path);
+        budget_create(
+            &db_path,
+            BudgetCreatePayload {
+                category: "Food",
+                scope_type: "category",
+                scope_value: "Food",
+                start_date: "2026-03-01",
+                end_date: "2026-03-31",
+                limit_base: 1000.0,
+                limit_base_minor: 100000,
+                include_mandatory: false,
+            },
+        )
+        .expect("create budget");
+        assert!(
+            budget_overlap_exists(
+                &db_path,
+                "category",
+                "Food",
+                "2026-03-15",
+                "2026-04-15",
+                None,
+            )
+            .expect("overlap")
+        );
+        assert!(
+            !budget_overlap_exists(
+                &db_path,
+                "category",
+                "Food",
+                "2026-04-01",
+                "2026-04-30",
+                None,
+            )
+            .expect("adjacent")
+        );
         fs::remove_file(db_path).ok();
     }
 }

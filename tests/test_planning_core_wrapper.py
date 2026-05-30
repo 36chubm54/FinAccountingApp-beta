@@ -267,6 +267,57 @@ def test_budget_service_rust_path_matches_python_fallback(tmp_path: Path) -> Non
         repo.close()
 
 
+def _exercise_budget_write_path(repo: SQLiteRecordRepository) -> tuple[object, ...]:
+    service = BudgetService(repo)
+    category_budget = service.create_budget(
+        "Food",
+        "2026-03-01",
+        "2026-03-31",
+        500.0,
+        include_mandatory=True,
+    )
+    tag_budget = service.create_budget(
+        "",
+        "2026-03-01",
+        "2026-03-31",
+        300.0,
+        scope_type="tag",
+        scope_value="#Travel",
+    )
+    updated_budget = service.update_budget_limit(category_budget.id, 750.25)
+    temporary = service.create_budget("Temp", "2026-04-01", "2026-04-30", 100.0)
+    service.delete_budget(temporary.id)
+    budgets = service.get_budgets()
+    service.replace_budgets(budgets)
+
+    sequence_rows = repo.query_all("SELECT name, seq FROM sqlite_sequence WHERE name = 'budgets'")
+    return (
+        service.get_budgets(),
+        service.get_budget_result(updated_budget),
+        service.get_budget_result(tag_budget),
+        [(row["name"], int(row["seq"])) for row in sequence_rows],
+    )
+
+
+def test_budget_write_path_rust_matches_python_fallback(tmp_path: Path) -> None:
+    rust_repo = _build_repo(tmp_path, "budget_rust_write.db")
+    fallback_repo = _build_repo(tmp_path, "budget_fallback_write.db")
+    try:
+        rust_values = _exercise_budget_write_path(rust_repo)
+
+        rust_core = budget_module._RUST_BUDGET_CORE
+        budget_module._RUST_BUDGET_CORE = None
+        try:
+            fallback_values = _exercise_budget_write_path(fallback_repo)
+        finally:
+            budget_module._RUST_BUDGET_CORE = rust_core
+
+        assert rust_values == fallback_values
+    finally:
+        rust_repo.close()
+        fallback_repo.close()
+
+
 def test_debt_service_rust_path_matches_python_fallback(tmp_path: Path) -> None:
     repo = _build_repo(tmp_path)
     try:

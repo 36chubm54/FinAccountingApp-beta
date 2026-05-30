@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date as dt_date
-from typing import cast
+from typing import Any, cast
 
 from app.data.protocols import BudgetRepositoryProtocol
 from bridge.ledgera_bridge import RustBudgetPlanningCore, get_budget_planning_core
@@ -18,6 +18,14 @@ from utils.finance.money import minor_to_money, to_minor_units, to_money_float
 from utils.records.tags import normalize_tag_name
 
 _RUST_BUDGET_CORE = get_budget_planning_core()
+
+
+def _payload_int(payload: dict[str, object], key: str, default: int = 0) -> int:
+    return int(cast(Any, payload.get(key, default)))
+
+
+def _payload_float(payload: dict[str, object], key: str, default: float = 0.0) -> float:
+    return float(cast(Any, payload.get(key, default)))
 
 
 class BudgetService:
@@ -61,6 +69,24 @@ class BudgetService:
         start_text = start.isoformat()
         end_text = end.isoformat()
         self._check_overlap(scope_type, scope_value, start_text, end_text, exclude_id=None)
+        limit_minor = to_minor_units(limit_value)
+
+        db_path = self._db_path()
+        if _RUST_BUDGET_CORE is not None and db_path:
+            rust_core = cast(RustBudgetPlanningCore, _RUST_BUDGET_CORE)
+            return self._budget_from_payload(
+                rust_core.budget_create(
+                    db_path,
+                    category,
+                    scope_type,
+                    scope_value,
+                    start_text,
+                    end_text,
+                    limit_value,
+                    limit_minor,
+                    bool(include_mandatory),
+                )
+            )
 
         self._repo.execute(
             """
@@ -77,7 +103,7 @@ class BudgetService:
                 start_text,
                 end_text,
                 limit_value,
-                to_minor_units(limit_value),
+                limit_minor,
                 int(bool(include_mandatory)),
             ),
         )
@@ -88,6 +114,13 @@ class BudgetService:
         return self._load_budget_by_id(int(row[0]))
 
     def get_budgets(self) -> list[Budget]:
+        db_path = self._db_path()
+        if _RUST_BUDGET_CORE is not None and db_path:
+            try:
+                rust_core = cast(RustBudgetPlanningCore, _RUST_BUDGET_CORE)
+                return [self._budget_from_payload(row) for row in rust_core.budget_rows(db_path)]
+            except Exception:
+                pass
         rows = self._repo.query_all(
             """
             SELECT id, category, start_date, end_date,
@@ -99,6 +132,11 @@ class BudgetService:
         return [row_to_budget(row) for row in rows]
 
     def delete_budget(self, budget_id: int) -> None:
+        db_path = self._db_path()
+        if _RUST_BUDGET_CORE is not None and db_path:
+            rust_core = cast(RustBudgetPlanningCore, _RUST_BUDGET_CORE)
+            rust_core.budget_delete(db_path, int(budget_id))
+            return
         row = self._repo.query_one("SELECT id FROM budgets WHERE id = ?", (int(budget_id),))
         if row is None:
             raise ValueError(f"Budget not found: {budget_id}")
@@ -109,17 +147,50 @@ class BudgetService:
         limit_value = to_money_float(new_limit_base)
         if limit_value <= 0:
             raise ValueError("Budget limit must be positive")
+        limit_minor = to_minor_units(limit_value)
+        db_path = self._db_path()
+        if _RUST_BUDGET_CORE is not None and db_path:
+            rust_core = cast(RustBudgetPlanningCore, _RUST_BUDGET_CORE)
+            return self._budget_from_payload(
+                rust_core.budget_update_limit(
+                    db_path,
+                    int(budget_id),
+                    limit_value,
+                    limit_minor,
+                )
+            )
         row = self._repo.query_one("SELECT id FROM budgets WHERE id = ?", (int(budget_id),))
         if row is None:
             raise ValueError(f"Budget not found: {budget_id}")
         self._repo.execute(
             "UPDATE budgets SET limit_base = ?, limit_base_minor = ? WHERE id = ?",
-            (limit_value, to_minor_units(limit_value), int(budget_id)),
+            (limit_value, limit_minor, int(budget_id)),
         )
         self._repo.commit()
         return self._load_budget_by_id(int(budget_id))
 
     def replace_budgets(self, budgets: list[Budget]) -> None:
+        db_path = self._db_path()
+        if _RUST_BUDGET_CORE is not None and db_path:
+            rust_core = cast(RustBudgetPlanningCore, _RUST_BUDGET_CORE)
+            rust_core.budget_replace_rows(
+                db_path,
+                [
+                    (
+                        int(budget.id),
+                        str(budget.category),
+                        str(budget.start_date),
+                        str(budget.end_date),
+                        float(budget.limit_base),
+                        int(budget.limit_base_minor),
+                        bool(budget.include_mandatory),
+                        str(budget.scope_type),
+                        str(budget.scope_value),
+                    )
+                    for budget in budgets
+                ],
+            )
+            return
         with self._repo.transaction():
             self._repo.execute("DELETE FROM budgets")
             for budget in sorted(budgets, key=lambda item: int(item.id)):
@@ -285,6 +356,19 @@ class BudgetService:
     def _db_path(self) -> str | None:
         db_path = getattr(self._repo, "db_path", None)
         return db_path if isinstance(db_path, str) and db_path else None
+
+    def _budget_from_payload(self, payload: dict[str, object]) -> Budget:
+        return Budget(
+            id=_payload_int(payload, "id"),
+            category=str(payload.get("category", "")),
+            start_date=str(payload.get("start_date", "")),
+            end_date=str(payload.get("end_date", "")),
+            limit_base=_payload_float(payload, "limit_base"),
+            limit_base_minor=_payload_int(payload, "limit_base_minor"),
+            include_mandatory=bool(payload.get("include_mandatory", False)),
+            scope_type=str(payload.get("scope_type", "category")),
+            scope_value=str(payload.get("scope_value", "")),
+        )
 
     def _spent_minor_for_budget(
         self,

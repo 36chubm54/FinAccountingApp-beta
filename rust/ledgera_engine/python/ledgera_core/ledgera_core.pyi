@@ -2,6 +2,18 @@ def build_rate(amount_original: object, amount_base: object, currency: str) -> f
 def budget_batch_spent_minor(
     db_path: str, budgets: list[tuple[int, str, str, str, str, bool]]
 ) -> list[tuple[int, int]]: ...
+def budget_create(
+    db_path: str,
+    category: str,
+    scope_type: str,
+    scope_value: str,
+    start_date: str,
+    end_date: str,
+    limit_base: float,
+    limit_base_minor: int,
+    include_mandatory: bool,
+) -> dict[str, object]: ...
+def budget_delete(db_path: str, budget_id: int) -> None: ...
 def budget_overlap_exists(
     db_path: str,
     scope_type: str,
@@ -10,6 +22,11 @@ def budget_overlap_exists(
     end_date: str,
     exclude_id: int | None = None,
 ) -> bool: ...
+def budget_replace_rows(
+    db_path: str,
+    rows: list[tuple[int, str, str, str, float, int, bool, str, str]],
+) -> None: ...
+def budget_rows(db_path: str) -> list[dict[str, object]]: ...
 def budget_spent_minor(
     db_path: str,
     scope_type: str,
@@ -18,6 +35,9 @@ def budget_spent_minor(
     end_date: str,
     include_mandatory: bool,
 ) -> int: ...
+def budget_update_limit(
+    db_path: str, budget_id: int, limit_base: float, limit_base_minor: int
+) -> dict[str, object]: ...
 def cashflow_sum(db_path: str, record_type: str, start_date: str, end_date: str) -> float: ...
 def currency_default_rates_for_base(
     base_currency: str, rates: dict[str, float]

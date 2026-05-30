@@ -289,6 +289,21 @@ class RustBudgetPlanningCore(Protocol):
         self, db_path: str, budgets: list[tuple[int, str, str, str, str, bool]]
     ) -> list[tuple[int, int]]: ...
 
+    def budget_create(
+        self,
+        db_path: str,
+        category: str,
+        scope_type: str,
+        scope_value: str,
+        start_date: str,
+        end_date: str,
+        limit_base: float,
+        limit_base_minor: int,
+        include_mandatory: bool,
+    ) -> dict[str, object]: ...
+
+    def budget_delete(self, db_path: str, budget_id: int) -> None: ...
+
     def budget_overlap_exists(
         self,
         db_path: str,
@@ -299,6 +314,14 @@ class RustBudgetPlanningCore(Protocol):
         exclude_id: int | None = None,
     ) -> bool: ...
 
+    def budget_replace_rows(
+        self,
+        db_path: str,
+        rows: list[tuple[int, str, str, str, float, int, bool, str, str]],
+    ) -> None: ...
+
+    def budget_rows(self, db_path: str) -> list[dict[str, object]]: ...
+
     def budget_spent_minor(
         self,
         db_path: str,
@@ -308,6 +331,14 @@ class RustBudgetPlanningCore(Protocol):
         end_date: str,
         include_mandatory: bool,
     ) -> int: ...
+
+    def budget_update_limit(
+        self,
+        db_path: str,
+        budget_id: int,
+        limit_base: float,
+        limit_base_minor: int,
+    ) -> dict[str, object]: ...
 
 
 class RustDebtCore(Protocol):
@@ -407,8 +438,13 @@ _DISTRIBUTION_SYMBOLS = (
 )
 _BUDGET_PLANNING_SYMBOLS = (
     "budget_batch_spent_minor",
+    "budget_create",
+    "budget_delete",
     "budget_overlap_exists",
+    "budget_replace_rows",
+    "budget_rows",
     "budget_spent_minor",
+    "budget_update_limit",
 )
 _DEBT_SYMBOLS = (
     "debt_payment_total_minor",

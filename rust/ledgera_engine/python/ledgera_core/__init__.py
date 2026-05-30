@@ -17,8 +17,13 @@ from .ledgera_core import (  # pyright: ignore[reportMissingModuleSource]
 
 cashflow_sum = getattr(_ledgera_core, "cashflow_sum", None)
 budget_batch_spent_minor = getattr(_ledgera_core, "budget_batch_spent_minor", None)
+budget_create = getattr(_ledgera_core, "budget_create", None)
+budget_delete = getattr(_ledgera_core, "budget_delete", None)
 budget_overlap_exists = getattr(_ledgera_core, "budget_overlap_exists", None)
+budget_replace_rows = getattr(_ledgera_core, "budget_replace_rows", None)
+budget_rows = getattr(_ledgera_core, "budget_rows", None)
 budget_spent_minor = getattr(_ledgera_core, "budget_spent_minor", None)
+budget_update_limit = getattr(_ledgera_core, "budget_update_limit", None)
 currency_default_rates_for_base = getattr(_ledgera_core, "currency_default_rates_for_base", None)
 currency_rate_for = getattr(_ledgera_core, "currency_rate_for", None)
 currency_resolve_provider_order = getattr(_ledgera_core, "currency_resolve_provider_order", None)
@@ -101,10 +106,20 @@ if cashflow_sum is not None:
     __all__.append("cashflow_sum")
 if budget_batch_spent_minor is not None:
     __all__.append("budget_batch_spent_minor")
+if budget_create is not None:
+    __all__.append("budget_create")
+if budget_delete is not None:
+    __all__.append("budget_delete")
 if budget_overlap_exists is not None:
     __all__.append("budget_overlap_exists")
+if budget_replace_rows is not None:
+    __all__.append("budget_replace_rows")
+if budget_rows is not None:
+    __all__.append("budget_rows")
 if budget_spent_minor is not None:
     __all__.append("budget_spent_minor")
+if budget_update_limit is not None:
+    __all__.append("budget_update_limit")
 if currency_default_rates_for_base is not None:
     __all__.append("currency_default_rates_for_base")
 if currency_rate_for is not None:
