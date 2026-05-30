@@ -170,9 +170,45 @@ class RustCurrencyCore(Protocol):
 class RustDistributionCore(Protocol):
     def distribution_available_months(self, db_path: str) -> list[str]: ...
 
+    def distribution_create_item(
+        self,
+        db_path: str,
+        name: str,
+        group_name: str,
+        sort_order: int,
+        pct: float,
+        pct_minor: int,
+    ) -> dict[str, object]: ...
+
+    def distribution_create_subitem(
+        self,
+        db_path: str,
+        item_id: int,
+        name: str,
+        sort_order: int,
+        pct: float,
+        pct_minor: int,
+    ) -> dict[str, object]: ...
+
+    def distribution_delete_item(self, db_path: str, item_id: int) -> None: ...
+
+    def distribution_delete_subitem(self, db_path: str, subitem_id: int) -> None: ...
+
+    def distribution_frozen_rows(
+        self, db_path: str, start_month: str | None = None, end_month: str | None = None
+    ) -> list[dict[str, object]]: ...
+
     def distribution_history_months(
         self, db_path: str, start_month: str, end_month: str
     ) -> list[str]: ...
+
+    def distribution_is_month_auto_fixed(self, db_path: str, month: str) -> bool: ...
+
+    def distribution_is_month_fixed(self, db_path: str, month: str) -> bool: ...
+
+    def distribution_item_rows(
+        self, db_path: str, active_only: bool
+    ) -> list[dict[str, object]]: ...
 
     def distribution_monthly_payload(
         self, db_path: str, month: str, start_date: str, end_date: str
@@ -183,6 +219,69 @@ class RustDistributionCore(Protocol):
     ) -> tuple[float, int]: ...
 
     def distribution_validate_structure(self, db_path: str) -> list[dict[str, object]]: ...
+
+    def distribution_replace_frozen_rows(
+        self,
+        db_path: str,
+        rows: list[
+            tuple[
+                str,
+                list[str],
+                list[tuple[str, str]],
+                list[tuple[str, str]],
+                bool,
+                bool,
+            ]
+        ],
+    ) -> None: ...
+
+    def distribution_replace_structure(
+        self,
+        db_path: str,
+        items: list[tuple[int, str, str, int, float, int, bool]],
+        subitems: list[tuple[int, int, str, int, float, int, bool]],
+    ) -> None: ...
+
+    def distribution_subitem_rows(
+        self, db_path: str, item_id: int, active_only: bool
+    ) -> list[dict[str, object]]: ...
+
+    def distribution_unfreeze_month(self, db_path: str, month: str) -> None: ...
+
+    def distribution_update_item_name(
+        self, db_path: str, item_id: int, name: str
+    ) -> dict[str, object]: ...
+
+    def distribution_update_item_order(
+        self, db_path: str, item_id: int, sort_order: int
+    ) -> None: ...
+
+    def distribution_update_item_pct(
+        self, db_path: str, item_id: int, pct: float, pct_minor: int
+    ) -> dict[str, object]: ...
+
+    def distribution_update_subitem_name(
+        self, db_path: str, subitem_id: int, name: str
+    ) -> dict[str, object]: ...
+
+    def distribution_update_subitem_order(
+        self, db_path: str, subitem_id: int, sort_order: int
+    ) -> None: ...
+
+    def distribution_update_subitem_pct(
+        self, db_path: str, subitem_id: int, pct: float, pct_minor: int
+    ) -> dict[str, object]: ...
+
+    def distribution_write_frozen_row(
+        self,
+        db_path: str,
+        month: str,
+        column_order: list[str],
+        headings_by_column: list[tuple[str, str]],
+        values_by_column: list[tuple[str, str]],
+        is_negative: bool,
+        auto_fixed: bool,
+    ) -> None: ...
 
 
 class RustBudgetPlanningCore(Protocol):
@@ -282,10 +381,29 @@ _CURRENCY_SYMBOLS = (
 )
 _DISTRIBUTION_SYMBOLS = (
     "distribution_available_months",
+    "distribution_create_item",
+    "distribution_create_subitem",
+    "distribution_delete_item",
+    "distribution_delete_subitem",
+    "distribution_frozen_rows",
     "distribution_history_months",
+    "distribution_is_month_auto_fixed",
+    "distribution_is_month_fixed",
+    "distribution_item_rows",
     "distribution_monthly_payload",
     "distribution_net_income_for_period",
+    "distribution_replace_frozen_rows",
+    "distribution_replace_structure",
+    "distribution_subitem_rows",
+    "distribution_unfreeze_month",
+    "distribution_update_item_name",
+    "distribution_update_item_order",
+    "distribution_update_item_pct",
+    "distribution_update_subitem_name",
+    "distribution_update_subitem_order",
+    "distribution_update_subitem_pct",
     "distribution_validate_structure",
+    "distribution_write_frozen_row",
 )
 _BUDGET_PLANNING_SYMBOLS = (
     "budget_batch_spent_minor",

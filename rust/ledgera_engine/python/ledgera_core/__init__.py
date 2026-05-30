@@ -26,12 +26,33 @@ debt_payment_total_minor = getattr(_ledgera_core, "debt_payment_total_minor", No
 debt_recalculate_payload = getattr(_ledgera_core, "debt_recalculate_payload", None)
 debt_validate_payment_amount = getattr(_ledgera_core, "debt_validate_payment_amount", None)
 distribution_available_months = getattr(_ledgera_core, "distribution_available_months", None)
+distribution_create_item = getattr(_ledgera_core, "distribution_create_item", None)
+distribution_create_subitem = getattr(_ledgera_core, "distribution_create_subitem", None)
+distribution_delete_item = getattr(_ledgera_core, "distribution_delete_item", None)
+distribution_delete_subitem = getattr(_ledgera_core, "distribution_delete_subitem", None)
+distribution_frozen_rows = getattr(_ledgera_core, "distribution_frozen_rows", None)
 distribution_history_months = getattr(_ledgera_core, "distribution_history_months", None)
+distribution_is_month_auto_fixed = getattr(_ledgera_core, "distribution_is_month_auto_fixed", None)
+distribution_is_month_fixed = getattr(_ledgera_core, "distribution_is_month_fixed", None)
+distribution_item_rows = getattr(_ledgera_core, "distribution_item_rows", None)
 distribution_monthly_payload = getattr(_ledgera_core, "distribution_monthly_payload", None)
 distribution_net_income_for_period = getattr(
     _ledgera_core, "distribution_net_income_for_period", None
 )
+distribution_replace_frozen_rows = getattr(_ledgera_core, "distribution_replace_frozen_rows", None)
+distribution_replace_structure = getattr(_ledgera_core, "distribution_replace_structure", None)
+distribution_subitem_rows = getattr(_ledgera_core, "distribution_subitem_rows", None)
+distribution_unfreeze_month = getattr(_ledgera_core, "distribution_unfreeze_month", None)
+distribution_update_item_name = getattr(_ledgera_core, "distribution_update_item_name", None)
+distribution_update_item_order = getattr(_ledgera_core, "distribution_update_item_order", None)
+distribution_update_item_pct = getattr(_ledgera_core, "distribution_update_item_pct", None)
+distribution_update_subitem_name = getattr(_ledgera_core, "distribution_update_subitem_name", None)
+distribution_update_subitem_order = getattr(
+    _ledgera_core, "distribution_update_subitem_order", None
+)
+distribution_update_subitem_pct = getattr(_ledgera_core, "distribution_update_subitem_pct", None)
 distribution_validate_structure = getattr(_ledgera_core, "distribution_validate_structure", None)
+distribution_write_frozen_row = getattr(_ledgera_core, "distribution_write_frozen_row", None)
 metrics_burn_rate = getattr(_ledgera_core, "metrics_burn_rate", None)
 metrics_income_by_category = getattr(_ledgera_core, "metrics_income_by_category", None)
 metrics_monthly_summary = getattr(_ledgera_core, "metrics_monthly_summary", None)
@@ -98,14 +119,52 @@ if debt_validate_payment_amount is not None:
     __all__.append("debt_validate_payment_amount")
 if distribution_available_months is not None:
     __all__.append("distribution_available_months")
+if distribution_create_item is not None:
+    __all__.append("distribution_create_item")
+if distribution_create_subitem is not None:
+    __all__.append("distribution_create_subitem")
+if distribution_delete_item is not None:
+    __all__.append("distribution_delete_item")
+if distribution_delete_subitem is not None:
+    __all__.append("distribution_delete_subitem")
+if distribution_frozen_rows is not None:
+    __all__.append("distribution_frozen_rows")
 if distribution_history_months is not None:
     __all__.append("distribution_history_months")
+if distribution_is_month_auto_fixed is not None:
+    __all__.append("distribution_is_month_auto_fixed")
+if distribution_is_month_fixed is not None:
+    __all__.append("distribution_is_month_fixed")
+if distribution_item_rows is not None:
+    __all__.append("distribution_item_rows")
 if distribution_monthly_payload is not None:
     __all__.append("distribution_monthly_payload")
 if distribution_net_income_for_period is not None:
     __all__.append("distribution_net_income_for_period")
+if distribution_replace_frozen_rows is not None:
+    __all__.append("distribution_replace_frozen_rows")
+if distribution_replace_structure is not None:
+    __all__.append("distribution_replace_structure")
+if distribution_subitem_rows is not None:
+    __all__.append("distribution_subitem_rows")
+if distribution_unfreeze_month is not None:
+    __all__.append("distribution_unfreeze_month")
+if distribution_update_item_name is not None:
+    __all__.append("distribution_update_item_name")
+if distribution_update_item_order is not None:
+    __all__.append("distribution_update_item_order")
+if distribution_update_item_pct is not None:
+    __all__.append("distribution_update_item_pct")
+if distribution_update_subitem_name is not None:
+    __all__.append("distribution_update_subitem_name")
+if distribution_update_subitem_order is not None:
+    __all__.append("distribution_update_subitem_order")
+if distribution_update_subitem_pct is not None:
+    __all__.append("distribution_update_subitem_pct")
 if distribution_validate_structure is not None:
     __all__.append("distribution_validate_structure")
+if distribution_write_frozen_row is not None:
+    __all__.append("distribution_write_frozen_row")
 if metrics_burn_rate is not None:
     __all__.append("metrics_burn_rate")
 if metrics_income_by_category is not None:

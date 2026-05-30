@@ -134,6 +134,78 @@ def test_distribution_service_rust_path_matches_python_fallback(tmp_path: Path) 
         repo.close()
 
 
+def _exercise_distribution_write_path(repo: SQLiteRecordRepository) -> tuple[object, ...]:
+    service = DistributionService(repo)
+    item = service.create_item("Needs", group_name="Core", pct=60.0)
+    second = service.create_item("Savings", pct=40.0)
+    item = service.update_item_name(item.id, "Essentials")
+    item = service.update_item_pct(item.id, 70.0)
+    service.update_item_order(second.id, -1)
+    subitem = service.create_subitem(item.id, "Rent", pct=100.0)
+    subitem = service.update_subitem_name(subitem.id, "Housing")
+    subitem = service.update_subitem_pct(subitem.id, 80.0)
+    service.update_subitem_order(subitem.id, 2)
+    temporary = service.create_subitem(item.id, "Temporary", pct=20.0)
+    service.delete_subitem(temporary.id)
+    doomed = service.create_item("Delete me")
+    service.delete_item(doomed.id)
+    items, subitems_by_item = service.export_structure()
+    service.replace_structure(items, subitems_by_item)
+
+    with sqlite3.connect(repo.db_path) as conn:
+        _insert_record(
+            conn,
+            record_type="income",
+            date="2026-03-01",
+            amount_base=1000.0,
+            category="Salary",
+        )
+    frozen = service.freeze_month("2026-03")
+    fixed_before = service.is_month_fixed("2026-03")
+    auto_before = service.is_month_auto_fixed("2026-03")
+    frozen_rows = service.get_frozen_rows("2026-03", "2026-03")
+    service.unfreeze_month("2026-03")
+    fixed_after = service.is_month_fixed("2026-03")
+    service.replace_frozen_rows(frozen_rows)
+
+    item_seq = repo.query_all(
+        "SELECT name, seq FROM sqlite_sequence WHERE name = 'distribution_items'"
+    )
+    subitem_seq = repo.query_all(
+        "SELECT name, seq FROM sqlite_sequence WHERE name = 'distribution_subitems'"
+    )
+    return (
+        service.export_structure(),
+        frozen,
+        fixed_before,
+        auto_before,
+        frozen_rows,
+        fixed_after,
+        service.get_frozen_rows(),
+        [(row["name"], int(row["seq"])) for row in item_seq],
+        [(row["name"], int(row["seq"])) for row in subitem_seq],
+    )
+
+
+def test_distribution_write_path_rust_matches_python_fallback(tmp_path: Path) -> None:
+    rust_repo = _build_repo(tmp_path, "distribution_rust_write.db")
+    fallback_repo = _build_repo(tmp_path, "distribution_fallback_write.db")
+    try:
+        rust_values = _exercise_distribution_write_path(rust_repo)
+
+        rust_core = distribution_module._RUST_DISTRIBUTION_CORE
+        distribution_module._RUST_DISTRIBUTION_CORE = None
+        try:
+            fallback_values = _exercise_distribution_write_path(fallback_repo)
+        finally:
+            distribution_module._RUST_DISTRIBUTION_CORE = rust_core
+
+        assert rust_values == fallback_values
+    finally:
+        rust_repo.close()
+        fallback_repo.close()
+
+
 def test_budget_service_rust_path_matches_python_fallback(tmp_path: Path) -> None:
     repo = _build_repo(tmp_path)
     try:

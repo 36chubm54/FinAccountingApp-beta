@@ -1,5 +1,6 @@
 use ledgera_engine_storage::{
-    CategoryMetricRow, MandatoryExpenseRow, MonthlyCashflowRow, MonthlyCumulativeRow,
+    CategoryMetricRow, DistributionItemPayload, DistributionSubitemPayload,
+    FrozenDistributionPayload, MandatoryExpenseRow, MonthlyCashflowRow, MonthlyCumulativeRow,
     MonthlySummaryRow, NetWorthDeltaRow, RecordRow, TagCoverageRow, TagMetricRow, TransferRow,
     WalletBalanceRow, WalletRow, budget_batch_spent_minor as storage_budget_batch_spent_minor,
     budget_overlap_exists as storage_budget_overlap_exists,
@@ -8,28 +9,47 @@ use ledgera_engine_storage::{
     debt_recalculate_payload as storage_debt_recalculate_payload,
     debt_validate_payment_amount as storage_debt_validate_payment_amount,
     distribution_available_months as storage_distribution_available_months,
+    distribution_create_item as storage_distribution_create_item,
+    distribution_create_subitem as storage_distribution_create_subitem,
+    distribution_delete_item as storage_distribution_delete_item,
+    distribution_delete_subitem as storage_distribution_delete_subitem,
+    distribution_frozen_rows as storage_distribution_frozen_rows,
     distribution_history_months as storage_distribution_history_months,
+    distribution_is_month_auto_fixed as storage_distribution_is_month_auto_fixed,
+    distribution_is_month_fixed as storage_distribution_is_month_fixed,
+    distribution_item_rows as storage_distribution_item_rows,
     distribution_monthly_payload as storage_distribution_monthly_payload,
     distribution_net_income_for_period as storage_distribution_net_income_for_period,
+    distribution_replace_frozen_rows as storage_distribution_replace_frozen_rows,
+    distribution_replace_structure as storage_distribution_replace_structure,
+    distribution_subitem_rows as storage_distribution_subitem_rows,
+    distribution_unfreeze_month as storage_distribution_unfreeze_month,
+    distribution_update_item_name as storage_distribution_update_item_name,
+    distribution_update_item_order as storage_distribution_update_item_order,
+    distribution_update_item_pct as storage_distribution_update_item_pct,
+    distribution_update_subitem_name as storage_distribution_update_subitem_name,
+    distribution_update_subitem_order as storage_distribution_update_subitem_order,
+    distribution_update_subitem_pct as storage_distribution_update_subitem_pct,
     distribution_validate_structure as storage_distribution_validate_structure,
+    distribution_write_frozen_row as storage_distribution_write_frozen_row,
     mandatory_expense_row as storage_mandatory_expense_row,
     mandatory_expense_rows as storage_mandatory_expense_rows,
-    metrics_period_snapshot as storage_metrics_period_snapshot,
-    metrics_refresh_snapshot as storage_metrics_refresh_snapshot,
     metrics_burn_rate as storage_metrics_burn_rate,
     metrics_income_by_category as storage_metrics_income_by_category,
     metrics_monthly_summary as storage_metrics_monthly_summary,
+    metrics_period_snapshot as storage_metrics_period_snapshot,
+    metrics_refresh_snapshot as storage_metrics_refresh_snapshot,
     metrics_savings_rate as storage_metrics_savings_rate,
     metrics_spending_by_category as storage_metrics_spending_by_category,
     metrics_spending_by_tag as storage_metrics_spending_by_tag,
     metrics_tag_coverage as storage_metrics_tag_coverage, record_get_row as storage_record_get_row,
     record_list_rows as storage_record_list_rows, record_rows_by_tag as storage_record_rows_by_tag,
+    storage_clear_read_connection_cache,
     timeline_cumulative_income_expense as storage_timeline_cumulative_income_expense,
     timeline_monthly_cashflow as storage_timeline_monthly_cashflow,
     timeline_net_worth_monthly_deltas as storage_timeline_net_worth_monthly_deltas,
     transfer_id_by_record_index as storage_transfer_id_by_record_index,
     transfer_list_rows as storage_transfer_list_rows,
-    storage_clear_read_connection_cache,
     wallet_balance_parts as storage_wallet_balance_parts,
     wallet_balance_rows as storage_wallet_balance_rows,
     wallet_list_rows as storage_wallet_list_rows,
@@ -42,6 +62,14 @@ type CompactCategoryRows = Vec<(String, f64, i64)>;
 type CompactTagRows = Vec<(String, String, f64, i64)>;
 type CompactMonthlySummaryRows = Vec<(String, f64, f64, f64, f64)>;
 type CompactMonthlyCashflowRows = Vec<(String, f64, f64, f64)>;
+type FrozenDistributionRowPayload = (
+    String,
+    Vec<String>,
+    Vec<(String, String)>,
+    Vec<(String, String)>,
+    bool,
+    bool,
+);
 type CompactMetricsPeriodSnapshot = (
     f64,
     f64,
@@ -369,6 +397,61 @@ fn distribution_monthly_to_dict(
     Ok(payload.into_any().unbind())
 }
 
+fn frozen_distribution_to_dict(
+    py: Python<'_>,
+    row: FrozenDistributionPayload,
+) -> PyResult<Py<PyAny>> {
+    let headings = PyDict::new(py);
+    for (key, value) in row.headings_by_column {
+        headings.set_item(key, value)?;
+    }
+    let values = PyDict::new(py);
+    for (key, value) in row.values_by_column {
+        values.set_item(key, value)?;
+    }
+    let payload = PyDict::new(py);
+    payload.set_item("month", row.month)?;
+    payload.set_item("column_order", row.column_order)?;
+    payload.set_item("headings_by_column", headings)?;
+    payload.set_item("values_by_column", values)?;
+    payload.set_item("is_negative", row.is_negative)?;
+    payload.set_item("auto_fixed", row.auto_fixed)?;
+    Ok(payload.into_any().unbind())
+}
+
+fn item_tuple_to_payload(
+    row: (i64, String, String, i64, f64, i64, bool),
+) -> DistributionItemPayload {
+    DistributionItemPayload {
+        id: row.0,
+        name: row.1,
+        group_name: row.2,
+        sort_order: row.3,
+        pct: row.4,
+        pct_minor: row.5,
+        is_active: row.6,
+        amount_base: 0.0,
+        amount_minor: 0,
+        subitems: Vec::new(),
+    }
+}
+
+fn subitem_tuple_to_payload(
+    row: (i64, i64, String, i64, f64, i64, bool),
+) -> DistributionSubitemPayload {
+    DistributionSubitemPayload {
+        id: row.0,
+        item_id: row.1,
+        name: row.2,
+        sort_order: row.3,
+        pct: row.4,
+        pct_minor: row.5,
+        is_active: row.6,
+        amount_base: 0.0,
+        amount_minor: 0,
+    }
+}
+
 fn category_metrics_to_py(
     py: Python<'_>,
     rows: Vec<CategoryMetricRow>,
@@ -384,10 +467,7 @@ fn tag_metrics_to_py(py: Python<'_>, rows: Vec<TagMetricRow>) -> PyResult<Vec<Py
         .collect()
 }
 
-fn monthly_summary_to_py(
-    py: Python<'_>,
-    rows: Vec<MonthlySummaryRow>,
-) -> PyResult<Vec<Py<PyAny>>> {
+fn monthly_summary_to_py(py: Python<'_>, rows: Vec<MonthlySummaryRow>) -> PyResult<Vec<Py<PyAny>>> {
     rows.into_iter()
         .map(|row| monthly_summary_to_dict(py, row))
         .collect()
@@ -573,7 +653,10 @@ fn metrics_period_snapshot(
         "spending_by_tag",
         tag_metrics_to_py(py, snapshot.spending_by_tag)?,
     )?;
-    payload.set_item("tag_coverage", tag_coverage_to_dict(py, snapshot.tag_coverage)?)?;
+    payload.set_item(
+        "tag_coverage",
+        tag_coverage_to_dict(py, snapshot.tag_coverage)?,
+    )?;
     payload.set_item(
         "monthly_summary",
         monthly_summary_to_py(py, snapshot.monthly_summary)?,
@@ -845,6 +928,218 @@ fn distribution_monthly_payload(
 }
 
 #[pyfunction]
+fn distribution_item_rows(
+    py: Python<'_>,
+    db_path: &str,
+    active_only: bool,
+) -> PyResult<Vec<Py<PyAny>>> {
+    storage_distribution_item_rows(db_path, active_only)
+        .map_err(core_err)?
+        .into_iter()
+        .map(|row| distribution_item_to_dict(py, row))
+        .collect()
+}
+
+#[pyfunction]
+fn distribution_subitem_rows(
+    py: Python<'_>,
+    db_path: &str,
+    item_id: i64,
+    active_only: bool,
+) -> PyResult<Vec<Py<PyAny>>> {
+    storage_distribution_subitem_rows(db_path, item_id, active_only)
+        .map_err(core_err)?
+        .into_iter()
+        .map(|row| distribution_subitem_to_dict(py, row))
+        .collect()
+}
+
+#[pyfunction]
+fn distribution_create_item(
+    py: Python<'_>,
+    db_path: &str,
+    name: &str,
+    group_name: &str,
+    sort_order: i64,
+    pct: f64,
+    pct_minor: i64,
+) -> PyResult<Py<PyAny>> {
+    storage_distribution_create_item(db_path, name, group_name, sort_order, pct, pct_minor)
+        .map_err(core_err)
+        .and_then(|row| distribution_item_to_dict(py, row))
+}
+
+#[pyfunction]
+fn distribution_update_item_pct(
+    py: Python<'_>,
+    db_path: &str,
+    item_id: i64,
+    pct: f64,
+    pct_minor: i64,
+) -> PyResult<Py<PyAny>> {
+    storage_distribution_update_item_pct(db_path, item_id, pct, pct_minor)
+        .map_err(core_err)
+        .and_then(|row| distribution_item_to_dict(py, row))
+}
+
+#[pyfunction]
+fn distribution_update_item_name(
+    py: Python<'_>,
+    db_path: &str,
+    item_id: i64,
+    name: &str,
+) -> PyResult<Py<PyAny>> {
+    storage_distribution_update_item_name(db_path, item_id, name)
+        .map_err(core_err)
+        .and_then(|row| distribution_item_to_dict(py, row))
+}
+
+#[pyfunction]
+fn distribution_update_item_order(db_path: &str, item_id: i64, sort_order: i64) -> PyResult<()> {
+    storage_distribution_update_item_order(db_path, item_id, sort_order).map_err(core_err)
+}
+
+#[pyfunction]
+fn distribution_delete_item(db_path: &str, item_id: i64) -> PyResult<()> {
+    storage_distribution_delete_item(db_path, item_id).map_err(core_err)
+}
+
+#[pyfunction]
+fn distribution_create_subitem(
+    py: Python<'_>,
+    db_path: &str,
+    item_id: i64,
+    name: &str,
+    sort_order: i64,
+    pct: f64,
+    pct_minor: i64,
+) -> PyResult<Py<PyAny>> {
+    storage_distribution_create_subitem(db_path, item_id, name, sort_order, pct, pct_minor)
+        .map_err(core_err)
+        .and_then(|row| distribution_subitem_to_dict(py, row))
+}
+
+#[pyfunction]
+fn distribution_update_subitem_pct(
+    py: Python<'_>,
+    db_path: &str,
+    subitem_id: i64,
+    pct: f64,
+    pct_minor: i64,
+) -> PyResult<Py<PyAny>> {
+    storage_distribution_update_subitem_pct(db_path, subitem_id, pct, pct_minor)
+        .map_err(core_err)
+        .and_then(|row| distribution_subitem_to_dict(py, row))
+}
+
+#[pyfunction]
+fn distribution_update_subitem_name(
+    py: Python<'_>,
+    db_path: &str,
+    subitem_id: i64,
+    name: &str,
+) -> PyResult<Py<PyAny>> {
+    storage_distribution_update_subitem_name(db_path, subitem_id, name)
+        .map_err(core_err)
+        .and_then(|row| distribution_subitem_to_dict(py, row))
+}
+
+#[pyfunction]
+fn distribution_update_subitem_order(
+    db_path: &str,
+    subitem_id: i64,
+    sort_order: i64,
+) -> PyResult<()> {
+    storage_distribution_update_subitem_order(db_path, subitem_id, sort_order).map_err(core_err)
+}
+
+#[pyfunction]
+fn distribution_delete_subitem(db_path: &str, subitem_id: i64) -> PyResult<()> {
+    storage_distribution_delete_subitem(db_path, subitem_id).map_err(core_err)
+}
+
+#[pyfunction]
+fn distribution_replace_structure(
+    db_path: &str,
+    items: Vec<(i64, String, String, i64, f64, i64, bool)>,
+    subitems: Vec<(i64, i64, String, i64, f64, i64, bool)>,
+) -> PyResult<()> {
+    let item_payloads: Vec<_> = items.into_iter().map(item_tuple_to_payload).collect();
+    let subitem_payloads: Vec<_> = subitems.into_iter().map(subitem_tuple_to_payload).collect();
+    storage_distribution_replace_structure(db_path, &item_payloads, &subitem_payloads)
+        .map_err(core_err)
+}
+
+#[pyfunction]
+fn distribution_is_month_fixed(db_path: &str, month: &str) -> PyResult<bool> {
+    storage_distribution_is_month_fixed(db_path, month).map_err(core_err)
+}
+
+#[pyfunction]
+fn distribution_is_month_auto_fixed(db_path: &str, month: &str) -> PyResult<bool> {
+    storage_distribution_is_month_auto_fixed(db_path, month).map_err(core_err)
+}
+
+#[pyfunction]
+fn distribution_write_frozen_row(
+    db_path: &str,
+    month: &str,
+    column_order: Vec<String>,
+    headings_by_column: Vec<(String, String)>,
+    values_by_column: Vec<(String, String)>,
+    is_negative: bool,
+    auto_fixed: bool,
+) -> PyResult<()> {
+    let row = FrozenDistributionPayload {
+        month: month.to_owned(),
+        column_order,
+        headings_by_column,
+        values_by_column,
+        is_negative,
+        auto_fixed,
+    };
+    storage_distribution_write_frozen_row(db_path, &row).map_err(core_err)
+}
+
+#[pyfunction]
+fn distribution_unfreeze_month(db_path: &str, month: &str) -> PyResult<()> {
+    storage_distribution_unfreeze_month(db_path, month).map_err(core_err)
+}
+
+#[pyfunction]
+fn distribution_frozen_rows(
+    py: Python<'_>,
+    db_path: &str,
+    start_month: Option<&str>,
+    end_month: Option<&str>,
+) -> PyResult<Vec<Py<PyAny>>> {
+    storage_distribution_frozen_rows(db_path, start_month, end_month)
+        .map_err(core_err)?
+        .into_iter()
+        .map(|row| frozen_distribution_to_dict(py, row))
+        .collect()
+}
+
+#[pyfunction]
+fn distribution_replace_frozen_rows(
+    db_path: &str,
+    rows: Vec<FrozenDistributionRowPayload>,
+) -> PyResult<()> {
+    let payloads: Vec<_> = rows
+        .into_iter()
+        .map(|row| FrozenDistributionPayload {
+            month: row.0,
+            column_order: row.1,
+            headings_by_column: row.2,
+            values_by_column: row.3,
+            is_negative: row.4,
+            auto_fixed: row.5,
+        })
+        .collect();
+    storage_distribution_replace_frozen_rows(db_path, &payloads).map_err(core_err)
+}
+
+#[pyfunction]
 fn budget_spent_minor(
     db_path: &str,
     scope_type: &str,
@@ -898,11 +1193,7 @@ fn debt_payment_total_minor(db_path: &str, debt_id: i64) -> PyResult<i64> {
 }
 
 #[pyfunction]
-fn debt_recalculate_payload(
-    py: Python<'_>,
-    db_path: &str,
-    debt_id: i64,
-) -> PyResult<Py<PyAny>> {
+fn debt_recalculate_payload(py: Python<'_>, db_path: &str, debt_id: i64) -> PyResult<Py<PyAny>> {
     let row = storage_debt_recalculate_payload(db_path, debt_id).map_err(core_err)?;
     let payload = PyDict::new(py);
     payload.set_item("remaining_amount_minor", row.remaining_amount_minor)?;
@@ -967,6 +1258,25 @@ fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(distribution_history_months, m)?)?;
     m.add_function(wrap_pyfunction!(distribution_validate_structure, m)?)?;
     m.add_function(wrap_pyfunction!(distribution_monthly_payload, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_item_rows, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_subitem_rows, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_create_item, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_update_item_pct, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_update_item_name, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_update_item_order, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_delete_item, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_create_subitem, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_update_subitem_pct, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_update_subitem_name, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_update_subitem_order, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_delete_subitem, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_replace_structure, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_is_month_fixed, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_is_month_auto_fixed, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_write_frozen_row, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_unfreeze_month, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_frozen_rows, m)?)?;
+    m.add_function(wrap_pyfunction!(distribution_replace_frozen_rows, m)?)?;
     m.add_function(wrap_pyfunction!(budget_spent_minor, m)?)?;
     m.add_function(wrap_pyfunction!(budget_batch_spent_minor, m)?)?;
     m.add_function(wrap_pyfunction!(budget_overlap_exists, m)?)?;

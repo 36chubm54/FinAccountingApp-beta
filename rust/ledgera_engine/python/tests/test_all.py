@@ -51,6 +51,10 @@ class _LedgeraCoreModule(Protocol):
 
     def distribution_available_months(self, db_path: str) -> list[str]: ...
 
+    def distribution_create_item(
+        self, db_path: str, name: str, group_name: str, sort_order: int, pct: float, pct_minor: int
+    ) -> dict[str, object]: ...
+
     def distribution_monthly_payload(
         self, db_path: str, month: str, start_date: str, end_date: str
     ) -> dict[str, object]: ...
@@ -246,6 +250,7 @@ def test_metrics_refresh_snapshot_compact_smoke():
 
 def test_planning_parity_exports_smoke():
     _assert_callable_export("distribution_available_months")
+    _assert_callable_export("distribution_create_item")
     _assert_callable_export("distribution_monthly_payload")
     _assert_callable_export("distribution_validate_structure")
     _assert_callable_export("budget_spent_minor")
