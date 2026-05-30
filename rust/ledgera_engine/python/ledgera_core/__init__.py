@@ -27,8 +27,15 @@ budget_update_limit = getattr(_ledgera_core, "budget_update_limit", None)
 currency_default_rates_for_base = getattr(_ledgera_core, "currency_default_rates_for_base", None)
 currency_rate_for = getattr(_ledgera_core, "currency_rate_for", None)
 currency_resolve_provider_order = getattr(_ledgera_core, "currency_resolve_provider_order", None)
+debt_create_obligation = getattr(_ledgera_core, "debt_create_obligation", None)
+debt_delete = getattr(_ledgera_core, "debt_delete", None)
+debt_delete_payment = getattr(_ledgera_core, "debt_delete_payment", None)
+debt_payment_rows = getattr(_ledgera_core, "debt_payment_rows", None)
 debt_payment_total_minor = getattr(_ledgera_core, "debt_payment_total_minor", None)
 debt_recalculate_payload = getattr(_ledgera_core, "debt_recalculate_payload", None)
+debt_register_payment = getattr(_ledgera_core, "debt_register_payment", None)
+debt_replace_rows = getattr(_ledgera_core, "debt_replace_rows", None)
+debt_rows = getattr(_ledgera_core, "debt_rows", None)
 debt_validate_payment_amount = getattr(_ledgera_core, "debt_validate_payment_amount", None)
 distribution_available_months = getattr(_ledgera_core, "distribution_available_months", None)
 distribution_create_item = getattr(_ledgera_core, "distribution_create_item", None)
@@ -126,10 +133,24 @@ if currency_rate_for is not None:
     __all__.append("currency_rate_for")
 if currency_resolve_provider_order is not None:
     __all__.append("currency_resolve_provider_order")
+if debt_create_obligation is not None:
+    __all__.append("debt_create_obligation")
+if debt_delete is not None:
+    __all__.append("debt_delete")
+if debt_delete_payment is not None:
+    __all__.append("debt_delete_payment")
+if debt_payment_rows is not None:
+    __all__.append("debt_payment_rows")
 if debt_payment_total_minor is not None:
     __all__.append("debt_payment_total_minor")
 if debt_recalculate_payload is not None:
     __all__.append("debt_recalculate_payload")
+if debt_register_payment is not None:
+    __all__.append("debt_register_payment")
+if debt_replace_rows is not None:
+    __all__.append("debt_replace_rows")
+if debt_rows is not None:
+    __all__.append("debt_rows")
 if debt_validate_payment_amount is not None:
     __all__.append("debt_validate_payment_amount")
 if distribution_available_months is not None:

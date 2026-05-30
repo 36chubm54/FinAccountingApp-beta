@@ -70,6 +70,37 @@ class _LedgeraCoreModule(Protocol):
 
     def debt_recalculate_payload(self, db_path: str, debt_id: int) -> dict[str, object]: ...
 
+    def debt_create_obligation(
+        self,
+        db_path: str,
+        debt_payload: dict[str, object],
+        open_record_payload: dict[str, object],
+    ) -> dict[str, object]: ...
+
+    def debt_delete(self, db_path: str, debt_id: int) -> None: ...
+
+    def debt_delete_payment(
+        self, db_path: str, payment_id: int, delete_linked_record: bool
+    ) -> dict[str, object]: ...
+
+    def debt_payment_rows(
+        self, db_path: str, debt_id: int | None = None
+    ) -> list[dict[str, object]]: ...
+
+    def debt_register_payment(
+        self,
+        db_path: str,
+        debt_id: int,
+        payment_payload: dict[str, object],
+        payment_record_payload: dict[str, object] | None = None,
+    ) -> dict[str, object]: ...
+
+    def debt_replace_rows(
+        self, db_path: str, debts: list[dict[str, object]], payments: list[dict[str, object]]
+    ) -> None: ...
+
+    def debt_rows(self, db_path: str) -> list[dict[str, object]]: ...
+
     def debt_validate_payment_amount(
         self, remaining_amount_minor: int, payment_amount_minor: int
     ) -> int: ...
@@ -224,10 +255,19 @@ def test_metrics_refresh_snapshot_compact_smoke():
                 id INTEGER PRIMARY KEY,
                 type TEXT NOT NULL,
                 date TEXT NOT NULL,
+                wallet_id INTEGER NOT NULL DEFAULT 1,
                 transfer_id INTEGER,
+                related_debt_id INTEGER,
+                amount_original REAL NOT NULL DEFAULT 0,
+                amount_original_minor INTEGER,
+                currency TEXT NOT NULL DEFAULT 'KZT',
+                rate_at_operation REAL NOT NULL DEFAULT 1.0,
+                rate_at_operation_text TEXT NOT NULL DEFAULT '1.000000',
                 amount_base REAL NOT NULL,
                 amount_base_minor INTEGER,
-                category TEXT NOT NULL
+                category TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                period TEXT
             );
             CREATE TABLE tags (
                 id INTEGER PRIMARY KEY,
@@ -284,7 +324,14 @@ def test_planning_parity_exports_smoke():
     _assert_callable_export("budget_rows")
     _assert_callable_export("budget_spent_minor")
     _assert_callable_export("budget_update_limit")
+    _assert_callable_export("debt_create_obligation")
+    _assert_callable_export("debt_delete")
+    _assert_callable_export("debt_delete_payment")
+    _assert_callable_export("debt_payment_rows")
     _assert_callable_export("debt_recalculate_payload")
+    _assert_callable_export("debt_register_payment")
+    _assert_callable_export("debt_replace_rows")
+    _assert_callable_export("debt_rows")
     _assert_callable_export("debt_validate_payment_amount")
 
     db_dir = Path.cwd() / "tests" / "_tmp"
@@ -299,10 +346,19 @@ def test_planning_parity_exports_smoke():
                 id INTEGER PRIMARY KEY,
                 type TEXT NOT NULL,
                 date TEXT NOT NULL,
+                wallet_id INTEGER NOT NULL DEFAULT 1,
                 transfer_id INTEGER,
+                related_debt_id INTEGER,
+                amount_original REAL NOT NULL DEFAULT 0,
+                amount_original_minor INTEGER,
+                currency TEXT NOT NULL DEFAULT 'KZT',
+                rate_at_operation REAL NOT NULL DEFAULT 1.0,
+                rate_at_operation_text TEXT NOT NULL DEFAULT '1.000000',
                 amount_base REAL NOT NULL,
                 amount_base_minor INTEGER,
-                category TEXT NOT NULL
+                category TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                period TEXT
             );
             CREATE TABLE distribution_items (
                 id INTEGER PRIMARY KEY,
@@ -335,12 +391,23 @@ def test_planning_parity_exports_smoke():
             );
             CREATE TABLE debts (
                 id INTEGER PRIMARY KEY,
-                total_amount_minor INTEGER NOT NULL
+                contact_name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                total_amount_minor INTEGER NOT NULL,
+                remaining_amount_minor INTEGER NOT NULL,
+                currency TEXT NOT NULL,
+                interest_rate REAL NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                closed_at TEXT
             );
             CREATE TABLE debt_payments (
                 id INTEGER PRIMARY KEY,
                 debt_id INTEGER NOT NULL,
+                record_id INTEGER,
+                operation_type TEXT NOT NULL,
                 principal_paid_minor INTEGER NOT NULL,
+                is_write_off INTEGER NOT NULL,
                 payment_date TEXT NOT NULL
             );
             CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
@@ -365,11 +432,16 @@ def test_planning_parity_exports_smoke():
             "(id, item_id, name, sort_order, pct, pct_minor, is_active) "
             "VALUES (1, 1, 'Food', 0, 100.0, 10000, 1)"
         )
-        conn.execute("INSERT INTO debts (id, total_amount_minor) VALUES (1, 10000)")
+        conn.execute(
+            "INSERT INTO debts "
+            "(id, contact_name, kind, total_amount_minor, remaining_amount_minor, currency, "
+            "interest_rate, status, created_at, closed_at) "
+            "VALUES (1, 'Alice', 'debt', 10000, 10000, 'KZT', 0.0, 'open', '2026-03-01', NULL)"
+        )
         conn.execute(
             "INSERT INTO debt_payments "
-            "(id, debt_id, principal_paid_minor, payment_date) "
-            "VALUES (1, 1, 2500, '2026-03-03')"
+            "(id, debt_id, record_id, operation_type, principal_paid_minor, is_write_off, payment_date) " # noqa: E501
+            "VALUES (1, 1, NULL, 'debt_repay', 2500, 0, '2026-03-03')"
         )
         conn.commit()
     finally:
@@ -414,5 +486,68 @@ def test_planning_parity_exports_smoke():
     assert ledgera_core.budget_rows(str(db_path)) == []
     assert ledgera_core.debt_validate_payment_amount(7500, 2500) == 2500
     assert ledgera_core.debt_recalculate_payload(str(db_path), 1)["remaining_amount_minor"] == 7500
+    created_debt = ledgera_core.debt_create_obligation(
+        str(db_path),
+        {
+            "id": 0,
+            "contact_name": "Bob",
+            "kind": "loan",
+            "total_amount_minor": 5000,
+            "remaining_amount_minor": 5000,
+            "currency": "KZT",
+            "interest_rate": 0.0,
+            "status": "open",
+            "created_at": "2026-04-01",
+            "closed_at": None,
+        },
+        {
+            "type": "expense",
+            "date": "2026-04-01",
+            "wallet_id": 1,
+            "amount_original": 50.0,
+            "amount_original_minor": 5000,
+            "currency": "KZT",
+            "rate_at_operation": 1.0,
+            "rate_at_operation_text": "1.000000",
+            "amount_base": 50.0,
+            "amount_base_minor": 5000,
+            "category": "Loan",
+            "description": "Bob",
+            "period": None,
+        },
+    )
+    created_debt_id = int(cast(int, created_debt["id"]))
+    payment = ledgera_core.debt_register_payment(
+        str(db_path),
+        created_debt_id,
+        {
+            "id": 0,
+            "debt_id": created_debt_id,
+            "record_id": None,
+            "operation_type": "loan_collect",
+            "principal_paid_minor": 5000,
+            "is_write_off": False,
+            "payment_date": "2026-04-02",
+        },
+        {
+            "type": "income",
+            "date": "2026-04-02",
+            "wallet_id": 1,
+            "amount_original": 50.0,
+            "amount_original_minor": 5000,
+            "currency": "KZT",
+            "rate_at_operation": 1.0,
+            "rate_at_operation_text": "1.000000",
+            "amount_base": 50.0,
+            "amount_base_minor": 5000,
+            "category": "Loan payment",
+            "description": "Bob",
+            "period": None,
+        },
+    )
+    assert payment["record_id"] is not None
+    assert ledgera_core.debt_rows(str(db_path))[-1]["status"] == "closed"
+    ledgera_core.debt_delete_payment(str(db_path), int(cast(int, payment["id"])), True)
+    assert ledgera_core.debt_payment_rows(str(db_path), created_debt_id) == []
     ledgera_core.storage_clear_read_cache()
     db_path.unlink(missing_ok=True)

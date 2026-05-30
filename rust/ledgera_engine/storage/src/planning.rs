@@ -91,6 +91,48 @@ pub struct DebtRecalculatePayload {
     pub closed_at: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct DebtPayload {
+    pub id: i64,
+    pub contact_name: String,
+    pub kind: String,
+    pub total_amount_minor: i64,
+    pub remaining_amount_minor: i64,
+    pub currency: String,
+    pub interest_rate: f64,
+    pub status: String,
+    pub created_at: String,
+    pub closed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DebtPaymentPayload {
+    pub id: i64,
+    pub debt_id: i64,
+    pub record_id: Option<i64>,
+    pub operation_type: String,
+    pub principal_paid_minor: i64,
+    pub is_write_off: bool,
+    pub payment_date: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DebtRecordPayload {
+    pub record_type: String,
+    pub date: String,
+    pub wallet_id: i64,
+    pub amount_original: f64,
+    pub amount_original_minor: i64,
+    pub currency: String,
+    pub rate_at_operation: f64,
+    pub rate_at_operation_text: String,
+    pub amount_base: f64,
+    pub amount_base_minor: i64,
+    pub category: String,
+    pub description: String,
+    pub period: Option<String>,
+}
+
 fn apply_pct(amount_minor: i64, pct_minor: i64) -> i64 {
     let numerator = i128::from(amount_minor) * i128::from(pct_minor);
     let sign = if numerator < 0 { -1 } else { 1 };
@@ -224,6 +266,188 @@ fn budget_exists(conn: &Connection, budget_id: i64) -> StorageResult<bool> {
     .optional()
     .map_err(sqlite_err)
     .map(|row| row.is_some())
+}
+
+fn debt_from_conn(conn: &Connection, debt_id: i64) -> StorageResult<DebtPayload> {
+    conn.query_row(
+        "SELECT id, contact_name, kind, total_amount_minor, remaining_amount_minor,
+                currency, interest_rate, status, created_at, closed_at
+         FROM debts
+         WHERE id = ?",
+        [debt_id],
+        |row| {
+            Ok(DebtPayload {
+                id: row.get(0)?,
+                contact_name: row.get(1)?,
+                kind: row.get(2)?,
+                total_amount_minor: row.get(3)?,
+                remaining_amount_minor: row.get(4)?,
+                currency: row.get(5)?,
+                interest_rate: row.get(6)?,
+                status: row.get(7)?,
+                created_at: row.get(8)?,
+                closed_at: row.get(9)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(sqlite_err)?
+    .ok_or_else(|| format!("Debt not found: {debt_id}"))
+}
+
+fn debt_payment_from_conn(
+    conn: &Connection,
+    payment_id: i64,
+) -> StorageResult<DebtPaymentPayload> {
+    conn.query_row(
+        "SELECT id, debt_id, record_id, operation_type, principal_paid_minor,
+                is_write_off, payment_date
+         FROM debt_payments
+         WHERE id = ?",
+        [payment_id],
+        |row| {
+            Ok(DebtPaymentPayload {
+                id: row.get(0)?,
+                debt_id: row.get(1)?,
+                record_id: row.get(2)?,
+                operation_type: row.get(3)?,
+                principal_paid_minor: row.get(4)?,
+                is_write_off: row.get(5)?,
+                payment_date: row.get(6)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(sqlite_err)?
+    .ok_or_else(|| format!("Debt payment not found: {payment_id}"))
+}
+
+fn insert_debt_row(conn: &Connection, debt: &DebtPayload, with_id: bool) -> StorageResult<i64> {
+    if with_id {
+        conn.execute(
+            "INSERT INTO debts (
+                id, contact_name, kind, total_amount_minor, remaining_amount_minor,
+                currency, interest_rate, status, created_at, closed_at
+             )
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                debt.id,
+                debt.contact_name,
+                debt.kind,
+                debt.total_amount_minor,
+                debt.remaining_amount_minor,
+                debt.currency,
+                debt.interest_rate,
+                debt.status,
+                debt.created_at,
+                debt.closed_at
+            ],
+        )
+        .map_err(sqlite_err)?;
+        Ok(debt.id)
+    } else {
+        conn.execute(
+            "INSERT INTO debts (
+                contact_name, kind, total_amount_minor, remaining_amount_minor,
+                currency, interest_rate, status, created_at, closed_at
+             )
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                debt.contact_name,
+                debt.kind,
+                debt.total_amount_minor,
+                debt.remaining_amount_minor,
+                debt.currency,
+                debt.interest_rate,
+                debt.status,
+                debt.created_at,
+                debt.closed_at
+            ],
+        )
+        .map_err(sqlite_err)?;
+        Ok(conn.last_insert_rowid())
+    }
+}
+
+fn insert_debt_record_row(
+    conn: &Connection,
+    record: &DebtRecordPayload,
+    related_debt_id: i64,
+) -> StorageResult<i64> {
+    conn.execute(
+        "INSERT INTO records (
+            type, date, wallet_id, transfer_id, related_debt_id,
+            amount_original, amount_original_minor, currency,
+            rate_at_operation, rate_at_operation_text,
+            amount_base, amount_base_minor, category, description, period
+         )
+         VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        params![
+            record.record_type,
+            record.date,
+            record.wallet_id,
+            related_debt_id,
+            record.amount_original,
+            record.amount_original_minor,
+            record.currency,
+            record.rate_at_operation,
+            record.rate_at_operation_text,
+            record.amount_base,
+            record.amount_base_minor,
+            record.category,
+            record.description,
+            record.period
+        ],
+    )
+    .map_err(sqlite_err)?;
+    Ok(conn.last_insert_rowid())
+}
+
+fn insert_debt_payment_row(
+    conn: &Connection,
+    payment: &DebtPaymentPayload,
+    debt_id: i64,
+    record_id: Option<i64>,
+    with_id: bool,
+) -> StorageResult<i64> {
+    if with_id {
+        conn.execute(
+            "INSERT INTO debt_payments (
+                id, debt_id, record_id, operation_type,
+                principal_paid_minor, is_write_off, payment_date
+             )
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            params![
+                payment.id,
+                debt_id,
+                record_id,
+                payment.operation_type,
+                payment.principal_paid_minor,
+                payment.is_write_off,
+                payment.payment_date
+            ],
+        )
+        .map_err(sqlite_err)?;
+        Ok(payment.id)
+    } else {
+        conn.execute(
+            "INSERT INTO debt_payments (
+                debt_id, record_id, operation_type,
+                principal_paid_minor, is_write_off, payment_date
+             )
+             VALUES (?, ?, ?, ?, ?, ?)",
+            params![
+                debt_id,
+                record_id,
+                payment.operation_type,
+                payment.principal_paid_minor,
+                payment.is_write_off,
+                payment.payment_date
+            ],
+        )
+        .map_err(sqlite_err)?;
+        Ok(conn.last_insert_rowid())
+    }
 }
 
 pub fn distribution_net_income_for_period(
@@ -1285,6 +1509,265 @@ pub fn budget_overlap_exists(
     })
 }
 
+pub fn debt_rows(db_path: &str) -> StorageResult<Vec<DebtPayload>> {
+    with_cached_read_connection(db_path, |conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, contact_name, kind, total_amount_minor, remaining_amount_minor,
+                        currency, interest_rate, status, created_at, closed_at
+                 FROM debts
+                 ORDER BY id",
+            )
+            .map_err(sqlite_err)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(DebtPayload {
+                    id: row.get(0)?,
+                    contact_name: row.get(1)?,
+                    kind: row.get(2)?,
+                    total_amount_minor: row.get(3)?,
+                    remaining_amount_minor: row.get(4)?,
+                    currency: row.get(5)?,
+                    interest_rate: row.get(6)?,
+                    status: row.get(7)?,
+                    created_at: row.get(8)?,
+                    closed_at: row.get(9)?,
+                })
+            })
+            .map_err(sqlite_err)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_err)
+    })
+}
+
+pub fn debt_payment_rows(
+    db_path: &str,
+    debt_id: Option<i64>,
+) -> StorageResult<Vec<DebtPaymentPayload>> {
+    with_cached_read_connection(db_path, |conn| {
+        let sql = if debt_id.is_some() {
+            "SELECT id, debt_id, record_id, operation_type, principal_paid_minor,
+                    is_write_off, payment_date
+             FROM debt_payments
+             WHERE debt_id = ?
+             ORDER BY id"
+        } else {
+            "SELECT id, debt_id, record_id, operation_type, principal_paid_minor,
+                    is_write_off, payment_date
+             FROM debt_payments
+             ORDER BY id"
+        };
+        let mut stmt = conn.prepare(sql).map_err(sqlite_err)?;
+        let rows = if let Some(id) = debt_id {
+            stmt.query_map([id], |row| {
+                Ok(DebtPaymentPayload {
+                    id: row.get(0)?,
+                    debt_id: row.get(1)?,
+                    record_id: row.get(2)?,
+                    operation_type: row.get(3)?,
+                    principal_paid_minor: row.get(4)?,
+                    is_write_off: row.get(5)?,
+                    payment_date: row.get(6)?,
+                })
+            })
+            .map_err(sqlite_err)?
+            .collect::<Result<Vec<_>, _>>()
+        } else {
+            stmt.query_map([], |row| {
+                Ok(DebtPaymentPayload {
+                    id: row.get(0)?,
+                    debt_id: row.get(1)?,
+                    record_id: row.get(2)?,
+                    operation_type: row.get(3)?,
+                    principal_paid_minor: row.get(4)?,
+                    is_write_off: row.get(5)?,
+                    payment_date: row.get(6)?,
+                })
+            })
+            .map_err(sqlite_err)?
+            .collect::<Result<Vec<_>, _>>()
+        };
+        rows.map_err(sqlite_err)
+    })
+}
+
+pub fn debt_create_obligation(
+    db_path: &str,
+    debt: &DebtPayload,
+    open_record: &DebtRecordPayload,
+) -> StorageResult<DebtPayload> {
+    let mut conn = open_write_connection(db_path)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    let debt_id = insert_debt_row(&tx, debt, false)?;
+    insert_debt_record_row(&tx, open_record, debt_id)?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    let conn = open_write_connection(db_path)?;
+    debt_from_conn(&conn, debt_id)
+}
+
+pub fn debt_delete(db_path: &str, debt_id: i64) -> StorageResult<()> {
+    let mut conn = open_write_connection(db_path)?;
+    debt_from_conn(&conn, debt_id)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    tx.execute(
+        "UPDATE records SET related_debt_id = NULL WHERE related_debt_id = ?",
+        [debt_id],
+    )
+    .map_err(sqlite_err)?;
+    tx.execute("DELETE FROM debt_payments WHERE debt_id = ?", [debt_id])
+        .map_err(sqlite_err)?;
+    tx.execute("DELETE FROM debts WHERE id = ?", [debt_id])
+        .map_err(sqlite_err)?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    Ok(())
+}
+
+pub fn debt_register_payment(
+    db_path: &str,
+    debt_id: i64,
+    payment: &DebtPaymentPayload,
+    payment_record: Option<&DebtRecordPayload>,
+) -> StorageResult<DebtPaymentPayload> {
+    let mut conn = open_write_connection(db_path)?;
+    let debt = debt_from_conn(&conn, debt_id)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    let record_id = if let Some(record) = payment_record {
+        Some(insert_debt_record_row(&tx, record, debt_id)?)
+    } else {
+        None
+    };
+    let payment_id = insert_debt_payment_row(&tx, payment, debt_id, record_id, false)?;
+    let remaining_amount_minor = (debt.remaining_amount_minor - payment.principal_paid_minor).max(0);
+    let is_closed = remaining_amount_minor == 0;
+    tx.execute(
+        "UPDATE debts
+         SET remaining_amount_minor = ?, status = ?, closed_at = ?
+         WHERE id = ?",
+        params![
+            remaining_amount_minor,
+            if is_closed { "closed" } else { "open" },
+            if is_closed {
+                Some(payment.payment_date.as_str())
+            } else {
+                None
+            },
+            debt_id
+        ],
+    )
+    .map_err(sqlite_err)?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    let conn = open_write_connection(db_path)?;
+    debt_payment_from_conn(&conn, payment_id)
+}
+
+pub fn debt_delete_payment(
+    db_path: &str,
+    payment_id: i64,
+    delete_linked_record: bool,
+) -> StorageResult<DebtPayload> {
+    let mut conn = open_write_connection(db_path)?;
+    let payment = debt_payment_from_conn(&conn, payment_id)?;
+    let debt = debt_from_conn(&conn, payment.debt_id)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    if delete_linked_record && let Some(record_id) = payment.record_id {
+        tx.execute("DELETE FROM records WHERE id = ?", [record_id])
+            .map_err(sqlite_err)?;
+    }
+    tx.execute("DELETE FROM debt_payments WHERE id = ?", [payment_id])
+        .map_err(sqlite_err)?;
+    let restored_remaining = (debt.remaining_amount_minor + payment.principal_paid_minor)
+        .min(debt.total_amount_minor);
+    tx.execute(
+        "UPDATE debts
+         SET remaining_amount_minor = ?, status = ?, closed_at = ?
+         WHERE id = ?",
+        params![
+            restored_remaining,
+            if restored_remaining > 0 {
+                "open"
+            } else {
+                debt.status.as_str()
+            },
+            if restored_remaining > 0 {
+                None::<&str>
+            } else {
+                debt.closed_at.as_deref()
+            },
+            payment.debt_id
+        ],
+    )
+    .map_err(sqlite_err)?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    let conn = open_write_connection(db_path)?;
+    debt_from_conn(&conn, payment.debt_id)
+}
+
+pub fn debt_replace_rows(
+    db_path: &str,
+    debts: &[DebtPayload],
+    payments: &[DebtPaymentPayload],
+) -> StorageResult<()> {
+    let mut conn = open_write_connection(db_path)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    tx.execute("DELETE FROM debt_payments", [])
+        .map_err(sqlite_err)?;
+    tx.execute("DELETE FROM debts", []).map_err(sqlite_err)?;
+    tx.execute("DELETE FROM sqlite_sequence WHERE name IN ('debts', 'debt_payments')", [])
+        .map_err(sqlite_err)?;
+
+    let mut sorted_debts = debts.to_vec();
+    sorted_debts.sort_by_key(|debt| debt.id);
+    for debt in &sorted_debts {
+        insert_debt_row(&tx, debt, true)?;
+    }
+
+    let mut sorted_payments = payments.to_vec();
+    sorted_payments.sort_by_key(|payment| payment.id);
+    for payment in &sorted_payments {
+        if !sorted_debts.iter().any(|debt| debt.id == payment.debt_id) {
+            return Err(format!(
+                "Debt payment #{} references missing debt {}",
+                payment.id, payment.debt_id
+            ));
+        }
+        if let Some(record_id) = payment.record_id {
+            let exists = tx
+                .query_row("SELECT 1 FROM records WHERE id = ?", [record_id], |_| Ok(()))
+                .optional()
+                .map_err(sqlite_err)?
+                .is_some();
+            if !exists {
+                return Err(format!(
+                    "Debt payment #{} references missing record {}",
+                    payment.id, record_id
+                ));
+            }
+        }
+        insert_debt_payment_row(&tx, payment, payment.debt_id, payment.record_id, true)?;
+    }
+
+    if let Some(max_id) = debts.iter().map(|debt| debt.id).max() {
+        tx.execute(
+            "INSERT INTO sqlite_sequence(name, seq) VALUES('debts', ?)",
+            [max_id],
+        )
+        .map_err(sqlite_err)?;
+    }
+    if let Some(max_id) = payments.iter().map(|payment| payment.id).max() {
+        tx.execute(
+            "INSERT INTO sqlite_sequence(name, seq) VALUES('debt_payments', ?)",
+            [max_id],
+        )
+        .map_err(sqlite_err)?;
+    }
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    Ok(())
+}
+
 pub fn debt_payment_total_minor(db_path: &str, debt_id: i64) -> StorageResult<i64> {
     with_cached_read_connection(db_path, |conn| {
         conn.query_row(
@@ -1380,6 +1863,45 @@ mod tests {
                 limit_base_minor INTEGER NOT NULL DEFAULT 0,
                 include_mandatory INTEGER NOT NULL DEFAULT 0
             );
+            CREATE TABLE records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                type TEXT NOT NULL,
+                date TEXT NOT NULL,
+                wallet_id INTEGER NOT NULL,
+                transfer_id INTEGER,
+                related_debt_id INTEGER,
+                amount_original REAL NOT NULL,
+                amount_original_minor INTEGER,
+                currency TEXT NOT NULL,
+                rate_at_operation REAL NOT NULL,
+                rate_at_operation_text TEXT NOT NULL,
+                amount_base REAL NOT NULL,
+                amount_base_minor INTEGER,
+                category TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                period TEXT
+            );
+            CREATE TABLE debts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                contact_name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                total_amount_minor INTEGER NOT NULL,
+                remaining_amount_minor INTEGER NOT NULL,
+                currency TEXT NOT NULL,
+                interest_rate REAL NOT NULL DEFAULT 0,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                closed_at TEXT
+            );
+            CREATE TABLE debt_payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                debt_id INTEGER NOT NULL,
+                record_id INTEGER,
+                operation_type TEXT NOT NULL,
+                principal_paid_minor INTEGER NOT NULL,
+                is_write_off INTEGER NOT NULL DEFAULT 0,
+                payment_date TEXT NOT NULL
+            );
             CREATE TABLE distribution_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
@@ -1418,6 +1940,56 @@ mod tests {
             ",
         )
         .expect("schema");
+    }
+
+    fn test_debt(contact_name: &str, amount_minor: i64) -> DebtPayload {
+        DebtPayload {
+            id: 1,
+            contact_name: contact_name.to_owned(),
+            kind: "debt".to_owned(),
+            total_amount_minor: amount_minor,
+            remaining_amount_minor: amount_minor,
+            currency: "KZT".to_owned(),
+            interest_rate: 0.0,
+            status: "open".to_owned(),
+            created_at: "2026-03-01".to_owned(),
+            closed_at: None,
+        }
+    }
+
+    fn test_debt_record(record_type: &str, amount_minor: i64) -> DebtRecordPayload {
+        DebtRecordPayload {
+            record_type: record_type.to_owned(),
+            date: "2026-03-01".to_owned(),
+            wallet_id: 1,
+            amount_original: minor_to_money_value(amount_minor),
+            amount_original_minor: amount_minor,
+            currency: "KZT".to_owned(),
+            rate_at_operation: 1.0,
+            rate_at_operation_text: "1.000000".to_owned(),
+            amount_base: minor_to_money_value(amount_minor),
+            amount_base_minor: amount_minor,
+            category: "Debt".to_owned(),
+            description: "Alice".to_owned(),
+            period: None,
+        }
+    }
+
+    fn test_payment(debt_id: i64, amount_minor: i64, write_off: bool) -> DebtPaymentPayload {
+        DebtPaymentPayload {
+            id: 1,
+            debt_id,
+            record_id: None,
+            operation_type: if write_off {
+                "debt_forgive"
+            } else {
+                "debt_repay"
+            }
+            .to_owned(),
+            principal_paid_minor: amount_minor,
+            is_write_off: write_off,
+            payment_date: "2026-03-05".to_owned(),
+        }
     }
 
     #[test]
@@ -1612,6 +2184,83 @@ mod tests {
                 None,
             )
             .expect("adjacent")
+        );
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn debt_create_payment_delete_and_replace_preserve_contracts() {
+        let db_path = test_db_path("debt_write");
+        init_distribution_schema(&db_path);
+        let debt = debt_create_obligation(
+            &db_path,
+            &test_debt("Alice", 50_000),
+            &test_debt_record("income", 50_000),
+        )
+        .expect("create debt");
+        assert_eq!(debt.id, 1);
+        assert_eq!(debt.remaining_amount_minor, 50_000);
+
+        let payment = debt_register_payment(
+            &db_path,
+            debt.id,
+            &test_payment(debt.id, 20_000, false),
+            Some(&test_debt_record("expense", 20_000)),
+        )
+        .expect("register payment");
+        assert_eq!(payment.id, 1);
+        assert!(payment.record_id.is_some());
+        let conn = Connection::open(&db_path).expect("open");
+        assert_eq!(
+            debt_from_conn(&conn, debt.id)
+                .expect("debt")
+                .remaining_amount_minor,
+            30_000
+        );
+
+        let reopened = debt_delete_payment(&db_path, payment.id, true).expect("delete payment");
+        assert_eq!(reopened.remaining_amount_minor, 50_000);
+        assert!(
+            debt_payment_rows(&db_path, Some(debt.id))
+                .expect("payments")
+                .is_empty()
+        );
+
+        let write_off =
+            debt_register_payment(&db_path, debt.id, &test_payment(debt.id, 50_000, true), None)
+                .expect("write off");
+        assert!(write_off.record_id.is_none());
+        let conn = Connection::open(&db_path).expect("open");
+        assert_eq!(
+            debt_from_conn(&conn, debt.id).expect("debt").status,
+            "closed"
+        );
+
+        let replacement_debt = DebtPayload {
+            id: 7,
+            contact_name: "Bob".to_owned(),
+            kind: "loan".to_owned(),
+            total_amount_minor: 10_000,
+            remaining_amount_minor: 10_000,
+            currency: "KZT".to_owned(),
+            interest_rate: 0.0,
+            status: "open".to_owned(),
+            created_at: "2026-04-01".to_owned(),
+            closed_at: None,
+        };
+        debt_replace_rows(&db_path, std::slice::from_ref(&replacement_debt), &[])
+            .expect("replace debts");
+        let next = debt_create_obligation(
+            &db_path,
+            &test_debt("Next", 10_000),
+            &test_debt_record("income", 10_000),
+        )
+        .expect("create after replace");
+        assert_eq!(next.id, 8);
+        assert!(
+            debt_delete(&db_path, 999)
+                .expect_err("missing delete")
+                .contains("Debt not found: 999")
         );
         fs::remove_file(db_path).ok();
     }

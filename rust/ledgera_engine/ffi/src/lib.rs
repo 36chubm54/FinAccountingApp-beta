@@ -1,16 +1,22 @@
 use ledgera_engine_storage::{
-    BudgetCreatePayload, BudgetPayload, CategoryMetricRow, DistributionItemPayload,
-    DistributionSubitemPayload, FrozenDistributionPayload, MandatoryExpenseRow, MonthlyCashflowRow,
-    MonthlyCumulativeRow, MonthlySummaryRow, NetWorthDeltaRow, RecordRow, TagCoverageRow,
-    TagMetricRow, TransferRow, WalletBalanceRow, WalletRow,
+    BudgetCreatePayload, BudgetPayload, CategoryMetricRow, DebtPayload, DebtPaymentPayload,
+    DebtRecordPayload, DistributionItemPayload, DistributionSubitemPayload,
+    FrozenDistributionPayload, MandatoryExpenseRow, MonthlyCashflowRow, MonthlyCumulativeRow,
+    MonthlySummaryRow, NetWorthDeltaRow, RecordRow, TagCoverageRow, TagMetricRow, TransferRow,
+    WalletBalanceRow, WalletRow,
     budget_batch_spent_minor as storage_budget_batch_spent_minor,
     budget_create as storage_budget_create, budget_delete as storage_budget_delete,
     budget_overlap_exists as storage_budget_overlap_exists,
     budget_replace_rows as storage_budget_replace_rows, budget_rows as storage_budget_rows,
     budget_spent_minor as storage_budget_spent_minor,
     budget_update_limit as storage_budget_update_limit, cashflow_sum as storage_cashflow_sum,
+    debt_create_obligation as storage_debt_create_obligation,
+    debt_delete as storage_debt_delete, debt_delete_payment as storage_debt_delete_payment,
+    debt_payment_rows as storage_debt_payment_rows,
     debt_payment_total_minor as storage_debt_payment_total_minor,
     debt_recalculate_payload as storage_debt_recalculate_payload,
+    debt_register_payment as storage_debt_register_payment,
+    debt_replace_rows as storage_debt_replace_rows, debt_rows as storage_debt_rows,
     debt_validate_payment_amount as storage_debt_validate_payment_amount,
     distribution_available_months as storage_distribution_available_months,
     distribution_create_item as storage_distribution_create_item,
@@ -96,6 +102,26 @@ type CompactMetricsRefreshSnapshot = (
 
 fn core_err(err: String) -> PyErr {
     PyValueError::new_err(err)
+}
+
+fn dict_required<T>(payload: &Bound<'_, PyDict>, key: &str) -> PyResult<T>
+where
+    T: for<'py> FromPyObject<'py, 'py, Error = PyErr>,
+{
+    payload
+        .get_item(key)?
+        .ok_or_else(|| PyValueError::new_err(format!("Missing payload key: {key}")))?
+        .extract::<T>()
+}
+
+fn dict_optional<T>(payload: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<T>>
+where
+    T: for<'py> FromPyObject<'py, 'py, Error = PyErr>,
+{
+    match payload.get_item(key)? {
+        Some(value) if !value.is_none() => Ok(Some(value.extract::<T>()?)),
+        _ => Ok(None),
+    }
 }
 
 fn py_value_to_text(value: &Bound<'_, PyAny>, default: &str) -> PyResult<String> {
@@ -360,6 +386,78 @@ fn budget_tuple_to_payload(row: BudgetRowPayload) -> BudgetPayload {
         scope_type: row.7,
         scope_value: row.8,
     }
+}
+
+fn debt_to_dict(py: Python<'_>, row: DebtPayload) -> PyResult<Py<PyAny>> {
+    let payload = PyDict::new(py);
+    payload.set_item("id", row.id)?;
+    payload.set_item("contact_name", row.contact_name)?;
+    payload.set_item("kind", row.kind)?;
+    payload.set_item("total_amount_minor", row.total_amount_minor)?;
+    payload.set_item("remaining_amount_minor", row.remaining_amount_minor)?;
+    payload.set_item("currency", row.currency)?;
+    payload.set_item("interest_rate", row.interest_rate)?;
+    payload.set_item("status", row.status)?;
+    payload.set_item("created_at", row.created_at)?;
+    payload.set_item("closed_at", row.closed_at)?;
+    Ok(payload.into_any().unbind())
+}
+
+fn debt_payment_to_dict(py: Python<'_>, row: DebtPaymentPayload) -> PyResult<Py<PyAny>> {
+    let payload = PyDict::new(py);
+    payload.set_item("id", row.id)?;
+    payload.set_item("debt_id", row.debt_id)?;
+    payload.set_item("record_id", row.record_id)?;
+    payload.set_item("operation_type", row.operation_type)?;
+    payload.set_item("principal_paid_minor", row.principal_paid_minor)?;
+    payload.set_item("is_write_off", row.is_write_off)?;
+    payload.set_item("payment_date", row.payment_date)?;
+    Ok(payload.into_any().unbind())
+}
+
+fn debt_from_dict(payload: &Bound<'_, PyDict>) -> PyResult<DebtPayload> {
+    Ok(DebtPayload {
+        id: dict_required(payload, "id")?,
+        contact_name: dict_required(payload, "contact_name")?,
+        kind: dict_required(payload, "kind")?,
+        total_amount_minor: dict_required(payload, "total_amount_minor")?,
+        remaining_amount_minor: dict_required(payload, "remaining_amount_minor")?,
+        currency: dict_required(payload, "currency")?,
+        interest_rate: dict_required(payload, "interest_rate")?,
+        status: dict_required(payload, "status")?,
+        created_at: dict_required(payload, "created_at")?,
+        closed_at: dict_optional(payload, "closed_at")?,
+    })
+}
+
+fn debt_payment_from_dict(payload: &Bound<'_, PyDict>) -> PyResult<DebtPaymentPayload> {
+    Ok(DebtPaymentPayload {
+        id: dict_required(payload, "id")?,
+        debt_id: dict_required(payload, "debt_id")?,
+        record_id: dict_optional(payload, "record_id")?,
+        operation_type: dict_required(payload, "operation_type")?,
+        principal_paid_minor: dict_required(payload, "principal_paid_minor")?,
+        is_write_off: dict_required(payload, "is_write_off")?,
+        payment_date: dict_required(payload, "payment_date")?,
+    })
+}
+
+fn debt_record_from_dict(payload: &Bound<'_, PyDict>) -> PyResult<DebtRecordPayload> {
+    Ok(DebtRecordPayload {
+        record_type: dict_required(payload, "type")?,
+        date: dict_required(payload, "date")?,
+        wallet_id: dict_required(payload, "wallet_id")?,
+        amount_original: dict_required(payload, "amount_original")?,
+        amount_original_minor: dict_required(payload, "amount_original_minor")?,
+        currency: dict_required(payload, "currency")?,
+        rate_at_operation: dict_required(payload, "rate_at_operation")?,
+        rate_at_operation_text: dict_required(payload, "rate_at_operation_text")?,
+        amount_base: dict_required(payload, "amount_base")?,
+        amount_base_minor: dict_required(payload, "amount_base_minor")?,
+        category: dict_required(payload, "category")?,
+        description: dict_required(payload, "description")?,
+        period: dict_optional(payload, "period")?,
+    })
 }
 
 fn distribution_validation_to_dict(
@@ -1290,6 +1388,93 @@ fn debt_payment_total_minor(db_path: &str, debt_id: i64) -> PyResult<i64> {
 }
 
 #[pyfunction]
+fn debt_rows(py: Python<'_>, db_path: &str) -> PyResult<Vec<Py<PyAny>>> {
+    storage_debt_rows(db_path)
+        .map_err(core_err)?
+        .into_iter()
+        .map(|row| debt_to_dict(py, row))
+        .collect()
+}
+
+#[pyfunction]
+fn debt_payment_rows(
+    py: Python<'_>,
+    db_path: &str,
+    debt_id: Option<i64>,
+) -> PyResult<Vec<Py<PyAny>>> {
+    storage_debt_payment_rows(db_path, debt_id)
+        .map_err(core_err)?
+        .into_iter()
+        .map(|row| debt_payment_to_dict(py, row))
+        .collect()
+}
+
+#[pyfunction]
+fn debt_create_obligation(
+    py: Python<'_>,
+    db_path: &str,
+    debt_payload: &Bound<'_, PyDict>,
+    open_record_payload: &Bound<'_, PyDict>,
+) -> PyResult<Py<PyAny>> {
+    let debt = debt_from_dict(debt_payload)?;
+    let record = debt_record_from_dict(open_record_payload)?;
+    storage_debt_create_obligation(db_path, &debt, &record)
+        .map_err(core_err)
+        .and_then(|row| debt_to_dict(py, row))
+}
+
+#[pyfunction]
+fn debt_delete(db_path: &str, debt_id: i64) -> PyResult<()> {
+    storage_debt_delete(db_path, debt_id).map_err(core_err)
+}
+
+#[pyfunction]
+fn debt_register_payment(
+    py: Python<'_>,
+    db_path: &str,
+    debt_id: i64,
+    payment_payload: &Bound<'_, PyDict>,
+    payment_record_payload: Option<&Bound<'_, PyDict>>,
+) -> PyResult<Py<PyAny>> {
+    let payment = debt_payment_from_dict(payment_payload)?;
+    let record = payment_record_payload
+        .map(debt_record_from_dict)
+        .transpose()?;
+    storage_debt_register_payment(db_path, debt_id, &payment, record.as_ref())
+        .map_err(core_err)
+        .and_then(|row| debt_payment_to_dict(py, row))
+}
+
+#[pyfunction]
+fn debt_delete_payment(
+    py: Python<'_>,
+    db_path: &str,
+    payment_id: i64,
+    delete_linked_record: bool,
+) -> PyResult<Py<PyAny>> {
+    storage_debt_delete_payment(db_path, payment_id, delete_linked_record)
+        .map_err(core_err)
+        .and_then(|row| debt_to_dict(py, row))
+}
+
+#[pyfunction]
+fn debt_replace_rows(
+    db_path: &str,
+    debts: Vec<Bound<'_, PyDict>>,
+    payments: Vec<Bound<'_, PyDict>>,
+) -> PyResult<()> {
+    let debt_payloads = debts
+        .iter()
+        .map(debt_from_dict)
+        .collect::<PyResult<Vec<_>>>()?;
+    let payment_payloads = payments
+        .iter()
+        .map(debt_payment_from_dict)
+        .collect::<PyResult<Vec<_>>>()?;
+    storage_debt_replace_rows(db_path, &debt_payloads, &payment_payloads).map_err(core_err)
+}
+
+#[pyfunction]
 fn debt_recalculate_payload(py: Python<'_>, db_path: &str, debt_id: i64) -> PyResult<Py<PyAny>> {
     let row = storage_debt_recalculate_payload(db_path, debt_id).map_err(core_err)?;
     let payload = PyDict::new(py);
@@ -1382,6 +1567,13 @@ fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(budget_spent_minor, m)?)?;
     m.add_function(wrap_pyfunction!(budget_batch_spent_minor, m)?)?;
     m.add_function(wrap_pyfunction!(budget_overlap_exists, m)?)?;
+    m.add_function(wrap_pyfunction!(debt_rows, m)?)?;
+    m.add_function(wrap_pyfunction!(debt_payment_rows, m)?)?;
+    m.add_function(wrap_pyfunction!(debt_create_obligation, m)?)?;
+    m.add_function(wrap_pyfunction!(debt_delete, m)?)?;
+    m.add_function(wrap_pyfunction!(debt_register_payment, m)?)?;
+    m.add_function(wrap_pyfunction!(debt_delete_payment, m)?)?;
+    m.add_function(wrap_pyfunction!(debt_replace_rows, m)?)?;
     m.add_function(wrap_pyfunction!(debt_payment_total_minor, m)?)?;
     m.add_function(wrap_pyfunction!(debt_recalculate_payload, m)?)?;
     m.add_function(wrap_pyfunction!(debt_validate_payment_amount, m)?)?;

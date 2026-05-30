@@ -342,9 +342,43 @@ class RustBudgetPlanningCore(Protocol):
 
 
 class RustDebtCore(Protocol):
+    def debt_create_obligation(
+        self,
+        db_path: str,
+        debt_payload: dict[str, object],
+        open_record_payload: dict[str, object],
+    ) -> dict[str, object]: ...
+
+    def debt_delete(self, db_path: str, debt_id: int) -> None: ...
+
+    def debt_delete_payment(
+        self, db_path: str, payment_id: int, delete_linked_record: bool
+    ) -> dict[str, object]: ...
+
+    def debt_payment_rows(
+        self, db_path: str, debt_id: int | None = None
+    ) -> list[dict[str, object]]: ...
+
     def debt_payment_total_minor(self, db_path: str, debt_id: int) -> int: ...
 
     def debt_recalculate_payload(self, db_path: str, debt_id: int) -> dict[str, object]: ...
+
+    def debt_register_payment(
+        self,
+        db_path: str,
+        debt_id: int,
+        payment_payload: dict[str, object],
+        payment_record_payload: dict[str, object] | None = None,
+    ) -> dict[str, object]: ...
+
+    def debt_replace_rows(
+        self,
+        db_path: str,
+        debts: list[dict[str, object]],
+        payments: list[dict[str, object]],
+    ) -> None: ...
+
+    def debt_rows(self, db_path: str) -> list[dict[str, object]]: ...
 
     def debt_validate_payment_amount(
         self, remaining_amount_minor: int, payment_amount_minor: int
@@ -447,8 +481,15 @@ _BUDGET_PLANNING_SYMBOLS = (
     "budget_update_limit",
 )
 _DEBT_SYMBOLS = (
+    "debt_create_obligation",
+    "debt_delete",
+    "debt_delete_payment",
+    "debt_payment_rows",
     "debt_payment_total_minor",
     "debt_recalculate_payload",
+    "debt_register_payment",
+    "debt_replace_rows",
+    "debt_rows",
     "debt_validate_payment_amount",
 )
 _SYNC_SYMBOLS = ("sync_start_daemon", "sync_stop_daemon")

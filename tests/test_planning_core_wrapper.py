@@ -346,3 +346,107 @@ def test_debt_service_rust_path_matches_python_fallback(tmp_path: Path) -> None:
         assert rust_value == fallback_value
     finally:
         repo.close()
+
+
+def _debt_summary(repo: SQLiteRecordRepository) -> tuple[object, ...]:
+    return (
+        [
+            (
+                debt.contact_name,
+                debt.kind.value,
+                debt.total_amount_minor,
+                debt.remaining_amount_minor,
+                debt.status.value,
+                debt.closed_at,
+            )
+            for debt in repo.load_debts()
+        ],
+        [
+            (
+                payment.debt_id,
+                payment.record_id is not None,
+                payment.operation_type.value,
+                payment.principal_paid_minor,
+                payment.is_write_off,
+                payment.payment_date,
+            )
+            for payment in repo.load_debt_payments()
+        ],
+        [
+            (
+                record.type,
+                record.related_debt_id is not None,
+                record.amount_base,
+                record.category,
+            )
+            for record in repo.load_all()
+        ],
+    )
+
+
+def _exercise_debt_write_path(repo: SQLiteRecordRepository) -> tuple[object, ...]:
+    service = DebtService(repo)
+    debt = service.create_debt(
+        contact_name="Alice",
+        wallet_id=1,
+        amount_base=500.0,
+        created_at="2026-03-01",
+    )
+    payment = service.register_payment(
+        debt_id=debt.id,
+        wallet_id=1,
+        amount_base=125.0,
+        payment_date="2026-03-02",
+    )
+    service.delete_payment(payment.id, delete_linked_record=True)
+    service.register_write_off(
+        debt_id=debt.id,
+        amount_base=500.0,
+        payment_date="2026-03-03",
+    )
+    loan = service.create_loan(
+        contact_name="Bob",
+        wallet_id=2,
+        amount_base=100.0,
+        created_at="2026-03-04",
+    )
+    service.register_payment(
+        debt_id=loan.id,
+        wallet_id=2,
+        amount_base=100.0,
+        payment_date="2026-03-05",
+    )
+    temporary = service.create_debt(
+        contact_name="Temporary",
+        wallet_id=1,
+        amount_base=50.0,
+        created_at="2026-03-06",
+    )
+    service.delete_debt(temporary.id)
+    return (
+        _debt_summary(repo),
+        [(debt.contact_name, debt.status.value) for debt in service.get_all_debts()],
+        [
+            (payment.operation_type.value, payment.is_write_off)
+            for payment in service.get_debt_history(debt.id)
+        ],
+    )
+
+
+def test_debt_write_path_rust_matches_python_fallback(tmp_path: Path) -> None:
+    rust_repo = _build_repo(tmp_path, "debt_rust_write.db")
+    fallback_repo = _build_repo(tmp_path, "debt_fallback_write.db")
+    try:
+        rust_values = _exercise_debt_write_path(rust_repo)
+
+        rust_core = debts_module._RUST_DEBT_CORE
+        debts_module._RUST_DEBT_CORE = None
+        try:
+            fallback_values = _exercise_debt_write_path(fallback_repo)
+        finally:
+            debts_module._RUST_DEBT_CORE = rust_core
+
+        assert rust_values == fallback_values
+    finally:
+        rust_repo.close()
+        fallback_repo.close()
