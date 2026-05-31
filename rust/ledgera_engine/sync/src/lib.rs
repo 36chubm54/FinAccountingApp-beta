@@ -125,20 +125,29 @@ pub fn sync_start_daemon(config: SyncConfig) -> SyncResult<SyncStatus> {
         .set_nonblocking(true)
         .map_err(|error| error.to_string())?;
     let actual_addr = listener.local_addr().map_err(|error| error.to_string())?;
+    let discovery_socket = if config.discovery_enabled {
+        let socket = UdpSocket::bind((config.bind_host.as_str(), config.discovery_port))
+            .map_err(|error| format!("sync discovery bind failed: {error}"))?;
+        socket
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .map_err(|error| format!("sync discovery timeout setup failed: {error}"))?;
+        Some(socket)
+    } else {
+        None
+    };
+
     let stop = Arc::new(AtomicBool::new(false));
     let daemon_stop = Arc::clone(&stop);
     let daemon_config = config.clone();
     let handle = thread::spawn(move || run_tcp_daemon(listener, daemon_config, daemon_stop));
 
-    let discovery_handle = if config.discovery_enabled {
+    let discovery_handle = discovery_socket.map(|socket| {
         let discovery_stop = Arc::clone(&stop);
         let discovery_config = config.clone();
-        Some(thread::spawn(move || {
-            run_discovery_responder(discovery_config, actual_addr.port(), discovery_stop);
-        }))
-    } else {
-        None
-    };
+        thread::spawn(move || {
+            run_discovery_responder(socket, discovery_config, actual_addr.port(), discovery_stop);
+        })
+    });
 
     let status = SyncStatus {
         enabled: true,
@@ -284,13 +293,12 @@ fn run_tcp_daemon(listener: TcpListener, config: SyncConfig, stop: Arc<AtomicBoo
     }
 }
 
-fn run_discovery_responder(config: SyncConfig, actual_port: u16, stop: Arc<AtomicBool>) {
-    let Ok(socket) = UdpSocket::bind((config.bind_host.as_str(), config.discovery_port)) else {
-        return;
-    };
-    socket
-        .set_read_timeout(Some(Duration::from_millis(100)))
-        .ok();
+fn run_discovery_responder(
+    socket: UdpSocket,
+    config: SyncConfig,
+    actual_port: u16,
+    stop: Arc<AtomicBool>,
+) {
     while !stop.load(Ordering::SeqCst) {
         let mut buf = [0_u8; 1024];
         match socket.recv_from(&mut buf) {
@@ -748,6 +756,29 @@ mod tests {
         assert!(second.running);
         assert!(!sync_stop_daemon().expect("stop").running);
         assert!(!sync_stop_daemon().expect("stop twice").running);
+    }
+
+    #[test]
+    fn start_reports_discovery_bind_failure() {
+        sync_stop_daemon().expect("cleanup");
+        let occupied = UdpSocket::bind(("127.0.0.1", 0)).expect("bind occupied discovery port");
+        let occupied_port = occupied.local_addr().expect("addr").port();
+        let config = SyncConfig {
+            db_path: test_db_path("discovery_bind"),
+            device_id: "device-a".to_owned(),
+            device_name: "Device A".to_owned(),
+            bind_host: "127.0.0.1".to_owned(),
+            bind_port: 0,
+            discovery_enabled: true,
+            discovery_port: occupied_port,
+            poll_interval_ms: 1000,
+        };
+
+        let error = sync_start_daemon(config).expect_err("discovery bind must fail");
+
+        assert!(error.contains("sync discovery bind failed"));
+        assert!(!sync_status().running);
+        drop(occupied);
     }
 
     #[test]
