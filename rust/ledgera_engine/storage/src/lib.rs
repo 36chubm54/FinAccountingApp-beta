@@ -137,10 +137,12 @@ pub struct MetricsRefreshSnapshot {
     pub monthly_summary: Vec<MonthlySummaryRow>,
 }
 
+mod audit;
 mod metrics;
 mod planning;
 mod timeline;
 
+pub use audit::{AuditFindingRow, audit_run};
 pub use metrics::{
     metrics_burn_rate, metrics_income_by_category, metrics_monthly_summary,
     metrics_period_snapshot, metrics_refresh_snapshot, metrics_savings_rate,

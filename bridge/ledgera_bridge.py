@@ -401,6 +401,10 @@ class RustSyncCore(Protocol):
     def sync_stop_daemon(self) -> dict[str, object]: ...
 
 
+class RustAuditCore(Protocol):
+    def audit_run(self, db_path: str) -> list[dict[str, object]]: ...
+
+
 class RustStorageControlCore(Protocol):
     def storage_clear_read_cache(self) -> None: ...
 
@@ -511,6 +515,7 @@ _SYNC_SYMBOLS = (
     "sync_status",
     "sync_stop_daemon",
 )
+_AUDIT_SYMBOLS = ("audit_run",)
 
 
 def is_python_fallback_forced() -> bool:
@@ -606,6 +611,13 @@ def get_sync_core() -> RustSyncCore | None:
     return cast(RustSyncCore, module)
 
 
+def get_audit_core() -> RustAuditCore | None:
+    module = load_extension_module()
+    if not _has_symbols(module, _AUDIT_SYMBOLS):
+        return None
+    return cast(RustAuditCore, module)
+
+
 def get_storage_control_core() -> RustStorageControlCore | None:
     module = load_extension_module()
     if not _has_symbols(module, _STORAGE_CONTROL_SYMBOLS):
@@ -615,6 +627,7 @@ def get_storage_control_core() -> RustStorageControlCore | None:
 
 __all__ = [
     "RustBalanceCore",
+    "RustAuditCore",
     "RustCurrencyCore",
     "RustBudgetPlanningCore",
     "RustDebtCore",
@@ -625,6 +638,7 @@ __all__ = [
     "RustSyncCore",
     "RustTimelineCore",
     "RustStorageControlCore",
+    "get_audit_core",
     "get_balance_core",
     "get_budget_planning_core",
     "get_currency_core",

@@ -40,6 +40,7 @@ def test_bridge_returns_none_when_rust_core_is_not_enabled(monkeypatch) -> None:
     assert ledgera_bridge.get_budget_planning_core() is None
     assert ledgera_bridge.get_debt_core() is None
     assert ledgera_bridge.get_sync_core() is None
+    assert ledgera_bridge.get_audit_core() is None
     assert ledgera_bridge.get_storage_control_core() is None
 
 
@@ -62,6 +63,7 @@ def test_bridge_returns_none_when_extension_import_fails(monkeypatch) -> None:
     assert ledgera_bridge.get_budget_planning_core() is None
     assert ledgera_bridge.get_debt_core() is None
     assert ledgera_bridge.get_sync_core() is None
+    assert ledgera_bridge.get_audit_core() is None
     assert ledgera_bridge.get_storage_control_core() is None
 
 
@@ -85,6 +87,7 @@ def test_bridge_force_python_fallback_skips_extension_import(monkeypatch) -> Non
     assert ledgera_bridge.get_budget_planning_core() is None
     assert ledgera_bridge.get_debt_core() is None
     assert ledgera_bridge.get_sync_core() is None
+    assert ledgera_bridge.get_audit_core() is None
     assert ledgera_bridge.get_storage_control_core() is None
 
 
@@ -104,6 +107,7 @@ def test_bridge_capability_gating_requires_full_symbol_set(monkeypatch) -> None:
     assert ledgera_bridge.get_budget_planning_core() is None
     assert ledgera_bridge.get_debt_core() is None
     assert ledgera_bridge.get_sync_core() is None
+    assert ledgera_bridge.get_audit_core() is None
     assert ledgera_bridge.get_storage_control_core() is None
 
 
@@ -194,6 +198,7 @@ def test_bridge_returns_typed_cores_when_symbols_are_complete(monkeypatch) -> No
         "sync_start_daemon",
         "sync_status",
         "sync_stop_daemon",
+        "audit_run",
         "storage_clear_read_cache",
     )
     monkeypatch.setenv("LEDGERA_ENABLE_RUST_CORE", "1")
@@ -210,4 +215,5 @@ def test_bridge_returns_typed_cores_when_symbols_are_complete(monkeypatch) -> No
     assert ledgera_bridge.get_budget_planning_core() is module
     assert ledgera_bridge.get_debt_core() is module
     assert ledgera_bridge.get_sync_core() is module
+    assert ledgera_bridge.get_audit_core() is module
     assert ledgera_bridge.get_storage_control_core() is module

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.data.protocols import AuditRepositoryProtocol
+from bridge.ledgera_bridge import get_audit_core
 from domain.audit import AuditFinding, AuditReport, AuditSeverity
 from domain.validation import parse_ymd
 from services.analytics.audit.records import (
@@ -20,6 +21,8 @@ from services.analytics.audit.support import (
     check_tag_integrity,
     load_audit_reference_rows,
 )
+
+_RUST_AUDIT_CORE = get_audit_core()
 
 
 class AuditService:
@@ -46,6 +49,26 @@ class AuditService:
         self._record_currency_code_findings: list[AuditFinding] = []
 
     def run(self) -> AuditReport:
+        rust_report = self._run_rust()
+        if rust_report is not None:
+            return rust_report
+        return self._run_python()
+
+    def _run_rust(self) -> AuditReport | None:
+        if _RUST_AUDIT_CORE is None:
+            return None
+        db_path = getattr(self._repo, "db_path", "")
+        if not isinstance(db_path, str) or not db_path:
+            return None
+        try:
+            findings = tuple(
+                self._finding_from_payload(row) for row in _RUST_AUDIT_CORE.audit_run(db_path)
+            )
+        except (TypeError, ValueError, RuntimeError):
+            return None
+        return AuditReport(findings=findings, db_path=db_path)
+
+    def _run_python(self) -> AuditReport:
         rows = load_audit_reference_rows(self._repo)
         self._wallet_rows = rows.wallet_rows
         self._transfer_rows = rows.transfer_rows
@@ -82,6 +105,15 @@ class AuditService:
         findings += self._check_asset_snapshot_integrity()
         findings += self._check_goal_integrity()
         return AuditReport(findings=tuple(findings), db_path=self._repo.db_path)
+
+    @staticmethod
+    def _finding_from_payload(payload: dict[str, object]) -> AuditFinding:
+        return AuditFinding(
+            check=str(payload.get("check", "")),
+            severity=AuditSeverity(str(payload.get("severity", ""))),
+            message=str(payload.get("message", "")),
+            detail=str(payload.get("detail", "")),
+        )
 
     def _check_system_wallet_sanity(self) -> list[AuditFinding]:
         return check_system_wallet_sanity(self._wallet_rows)

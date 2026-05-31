@@ -1,9 +1,5 @@
 use ledgera_engine_storage::{
-    BudgetCreatePayload, BudgetPayload, CategoryMetricRow, DebtPayload, DebtPaymentPayload,
-    DebtRecordPayload, DistributionItemPayload, DistributionSubitemPayload,
-    FrozenDistributionPayload, MandatoryExpenseRow, MonthlyCashflowRow, MonthlyCumulativeRow,
-    MonthlySummaryRow, NetWorthDeltaRow, RecordRow, TagCoverageRow, TagMetricRow, TransferRow,
-    WalletBalanceRow, WalletRow, budget_batch_spent_minor as storage_budget_batch_spent_minor,
+    audit_run as storage_audit_run, budget_batch_spent_minor as storage_budget_batch_spent_minor,
     budget_create as storage_budget_create, budget_delete as storage_budget_delete,
     budget_overlap_exists as storage_budget_overlap_exists,
     budget_replace_rows as storage_budget_replace_rows, budget_rows as storage_budget_rows,
@@ -61,13 +57,17 @@ use ledgera_engine_storage::{
     transfer_list_rows as storage_transfer_list_rows,
     wallet_balance_parts as storage_wallet_balance_parts,
     wallet_balance_rows as storage_wallet_balance_rows,
-    wallet_list_rows as storage_wallet_list_rows,
+    wallet_list_rows as storage_wallet_list_rows, AuditFindingRow, BudgetCreatePayload,
+    BudgetPayload, CategoryMetricRow, DebtPayload, DebtPaymentPayload, DebtRecordPayload,
+    DistributionItemPayload, DistributionSubitemPayload, FrozenDistributionPayload,
+    MandatoryExpenseRow, MonthlyCashflowRow, MonthlyCumulativeRow, MonthlySummaryRow,
+    NetWorthDeltaRow, RecordRow, TagCoverageRow, TagMetricRow, TransferRow, WalletBalanceRow,
+    WalletRow,
 };
 use ledgera_engine_sync::{
-    SyncApplyResult, SyncConfig, SyncPeer, SyncStatus,
     sync_discover_peers as engine_sync_discover_peers, sync_push_once as engine_sync_push_once,
     sync_start_daemon as engine_sync_start_daemon, sync_status as engine_sync_status,
-    sync_stop_daemon as engine_sync_stop_daemon,
+    sync_stop_daemon as engine_sync_stop_daemon, SyncApplyResult, SyncConfig, SyncPeer, SyncStatus,
 };
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -303,6 +303,15 @@ fn record_to_dict(py: Python<'_>, row: RecordRow) -> PyResult<Py<PyAny>> {
     payload.set_item("description", row.description)?;
     payload.set_item("period", row.period)?;
     payload.set_item("tags", row.tags)?;
+    Ok(payload.into_any().unbind())
+}
+
+fn audit_finding_to_dict(py: Python<'_>, row: AuditFindingRow) -> PyResult<Py<PyAny>> {
+    let payload = PyDict::new(py);
+    payload.set_item("check", row.check)?;
+    payload.set_item("severity", row.severity)?;
+    payload.set_item("message", row.message)?;
+    payload.set_item("detail", row.detail)?;
     Ok(payload.into_any().unbind())
 }
 
@@ -685,6 +694,15 @@ fn record_rows_by_tag(py: Python<'_>, db_path: &str, tag_name: &str) -> PyResult
         .map_err(core_err)?
         .into_iter()
         .map(|row| record_to_dict(py, row))
+        .collect()
+}
+
+#[pyfunction]
+fn audit_run(py: Python<'_>, db_path: &str) -> PyResult<Vec<Py<PyAny>>> {
+    storage_audit_run(db_path)
+        .map_err(core_err)?
+        .into_iter()
+        .map(|row| audit_finding_to_dict(py, row))
         .collect()
 }
 
@@ -1611,6 +1629,7 @@ fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(record_list_rows, m)?)?;
     m.add_function(wrap_pyfunction!(record_get_row, m)?)?;
     m.add_function(wrap_pyfunction!(record_rows_by_tag, m)?)?;
+    m.add_function(wrap_pyfunction!(audit_run, m)?)?;
     m.add_function(wrap_pyfunction!(metrics_savings_rate, m)?)?;
     m.add_function(wrap_pyfunction!(metrics_burn_rate, m)?)?;
     m.add_function(wrap_pyfunction!(metrics_spending_by_category, m)?)?;

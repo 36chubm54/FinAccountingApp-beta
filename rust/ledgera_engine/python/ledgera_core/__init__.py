@@ -16,6 +16,7 @@ from .ledgera_core import (  # pyright: ignore[reportMissingModuleSource]
 )
 
 cashflow_sum = getattr(_ledgera_core, "cashflow_sum", None)
+audit_run = getattr(_ledgera_core, "audit_run", None)
 budget_batch_spent_minor = getattr(_ledgera_core, "budget_batch_spent_minor", None)
 budget_create = getattr(_ledgera_core, "budget_create", None)
 budget_delete = getattr(_ledgera_core, "budget_delete", None)
@@ -116,6 +117,8 @@ __all__ = [
 ]
 if cashflow_sum is not None:
     __all__.append("cashflow_sum")
+if audit_run is not None:
+    __all__.append("audit_run")
 if budget_batch_spent_minor is not None:
     __all__.append("budget_batch_spent_minor")
 if budget_create is not None:

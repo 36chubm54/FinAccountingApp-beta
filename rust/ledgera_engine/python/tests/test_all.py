@@ -1,5 +1,7 @@
 import os
 import sqlite3
+import tempfile
+import time
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -13,6 +15,8 @@ class _LedgeraCoreModule(Protocol):
     def convert_amount(self, amount: float, rate: float) -> float: ...
 
     def calculate_daily_burn(self, total_spent: float, days_passed: int) -> float: ...
+
+    def audit_run(self, db_path: str) -> list[dict[str, object]]: ...
 
     def currency_default_rates_for_base(
         self, base_currency: str, rates: dict[str, float]
@@ -255,12 +259,23 @@ def test_currency_parity_helpers():
     ) == ["nbk", "exchange_rate", "static"]
 
 
+def test_audit_export_smoke():
+    _assert_callable_export("audit_run")
+
+
+def _local_tmp_db(name: str) -> Path:
+    db_path = (
+        Path(tempfile.gettempdir())
+        / f"ledgera_core_{name}_{os.getpid()}_{time.time_ns()}.db"
+    )
+    for suffix in ("", "-journal", "-wal", "-shm"):
+        db_path.with_name(f"{db_path.name}{suffix}").unlink(missing_ok=True)
+    return db_path
+
+
 def test_metrics_refresh_snapshot_compact_smoke():
     _assert_callable_export("metrics_refresh_snapshot_compact")
-    db_dir = Path.cwd() / "tests" / "_tmp"
-    db_dir.mkdir(exist_ok=True)
-    db_path = db_dir / f"refresh_snapshot_{os.getpid()}.db"
-    db_path.unlink(missing_ok=True)
+    db_path = _local_tmp_db("refresh_snapshot")
     conn = sqlite3.connect(db_path)
     try:
         conn.executescript(
@@ -348,10 +363,7 @@ def test_planning_parity_exports_smoke():
     _assert_callable_export("debt_rows")
     _assert_callable_export("debt_validate_payment_amount")
 
-    db_dir = Path.cwd() / "tests" / "_tmp"
-    db_dir.mkdir(exist_ok=True)
-    db_path = db_dir / f"planning_{os.getpid()}.db"
-    db_path.unlink(missing_ok=True)
+    db_path = _local_tmp_db("planning")
     conn = sqlite3.connect(db_path)
     try:
         conn.executescript(
