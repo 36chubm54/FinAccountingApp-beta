@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Write};
-use std::net::{TcpListener, TcpStream, UdpSocket};
+use std::net::{IpAddr, TcpListener, TcpStream, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
@@ -198,16 +198,10 @@ pub fn sync_discover_peers(timeout_ms: u64, discovery_port: u16) -> SyncResult<V
         match socket.recv_from(&mut buf) {
             Ok((len, addr)) => {
                 if let Ok(peer) = serde_json::from_slice::<SyncPeer>(&buf[..len]) {
-                    let key = (peer.device_id.clone(), peer.host.clone(), peer.port);
+                    let host = resolved_discovery_host(&peer.host, addr.ip());
+                    let key = (peer.device_id.clone(), host.clone(), peer.port);
                     if seen.insert(key) {
-                        peers.push(SyncPeer {
-                            host: if peer.host.is_empty() {
-                                addr.ip().to_string()
-                            } else {
-                                peer.host
-                            },
-                            ..peer
-                        });
+                        peers.push(SyncPeer { host, ..peer });
                     }
                 }
             }
@@ -302,7 +296,7 @@ fn run_discovery_responder(config: SyncConfig, actual_port: u16, stop: Arc<Atomi
         match socket.recv_from(&mut buf) {
             Ok((len, addr)) if &buf[..len] == DISCOVERY_REQUEST => {
                 let peer = SyncPeer {
-                    host: config.bind_host.clone(),
+                    host: advertised_discovery_host(&config.bind_host),
                     port: actual_port,
                     device_id: config.device_id.clone(),
                     device_name: config.device_name.clone(),
@@ -318,6 +312,26 @@ fn run_discovery_responder(config: SyncConfig, actual_port: u16, stop: Arc<Atomi
             Err(_) => break,
         }
     }
+}
+
+fn advertised_discovery_host(bind_host: &str) -> String {
+    if is_wildcard_host(bind_host) {
+        String::new()
+    } else {
+        bind_host.to_owned()
+    }
+}
+
+fn resolved_discovery_host(peer_host: &str, sender_ip: IpAddr) -> String {
+    if is_wildcard_host(peer_host) {
+        sender_ip.to_string()
+    } else {
+        peer_host.to_owned()
+    }
+}
+
+fn is_wildcard_host(host: &str) -> bool {
+    matches!(host.trim(), "" | "0.0.0.0" | "::")
 }
 
 fn handle_connection(mut stream: TcpStream, config: &SyncConfig) -> SyncResult<()> {
@@ -653,6 +667,18 @@ mod tests {
     fn fingerprint_ignores_local_id() {
         let record = sync_record(1);
         assert_eq!(record_fingerprint(&record), record_fingerprint(&record));
+    }
+
+    #[test]
+    fn discovery_host_normalizes_wildcard_addresses() {
+        let sender: IpAddr = "192.168.1.25".parse().expect("ip");
+        assert_eq!(advertised_discovery_host("0.0.0.0"), "");
+        assert_eq!(advertised_discovery_host("::"), "");
+        assert_eq!(advertised_discovery_host("127.0.0.1"), "127.0.0.1");
+        assert_eq!(resolved_discovery_host("", sender), "192.168.1.25");
+        assert_eq!(resolved_discovery_host("0.0.0.0", sender), "192.168.1.25");
+        assert_eq!(resolved_discovery_host("::", sender), "192.168.1.25");
+        assert_eq!(resolved_discovery_host("10.0.0.2", sender), "10.0.0.2");
     }
 
     #[test]

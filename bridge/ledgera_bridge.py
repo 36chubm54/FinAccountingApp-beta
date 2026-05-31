@@ -402,7 +402,7 @@ class RustSyncCore(Protocol):
 
 
 class RustAuditCore(Protocol):
-    def audit_run(self, db_path: str) -> list[dict[str, object]]: ...
+    def audit_run(self, db_path: str, today: str | None = None) -> list[dict[str, object]]: ...
 
 
 class RustStorageControlCore(Protocol):

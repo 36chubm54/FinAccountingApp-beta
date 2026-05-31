@@ -16,7 +16,7 @@ class _LedgeraCoreModule(Protocol):
 
     def calculate_daily_burn(self, total_spent: float, days_passed: int) -> float: ...
 
-    def audit_run(self, db_path: str) -> list[dict[str, object]]: ...
+    def audit_run(self, db_path: str, today: str | None = None) -> list[dict[str, object]]: ...
 
     def currency_default_rates_for_base(
         self, base_currency: str, rates: dict[str, float]
@@ -264,10 +264,7 @@ def test_audit_export_smoke():
 
 
 def _local_tmp_db(name: str) -> Path:
-    db_path = (
-        Path(tempfile.gettempdir())
-        / f"ledgera_core_{name}_{os.getpid()}_{time.time_ns()}.db"
-    )
+    db_path = Path(tempfile.gettempdir()) / f"ledgera_core_{name}_{os.getpid()}_{time.time_ns()}.db"
     for suffix in ("", "-journal", "-wal", "-shm"):
         db_path.with_name(f"{db_path.name}{suffix}").unlink(missing_ok=True)
     return db_path

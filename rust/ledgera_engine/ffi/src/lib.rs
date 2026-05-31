@@ -1,5 +1,11 @@
 use ledgera_engine_storage::{
-    audit_run as storage_audit_run, budget_batch_spent_minor as storage_budget_batch_spent_minor,
+    AuditFindingRow, BudgetCreatePayload, BudgetPayload, CategoryMetricRow, DebtPayload,
+    DebtPaymentPayload, DebtRecordPayload, DistributionItemPayload, DistributionSubitemPayload,
+    FrozenDistributionPayload, MandatoryExpenseRow, MonthlyCashflowRow, MonthlyCumulativeRow,
+    MonthlySummaryRow, NetWorthDeltaRow, RecordRow, TagCoverageRow, TagMetricRow, TransferRow,
+    WalletBalanceRow, WalletRow, audit_run as storage_audit_run,
+    audit_run_for_date as storage_audit_run_for_date,
+    budget_batch_spent_minor as storage_budget_batch_spent_minor,
     budget_create as storage_budget_create, budget_delete as storage_budget_delete,
     budget_overlap_exists as storage_budget_overlap_exists,
     budget_replace_rows as storage_budget_replace_rows, budget_rows as storage_budget_rows,
@@ -57,17 +63,13 @@ use ledgera_engine_storage::{
     transfer_list_rows as storage_transfer_list_rows,
     wallet_balance_parts as storage_wallet_balance_parts,
     wallet_balance_rows as storage_wallet_balance_rows,
-    wallet_list_rows as storage_wallet_list_rows, AuditFindingRow, BudgetCreatePayload,
-    BudgetPayload, CategoryMetricRow, DebtPayload, DebtPaymentPayload, DebtRecordPayload,
-    DistributionItemPayload, DistributionSubitemPayload, FrozenDistributionPayload,
-    MandatoryExpenseRow, MonthlyCashflowRow, MonthlyCumulativeRow, MonthlySummaryRow,
-    NetWorthDeltaRow, RecordRow, TagCoverageRow, TagMetricRow, TransferRow, WalletBalanceRow,
-    WalletRow,
+    wallet_list_rows as storage_wallet_list_rows,
 };
 use ledgera_engine_sync::{
+    SyncApplyResult, SyncConfig, SyncPeer, SyncStatus,
     sync_discover_peers as engine_sync_discover_peers, sync_push_once as engine_sync_push_once,
     sync_start_daemon as engine_sync_start_daemon, sync_status as engine_sync_status,
-    sync_stop_daemon as engine_sync_stop_daemon, SyncApplyResult, SyncConfig, SyncPeer, SyncStatus,
+    sync_stop_daemon as engine_sync_stop_daemon,
 };
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -697,9 +699,14 @@ fn record_rows_by_tag(py: Python<'_>, db_path: &str, tag_name: &str) -> PyResult
         .collect()
 }
 
-#[pyfunction]
-fn audit_run(py: Python<'_>, db_path: &str) -> PyResult<Vec<Py<PyAny>>> {
-    storage_audit_run(db_path)
+#[pyfunction(signature = (db_path, today = None))]
+fn audit_run(py: Python<'_>, db_path: &str, today: Option<&str>) -> PyResult<Vec<Py<PyAny>>> {
+    let findings = if let Some(today) = today {
+        storage_audit_run_for_date(db_path, today)
+    } else {
+        storage_audit_run(db_path)
+    };
+    findings
         .map_err(core_err)?
         .into_iter()
         .map(|row| audit_finding_to_dict(py, row))

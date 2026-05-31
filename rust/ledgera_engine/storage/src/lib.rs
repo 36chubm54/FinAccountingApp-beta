@@ -142,7 +142,7 @@ mod metrics;
 mod planning;
 mod timeline;
 
-pub use audit::{AuditFindingRow, audit_run};
+pub use audit::{AuditFindingRow, audit_run, audit_run_for_date};
 pub use metrics::{
     metrics_burn_rate, metrics_income_by_category, metrics_monthly_summary,
     metrics_period_snapshot, metrics_refresh_snapshot, metrics_savings_rate,

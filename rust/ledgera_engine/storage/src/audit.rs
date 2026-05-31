@@ -1,4 +1,4 @@
-use crate::{open_sqlite_connection, sqlite_err, StorageResult};
+use crate::{StorageResult, open_sqlite_connection, sqlite_err};
 use ledgera_engine_core::{to_money_float, to_rate_float};
 use rusqlite::Connection;
 use std::collections::{HashMap, HashSet};
@@ -122,6 +122,14 @@ struct DateParts {
 }
 
 pub fn audit_run(db_path: &str) -> StorageResult<Vec<AuditFindingRow>> {
+    audit_run_with_today(db_path, today_utc())
+}
+
+pub fn audit_run_for_date(db_path: &str, today: &str) -> StorageResult<Vec<AuditFindingRow>> {
+    audit_run_with_today(db_path, parse_ymd(today)?)
+}
+
+fn audit_run_with_today(db_path: &str, today: DateParts) -> StorageResult<Vec<AuditFindingRow>> {
     let conn = open_sqlite_connection(db_path)?;
     let wallets = wallet_rows(&conn)?;
     let transfers = transfer_rows(&conn)?;
@@ -135,7 +143,7 @@ pub fn audit_run(db_path: &str) -> StorageResult<Vec<AuditFindingRow>> {
     let asset_snapshots = asset_snapshot_rows(&conn)?;
     let goals = goal_rows(&conn)?;
 
-    let (transfer_linked_records, record_findings) = scan_records(&records);
+    let (transfer_linked_records, record_findings) = scan_records(&records, today);
     let mut findings = Vec::new();
     findings.extend(check_system_wallet_sanity(&wallets));
     findings.extend(check_transfer_pair_integrity(
@@ -179,9 +187,13 @@ pub fn audit_run(db_path: &str) -> StorageResult<Vec<AuditFindingRow>> {
         &mandatory_expenses,
     ));
     findings.extend(check_debt_balance_integrity(&conn, &debts, &debt_payments)?);
-    findings.extend(check_asset_integrity(&assets));
-    findings.extend(check_asset_snapshot_integrity(&assets, &asset_snapshots));
-    findings.extend(check_goal_integrity(&goals));
+    findings.extend(check_asset_integrity(&assets, today));
+    findings.extend(check_asset_snapshot_integrity(
+        &assets,
+        &asset_snapshots,
+        today,
+    ));
+    findings.extend(check_goal_integrity(&goals, today));
     Ok(findings)
 }
 
@@ -195,6 +207,7 @@ struct RecordFindingGroups {
 
 fn scan_records(
     records: &[RecordAuditRow],
+    today: DateParts,
 ) -> (HashMap<i64, Vec<RecordAuditRow>>, RecordFindingGroups) {
     let mut transfer_linked_records: HashMap<i64, Vec<RecordAuditRow>> = HashMap::new();
     let mut amount_consistency = Vec::new();
@@ -247,7 +260,7 @@ fn scan_records(
             ));
         }
 
-        if let Err(error) = parse_ymd_not_future(&record.date) {
+        if let Err(error) = parse_ymd_not_future(&record.date, today) {
             date_validity.push(finding(
                 "date_validity",
                 "error",
@@ -825,7 +838,7 @@ fn check_debt_balance_integrity(
     ))
 }
 
-fn check_asset_integrity(assets: &[AssetAuditRow]) -> Vec<AuditFindingRow> {
+fn check_asset_integrity(assets: &[AssetAuditRow], today: DateParts) -> Vec<AuditFindingRow> {
     let mut findings = Vec::new();
     let valid_categories = HashSet::from(["bank", "crypto", "cash", "other"]);
     for asset in assets {
@@ -855,7 +868,7 @@ fn check_asset_integrity(assets: &[AssetAuditRow]) -> Vec<AuditFindingRow> {
                 format!("currency={}", py_string_repr(&currency)),
             ));
         }
-        if let Err(error) = parse_ymd_not_future(&asset.created_at) {
+        if let Err(error) = parse_ymd_not_future(&asset.created_at, today) {
             findings.push(finding(
                 "asset_integrity",
                 "error",
@@ -882,6 +895,7 @@ fn check_asset_integrity(assets: &[AssetAuditRow]) -> Vec<AuditFindingRow> {
 fn check_asset_snapshot_integrity(
     assets: &[AssetAuditRow],
     snapshots: &[AssetSnapshotAuditRow],
+    today: DateParts,
 ) -> Vec<AuditFindingRow> {
     let assets_by_id = assets
         .iter()
@@ -909,7 +923,7 @@ fn check_asset_snapshot_integrity(
                 format!("value_minor={}", snapshot.value_minor),
             ));
         }
-        match parse_ymd_not_future(&snapshot.snapshot_date) {
+        match parse_ymd_not_future(&snapshot.snapshot_date, today) {
             Ok(snapshot_date) => match parse_ymd(&asset.created_at) {
                 Ok(asset_created_at) if snapshot_date < asset_created_at => {
                     findings.push(finding(
@@ -980,7 +994,7 @@ fn check_asset_snapshot_integrity(
     )
 }
 
-fn check_goal_integrity(goals: &[GoalAuditRow]) -> Vec<AuditFindingRow> {
+fn check_goal_integrity(goals: &[GoalAuditRow], today: DateParts) -> Vec<AuditFindingRow> {
     let mut findings = Vec::new();
     for goal in goals {
         if goal.title.trim().is_empty() {
@@ -1008,7 +1022,7 @@ fn check_goal_integrity(goals: &[GoalAuditRow]) -> Vec<AuditFindingRow> {
                 format!("currency={}", py_string_repr(&currency)),
             ));
         }
-        let created_at = match parse_ymd_not_future(&goal.created_at) {
+        let created_at = match parse_ymd_not_future(&goal.created_at, today) {
             Ok(value) => Some(value),
             Err(error) => {
                 findings.push(finding(
@@ -1126,9 +1140,8 @@ fn py_string_repr(value: &str) -> String {
     format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
-fn parse_ymd_not_future(value: &str) -> Result<DateParts, String> {
+fn parse_ymd_not_future(value: &str, today: DateParts) -> Result<DateParts, String> {
     let parsed = parse_ymd(value)?;
-    let today = today_utc();
     if parsed > today {
         Err("Date cannot be in the future".to_owned())
     } else {
@@ -1538,10 +1551,25 @@ mod tests {
     fn clean_fixture_returns_15_ok_findings() {
         let db_path = test_db_path("clean");
         init_clean_db(&db_path);
-        let findings = audit_run(&db_path).expect("audit");
+        let findings = audit_run_for_date(&db_path, "2026-03-05").expect("audit");
         assert_eq!(findings.len(), 15);
         assert!(findings.iter().all(|finding| finding.severity == "ok"));
         fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn future_date_check_uses_supplied_today() {
+        let today = DateParts {
+            year: 2026,
+            month: 3,
+            day: 5,
+        };
+
+        assert!(parse_ymd_not_future("2026-03-05", today).is_ok());
+        assert_eq!(
+            parse_ymd_not_future("2026-03-06", today).expect_err("future"),
+            "Date cannot be in the future"
+        );
     }
 
     #[test]

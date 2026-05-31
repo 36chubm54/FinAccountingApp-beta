@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+from datetime import date
 from typing import Any
 
 from app.data.protocols import AuditRepositoryProtocol
@@ -23,6 +25,7 @@ from services.analytics.audit.support import (
 )
 
 _RUST_AUDIT_CORE = get_audit_core()
+logger = logging.getLogger(__name__)
 
 
 class AuditService:
@@ -61,10 +64,13 @@ class AuditService:
         if not isinstance(db_path, str) or not db_path:
             return None
         try:
+            today = date.today().isoformat()
             findings = tuple(
-                self._finding_from_payload(row) for row in _RUST_AUDIT_CORE.audit_run(db_path)
+                self._finding_from_payload(row)
+                for row in _RUST_AUDIT_CORE.audit_run(db_path, today)
             )
-        except (TypeError, ValueError, RuntimeError):
+        except (TypeError, ValueError, RuntimeError) as exc:
+            logger.debug("Rust audit core failed; falling back to Python audit path.", exc_info=exc)
             return None
         return AuditReport(findings=findings, db_path=db_path)
 

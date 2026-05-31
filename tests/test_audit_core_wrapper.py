@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -22,8 +23,9 @@ from tests.test_audit_engine import (
 
 
 class _FakeAuditCore:
-    def audit_run(self, db_path: str) -> list[dict[str, object]]:
+    def audit_run(self, db_path: str, today: str | None = None) -> list[dict[str, object]]:
         assert db_path
+        assert today is not None
         return [
             {
                 "check": "system_wallet_sanity",
@@ -89,15 +91,18 @@ def test_audit_service_reconstructs_rust_payload(monkeypatch, tmp_path: Path) ->
     )
 
 
-def test_audit_service_falls_back_when_rust_payload_is_invalid(monkeypatch, tmp_path: Path) -> None:
+def test_audit_service_falls_back_when_rust_payload_is_invalid(
+    monkeypatch, tmp_path: Path, caplog
+) -> None:
     class _InvalidAuditCore:
-        def audit_run(self, db_path: str) -> list[dict[str, object]]:
+        def audit_run(self, db_path: str, today: str | None = None) -> list[dict[str, object]]:
             return [{"check": "bad", "severity": "not-a-severity"}]
 
     db_path = tmp_path / "audit.db"
     _build_db(db_path)
     repo = _repo_for_db(db_path)
     monkeypatch.setattr(audit_service_module, "_RUST_AUDIT_CORE", _InvalidAuditCore())
+    caplog.set_level(logging.DEBUG, logger=audit_service_module.__name__)
 
     try:
         report = audit_service_module.AuditService(repo).run()
@@ -106,6 +111,7 @@ def test_audit_service_falls_back_when_rust_payload_is_invalid(monkeypatch, tmp_
 
     assert len(report.findings) == 15
     assert all(finding.severity.value == "ok" for finding in report.findings)
+    assert "Rust audit core failed; falling back to Python audit path." in caplog.text
 
 
 def test_audit_rust_path_matches_python_fallback(monkeypatch, tmp_path: Path) -> None:

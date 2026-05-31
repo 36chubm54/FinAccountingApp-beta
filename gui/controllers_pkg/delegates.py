@@ -330,8 +330,24 @@ class ControllerDelegateMixin:
     def _min_date_iso(self, a: str, b: str) -> str:
         return self._analysis._min_date_iso(a, b)
 
-    def start_sync_daemon(self) -> SyncStatus:
-        return self._sync.start_daemon()
+    def start_sync_daemon(
+        self,
+        *,
+        bind_host: str = "127.0.0.1",
+        bind_port: int = 0,
+        discovery_enabled: bool = False,
+        discovery_port: int = 37639,
+        poll_interval_ms: int = 1000,
+        device_name: str | None = None,
+    ) -> SyncStatus:
+        return self._sync.start_daemon(
+            bind_host=bind_host,
+            bind_port=bind_port,
+            discovery_enabled=discovery_enabled,
+            discovery_port=discovery_port,
+            poll_interval_ms=poll_interval_ms,
+            device_name=device_name,
+        )
 
     def stop_sync_daemon(self) -> SyncStatus:
         return self._sync.stop_daemon()

@@ -4,9 +4,11 @@ import importlib
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
+from gui.controllers_pkg.delegates import ControllerDelegateMixin
 from services.sync import service as sync_service_module
 from services.sync.service import SyncPeer, SyncResult, SyncService, SyncStatus
 
@@ -146,9 +148,21 @@ def test_sync_service_maps_rust_payloads(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(sync_service_module, "_RUST_SYNC_CORE", fake_core)
     service = SyncService(_Repo(str(tmp_path / "ledger.db")))
 
-    status = service.start_daemon(device_name="Test Device")
+    status = service.start_daemon(
+        bind_host="0.0.0.0",
+        bind_port=45678,
+        discovery_enabled=True,
+        discovery_port=45679,
+        poll_interval_ms=250,
+        device_name="Test Device",
+    )
     assert status.running is True
     assert status.bind_port == 41234
+    assert fake_core.configs[0]["bind_host"] == "0.0.0.0"
+    assert fake_core.configs[0]["bind_port"] == 45678
+    assert fake_core.configs[0]["discovery_enabled"] is True
+    assert fake_core.configs[0]["discovery_port"] == 45679
+    assert fake_core.configs[0]["poll_interval_ms"] == 250
     assert fake_core.configs[0]["device_name"] == "Test Device"
 
     assert service.status() == SyncStatus(enabled=True, running=True)
@@ -156,6 +170,41 @@ def test_sync_service_maps_rust_payloads(monkeypatch, tmp_path: Path) -> None:
         SyncPeer(host="127.0.0.1", port=41234, device_id="peer", device_name="Peer")
     ]
     assert service.push_once("127.0.0.1", 41234) == SyncResult(inserted=1, skipped=2, errors=0)
+
+
+def test_controller_forwards_sync_daemon_lan_options() -> None:
+    class _Sync:
+        def __init__(self) -> None:
+            self.kwargs: dict[str, object] = {}
+
+        def start_daemon(self, **kwargs: object) -> SyncStatus:
+            self.kwargs = kwargs
+            return SyncStatus(enabled=True, running=True, bind_host=str(kwargs["bind_host"]))
+
+    class _Controller(ControllerDelegateMixin):
+        def __init__(self) -> None:
+            self._sync: Any = _Sync()
+
+    controller = _Controller()
+
+    status = controller.start_sync_daemon(
+        bind_host="0.0.0.0",
+        bind_port=45678,
+        discovery_enabled=True,
+        discovery_port=45679,
+        poll_interval_ms=250,
+        device_name="LAN Device",
+    )
+
+    assert status.bind_host == "0.0.0.0"
+    assert controller._sync.kwargs == {
+        "bind_host": "0.0.0.0",
+        "bind_port": 45678,
+        "discovery_enabled": True,
+        "discovery_port": 45679,
+        "poll_interval_ms": 250,
+        "device_name": "LAN Device",
+    }
 
 
 def test_sync_push_once_smoke_with_two_sqlite_databases(monkeypatch, tmp_path: Path) -> None:
