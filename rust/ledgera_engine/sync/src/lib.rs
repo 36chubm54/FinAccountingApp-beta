@@ -595,6 +595,13 @@ mod tests {
             .into_owned()
     }
 
+    fn test_daemon_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("daemon test lock")
+    }
+
     fn init_schema(db_path: &str) {
         let conn = Connection::open(db_path).expect("open");
         conn.execute_batch(
@@ -729,6 +736,7 @@ mod tests {
 
     #[test]
     fn daemon_lifecycle_is_idempotent() {
+        let _guard = test_daemon_lock();
         sync_stop_daemon().expect("cleanup");
         let config = SyncConfig {
             db_path: test_db_path("daemon"),
@@ -760,6 +768,7 @@ mod tests {
 
     #[test]
     fn start_reports_discovery_bind_failure() {
+        let _guard = test_daemon_lock();
         sync_stop_daemon().expect("cleanup");
         let occupied = UdpSocket::bind(("127.0.0.1", 0)).expect("bind occupied discovery port");
         let occupied_port = occupied.local_addr().expect("addr").port();
@@ -783,6 +792,7 @@ mod tests {
 
     #[test]
     fn push_rejects_same_device_loopback() {
+        let _guard = test_daemon_lock();
         sync_stop_daemon().expect("cleanup");
         let db_path = test_db_path("same_device");
         init_schema(&db_path);
