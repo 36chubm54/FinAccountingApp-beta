@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import socket
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,6 +11,7 @@ from bridge.ledgera_bridge import get_sync_core
 
 _RUST_SYNC_CORE = get_sync_core()
 DEFAULT_DISCOVERY_PORT = 37639
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,9 +55,14 @@ class SyncService:
         device_name: str | None = None,
     ) -> SyncStatus:
         core = _RUST_SYNC_CORE
-        if core is None or not self._db_path():
+        db_path = self._db_path()
+        if core is None:
+            logger.debug("sync_core_unavailable operation=start_daemon")
             return self._disabled_status()
-        return self._status_from_payload(
+        if not db_path:
+            logger.debug("db_path_missing operation=start_daemon")
+            return self._disabled_status()
+        status = self._status_from_payload(
             core.sync_start_daemon(
                 self._config(
                     bind_host=bind_host,
@@ -66,16 +74,38 @@ class SyncService:
                 )
             )
         )
+        logger.info(
+            "sync_daemon_started running=%s bind_host=%s bind_port=%s discovery_enabled=%s "
+            "discovery_port=%s device_id_prefix=%s db=%s",
+            status.running,
+            status.bind_host,
+            status.bind_port,
+            bool(discovery_enabled),
+            int(discovery_port),
+            status.device_id[:8],
+            _safe_db_label(db_path),
+        )
+        return status
 
     def stop_daemon(self) -> SyncStatus:
         core = _RUST_SYNC_CORE
         if core is None:
+            logger.debug("sync_core_unavailable operation=stop_daemon")
             return self._disabled_status()
-        return self._status_from_payload(core.sync_stop_daemon())
+        previous = self.status()
+        status = self._status_from_payload(core.sync_stop_daemon())
+        logger.info(
+            "sync_daemon_stopped running=%s previous_bind_port=%s bind_port=%s",
+            status.running,
+            previous.bind_port,
+            status.bind_port,
+        )
+        return status
 
     def status(self) -> SyncStatus:
         core = _RUST_SYNC_CORE
         if core is None:
+            logger.debug("sync_core_unavailable operation=status")
             return self._disabled_status()
         return self._status_from_payload(core.sync_status())
 
@@ -87,11 +117,19 @@ class SyncService:
     ) -> list[SyncPeer]:
         core = _RUST_SYNC_CORE
         if core is None:
+            logger.debug("sync_core_unavailable operation=discover_peers")
             return []
-        return [
+        peers = [
             self._peer_from_payload(row)
             for row in core.sync_discover_peers(int(timeout_ms), int(discovery_port))
         ]
+        logger.debug(
+            "sync_discover_peers timeout_ms=%s discovery_port=%s peer_count=%s",
+            int(timeout_ms),
+            int(discovery_port),
+            len(peers),
+        )
+        return peers
 
     def push_once(
         self,
@@ -103,8 +141,14 @@ class SyncService:
         device_name: str | None = None,
     ) -> SyncResult:
         core = _RUST_SYNC_CORE
-        if core is None or not self._db_path():
+        db_path = self._db_path()
+        if core is None:
+            logger.debug("sync_core_unavailable operation=push_once")
             return SyncResult(inserted=0, skipped=0, errors=0)
+        if not db_path:
+            logger.debug("db_path_missing operation=push_once")
+            return SyncResult(inserted=0, skipped=0, errors=0)
+        started = time.perf_counter()
         payload = core.sync_push_once(
             self._config(
                 bind_host=bind_host,
@@ -117,7 +161,19 @@ class SyncService:
             peer_host,
             int(peer_port),
         )
-        return self._result_from_payload(payload)
+        result = self._result_from_payload(payload)
+        logger.info(
+            "sync_push_once peer_host=%s peer_port=%s inserted=%s skipped=%s errors=%s "
+            "elapsed_ms=%s db=%s",
+            peer_host,
+            int(peer_port),
+            result.inserted,
+            result.skipped,
+            result.errors,
+            int((time.perf_counter() - started) * 1000),
+            _safe_db_label(db_path),
+        )
+        return result
 
     def _config(
         self,
@@ -191,3 +247,8 @@ def _int_payload(value: object) -> int:
     if isinstance(value, int | float | str):
         return int(value)
     return 0
+
+
+def _safe_db_label(db_path: str) -> str:
+    digest = hashlib.sha256(db_path.encode("utf-8")).hexdigest()[:8]
+    return f"db:{digest}"

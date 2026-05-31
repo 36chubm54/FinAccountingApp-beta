@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
@@ -131,8 +132,9 @@ def _record_count(path: Path) -> int:
         conn.close()
 
 
-def test_sync_service_returns_disabled_status_when_core_missing(monkeypatch) -> None:
+def test_sync_service_returns_disabled_status_when_core_missing(monkeypatch, caplog) -> None:
     monkeypatch.setattr(sync_service_module, "_RUST_SYNC_CORE", None)
+    caplog.set_level(logging.DEBUG, logger=sync_service_module.__name__)
 
     service = SyncService(SimpleNamespace(db_path="ledger.db"))
 
@@ -141,12 +143,16 @@ def test_sync_service_returns_disabled_status_when_core_missing(monkeypatch) -> 
     assert service.stop_daemon() == SyncStatus(enabled=False, running=False)
     assert service.discover_peers() == []
     assert service.push_once("127.0.0.1", 1) == SyncResult(inserted=0, skipped=0, errors=0)
+    assert "sync_core_unavailable operation=start_daemon" in caplog.text
+    assert "sync_core_unavailable operation=push_once" in caplog.text
 
 
-def test_sync_service_maps_rust_payloads(monkeypatch, tmp_path: Path) -> None:
+def test_sync_service_maps_rust_payloads(monkeypatch, tmp_path: Path, caplog) -> None:
     fake_core = _FakeSyncCore()
     monkeypatch.setattr(sync_service_module, "_RUST_SYNC_CORE", fake_core)
-    service = SyncService(_Repo(str(tmp_path / "ledger.db")))
+    db_path = tmp_path / "ledger.db"
+    caplog.set_level(logging.DEBUG, logger=sync_service_module.__name__)
+    service = SyncService(_Repo(str(db_path)))
 
     status = service.start_daemon(
         bind_host="0.0.0.0",
@@ -170,6 +176,14 @@ def test_sync_service_maps_rust_payloads(monkeypatch, tmp_path: Path) -> None:
         SyncPeer(host="127.0.0.1", port=41234, device_id="peer", device_name="Peer")
     ]
     assert service.push_once("127.0.0.1", 41234) == SyncResult(inserted=1, skipped=2, errors=0)
+    assert "sync_daemon_started running=True bind_host=0.0.0.0 bind_port=41234" in caplog.text
+    assert "sync_discover_peers timeout_ms=50 discovery_port=37639 peer_count=1" in caplog.text
+    assert (
+        "sync_push_once peer_host=127.0.0.1 peer_port=41234 inserted=1 skipped=2 errors=0"
+        in caplog.text
+    )
+    assert str(db_path) not in caplog.text
+    assert "db:" in caplog.text
 
 
 def test_controller_forwards_sync_daemon_lan_options() -> None:

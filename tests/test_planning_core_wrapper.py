@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 from pathlib import Path
@@ -450,3 +451,48 @@ def test_debt_write_path_rust_matches_python_fallback(tmp_path: Path) -> None:
     finally:
         rust_repo.close()
         fallback_repo.close()
+
+
+def test_planning_services_log_rust_read_fallbacks(monkeypatch, tmp_path: Path, caplog) -> None:
+    class _FailingDistributionCore:
+        def distribution_item_rows(
+            self, db_path: str, active_only: bool
+        ) -> list[dict[str, object]]:
+            raise RuntimeError("distribution boom")
+
+    class _FailingBudgetCore:
+        def budget_rows(self, db_path: str) -> list[dict[str, object]]:
+            raise RuntimeError("budget boom")
+
+    class _FailingDebtCore:
+        def debt_rows(self, db_path: str) -> list[dict[str, object]]:
+            raise RuntimeError("debt boom")
+
+    repo = _build_repo(tmp_path, "planning_logging.db")
+    monkeypatch.setattr(distribution_module, "_RUST_DISTRIBUTION_CORE", _FailingDistributionCore())
+    monkeypatch.setattr(budget_module, "_RUST_BUDGET_CORE", _FailingBudgetCore())
+    monkeypatch.setattr(debts_module, "_RUST_DEBT_CORE", _FailingDebtCore())
+    caplog.set_level(logging.DEBUG, logger=distribution_module.__name__)
+    caplog.set_level(logging.DEBUG, logger=budget_module.__name__)
+    caplog.set_level(logging.DEBUG, logger=debts_module.__name__)
+
+    try:
+        DistributionService(repo).get_items()
+        BudgetService(repo).get_budgets()
+        DebtService(repo).get_all_debts()
+    finally:
+        repo.close()
+
+    assert "distribution_rust_path operation=get_items" in caplog.text
+    assert (
+        "distribution_rust_read_fallback operation=get_items exception_type=RuntimeError"
+        in caplog.text
+    )
+    assert "budget_rust_path operation=get_budgets" in caplog.text
+    assert (
+        "budget_rust_read_fallback operation=get_budgets exception_type=RuntimeError" in caplog.text
+    )
+    assert "debt_rust_path operation=get_all_debts" in caplog.text
+    assert (
+        "debt_rust_read_fallback operation=get_all_debts exception_type=RuntimeError" in caplog.text
+    )

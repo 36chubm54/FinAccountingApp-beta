@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.use_cases_pkg.wallets import CalculateNetWorth, CalculateWalletBalance
@@ -17,6 +18,8 @@ from services.planning.distribution import DistributionService
 from services.portfolio.assets import AssetService
 from services.portfolio.goals import GoalService
 from services.sync import SyncPeer, SyncResult, SyncService, SyncStatus
+
+logger = logging.getLogger(__name__)
 
 
 class ControllerDelegateMixin:
@@ -340,6 +343,14 @@ class ControllerDelegateMixin:
         poll_interval_ms: int = 1000,
         device_name: str | None = None,
     ) -> SyncStatus:
+        logger.info(
+            "controller_sync_start_daemon bind_host=%s bind_port=%s discovery_enabled=%s "
+            "discovery_port=%s",
+            bind_host,
+            int(bind_port),
+            bool(discovery_enabled),
+            int(discovery_port),
+        )
         return self._sync.start_daemon(
             bind_host=bind_host,
             bind_port=bind_port,
@@ -350,6 +361,7 @@ class ControllerDelegateMixin:
         )
 
     def stop_sync_daemon(self) -> SyncStatus:
+        logger.info("controller_sync_stop_daemon")
         return self._sync.stop_daemon()
 
     def get_sync_status(self) -> SyncStatus:

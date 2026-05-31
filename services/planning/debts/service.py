@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from typing import Any, cast
 
@@ -22,6 +23,7 @@ from utils.finance.money import (
 )
 
 _RUST_DEBT_CORE = get_debt_core()
+logger = logging.getLogger(__name__)
 
 
 def _payload_int(payload: dict[str, object], key: str, default: int = 0) -> int:
@@ -39,6 +41,29 @@ def _payload_str(payload: dict[str, object], key: str, default: str = "") -> str
 class DebtService:
     def __init__(self, repository: DebtRepositoryProtocol) -> None:
         self._repo = repository
+
+    def _rust_core(self, operation: str) -> tuple[RustDebtCore | None, str | None]:
+        db_path = self._db_path()
+        if _RUST_DEBT_CORE is not None and db_path:
+            logger.debug("debt_rust_path operation=%s", operation)
+            return cast(RustDebtCore, _RUST_DEBT_CORE), db_path
+        reason = "rust_core_unavailable" if _RUST_DEBT_CORE is None else "db_path_missing"
+        logger.debug("debt_python_fallback operation=%s reason=%s", operation, reason)
+        return None, None
+
+    def _log_rust_read_fallback(self, operation: str, exc: Exception) -> None:
+        logger.warning(
+            "debt_rust_read_fallback operation=%s exception_type=%s",
+            operation,
+            exc.__class__.__name__,
+        )
+
+    def _log_rust_mutation_failed(self, operation: str, exc: Exception) -> None:
+        logger.warning(
+            "debt_rust_mutation_failed operation=%s exception_type=%s",
+            operation,
+            exc.__class__.__name__,
+        )
 
     def create_debt(
         self,
@@ -117,17 +142,20 @@ class DebtService:
             payment_date=payment_date_text,
         )
 
-        db_path = self._db_path()
-        if _RUST_DEBT_CORE is not None and db_path:
-            rust_core = cast(RustDebtCore, _RUST_DEBT_CORE)
-            return self._payment_from_payload(
-                rust_core.debt_register_payment(
-                    db_path,
-                    int(debt.id),
-                    self._payment_to_payload(payment),
-                    self._record_payload_from_record(record),
+        rust_core, db_path = self._rust_core("register_payment")
+        if rust_core is not None and db_path:
+            try:
+                return self._payment_from_payload(
+                    rust_core.debt_register_payment(
+                        db_path,
+                        int(debt.id),
+                        self._payment_to_payload(payment),
+                        self._record_payload_from_record(record),
+                    )
                 )
-            )
+            except Exception as exc:
+                self._log_rust_mutation_failed("register_payment", exc)
+                raise
 
         with self._repo.transaction():
             self._repo.save(record)
@@ -163,17 +191,20 @@ class DebtService:
             payment_date=payment_date_text,
         )
 
-        db_path = self._db_path()
-        if _RUST_DEBT_CORE is not None and db_path:
-            rust_core = cast(RustDebtCore, _RUST_DEBT_CORE)
-            return self._payment_from_payload(
-                rust_core.debt_register_payment(
-                    db_path,
-                    int(debt.id),
-                    self._payment_to_payload(payment),
-                    None,
+        rust_core, db_path = self._rust_core("register_write_off")
+        if rust_core is not None and db_path:
+            try:
+                return self._payment_from_payload(
+                    rust_core.debt_register_payment(
+                        db_path,
+                        int(debt.id),
+                        self._payment_to_payload(payment),
+                        None,
+                    )
                 )
-            )
+            except Exception as exc:
+                self._log_rust_mutation_failed("register_write_off", exc)
+                raise
 
         with self._repo.transaction():
             self._repo.save_debt_payment(payment)
@@ -218,20 +249,26 @@ class DebtService:
         return self._repo.get_debt_by_id(int(debt_id))
 
     def delete_debt(self, debt_id: int) -> None:
-        db_path = self._db_path()
-        if _RUST_DEBT_CORE is not None and db_path:
-            rust_core = cast(RustDebtCore, _RUST_DEBT_CORE)
-            rust_core.debt_delete(db_path, int(debt_id))
-            return
+        rust_core, db_path = self._rust_core("delete_debt")
+        if rust_core is not None and db_path:
+            try:
+                rust_core.debt_delete(db_path, int(debt_id))
+                return
+            except Exception as exc:
+                self._log_rust_mutation_failed("delete_debt", exc)
+                raise
         if not self._repo.delete_debt(int(debt_id)):
             raise ValueError(f"Debt not found: {debt_id}")
 
     def delete_payment(self, payment_id: int, *, delete_linked_record: bool = False) -> None:
-        db_path = self._db_path()
-        if _RUST_DEBT_CORE is not None and db_path:
-            rust_core = cast(RustDebtCore, _RUST_DEBT_CORE)
-            rust_core.debt_delete_payment(db_path, int(payment_id), bool(delete_linked_record))
-            return
+        rust_core, db_path = self._rust_core("delete_payment")
+        if rust_core is not None and db_path:
+            try:
+                rust_core.debt_delete_payment(db_path, int(payment_id), bool(delete_linked_record))
+                return
+            except Exception as exc:
+                self._log_rust_mutation_failed("delete_payment", exc)
+                raise
         payment = self._repo.get_debt_payment_by_id(int(payment_id))
         debt = self._repo.get_debt_by_id(int(payment.debt_id))
         restored_remaining = min(
@@ -257,10 +294,9 @@ class DebtService:
 
     def recalculate_debt(self, debt_id: int) -> Debt:
         debt = self._repo.get_debt_by_id(int(debt_id))
-        db_path = self._db_path()
-        if _RUST_DEBT_CORE is not None and db_path:
+        rust_core, db_path = self._rust_core("recalculate_debt")
+        if rust_core is not None and db_path:
             try:
-                rust_core = cast(RustDebtCore, _RUST_DEBT_CORE)
                 payload = rust_core.debt_recalculate_payload(db_path, int(debt_id))
                 recalculated = replace(
                     debt,
@@ -272,8 +308,8 @@ class DebtService:
                 )
                 self._repo.save_debt(recalculated)
                 return self._repo.get_debt_by_id(int(debt_id))
-            except Exception:
-                pass
+            except Exception as exc:
+                self._log_rust_read_fallback("recalculate_debt", exc)
 
         payments = self._repo.load_debt_payments(int(debt_id))
         paid_minor = sum(int(payment.principal_paid_minor) for payment in payments)
@@ -289,26 +325,24 @@ class DebtService:
         return self._repo.get_debt_by_id(int(debt_id))
 
     def get_debt_history(self, debt_id: int) -> list[DebtPayment]:
-        db_path = self._db_path()
-        if _RUST_DEBT_CORE is not None and db_path:
+        rust_core, db_path = self._rust_core("get_debt_history")
+        if rust_core is not None and db_path:
             try:
-                rust_core = cast(RustDebtCore, _RUST_DEBT_CORE)
                 return [
                     self._payment_from_payload(row)
                     for row in rust_core.debt_payment_rows(db_path, int(debt_id))
                 ]
-            except Exception:
-                pass
+            except Exception as exc:
+                self._log_rust_read_fallback("get_debt_history", exc)
         return self._repo.load_debt_payments(int(debt_id))
 
     def get_all_debts(self) -> list[Debt]:
-        db_path = self._db_path()
-        if _RUST_DEBT_CORE is not None and db_path:
+        rust_core, db_path = self._rust_core("get_all_debts")
+        if rust_core is not None and db_path:
             try:
-                rust_core = cast(RustDebtCore, _RUST_DEBT_CORE)
                 return [self._debt_from_payload(row) for row in rust_core.debt_rows(db_path)]
-            except Exception:
-                pass
+            except Exception as exc:
+                self._log_rust_read_fallback("get_all_debts", exc)
         return self._repo.load_debts()
 
     def get_open_debts(self) -> list[Debt]:
@@ -355,23 +389,26 @@ class DebtService:
             created_at=created_at_text,
         )
 
-        db_path = self._db_path()
-        if _RUST_DEBT_CORE is not None and db_path:
-            rust_core = cast(RustDebtCore, _RUST_DEBT_CORE)
-            record = self._build_open_record(
-                debt=debt,
-                wallet_id=wallet_id,
-                amount_minor=amount_minor,
-                operation_date=created_at_text,
-                description=description,
-            )
-            return self._debt_from_payload(
-                rust_core.debt_create_obligation(
-                    db_path,
-                    self._debt_to_payload(debt),
-                    self._record_payload_from_record(record),
+        rust_core, db_path = self._rust_core(f"create_{kind.value}")
+        if rust_core is not None and db_path:
+            try:
+                record = self._build_open_record(
+                    debt=debt,
+                    wallet_id=wallet_id,
+                    amount_minor=amount_minor,
+                    operation_date=created_at_text,
+                    description=description,
                 )
-            )
+                return self._debt_from_payload(
+                    rust_core.debt_create_obligation(
+                        db_path,
+                        self._debt_to_payload(debt),
+                        self._record_payload_from_record(record),
+                    )
+                )
+            except Exception as exc:
+                self._log_rust_mutation_failed(f"create_{kind.value}", exc)
+                raise
 
         with self._repo.transaction():
             self._repo.save_debt(debt)
@@ -525,6 +562,7 @@ class DebtService:
         amount_minor = to_minor_units(amount_base)
         if _RUST_DEBT_CORE is not None:
             try:
+                logger.debug("debt_rust_path operation=validate_payment_amount")
                 rust_core = cast(RustDebtCore, _RUST_DEBT_CORE)
                 return int(
                     rust_core.debt_validate_payment_amount(
@@ -535,6 +573,11 @@ class DebtService:
             except Exception as exc:
                 if exc.__class__.__name__ == "ValueError":
                     raise
+                self._log_rust_read_fallback("validate_payment_amount", exc)
+        else:
+            logger.debug(
+                "debt_python_fallback operation=validate_payment_amount reason=rust_core_unavailable" # noqa: E501
+            )
         return validate_payment_amount(debt, amount_base)
 
     def _latest_debt_id(self) -> int:

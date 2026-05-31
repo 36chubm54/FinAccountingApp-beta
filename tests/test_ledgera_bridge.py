@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 
 from bridge import ledgera_bridge
@@ -18,6 +19,39 @@ def test_bridge_loads_extension_module(monkeypatch) -> None:
     monkeypatch.setattr(ledgera_bridge.importlib, "import_module", lambda name: module)
 
     assert ledgera_bridge.load_extension_module() is module
+
+
+def test_bridge_logs_disabled_and_missing_symbol_decisions(monkeypatch, caplog) -> None:
+    partial = _module_with_symbols("to_money_float")
+    ledgera_bridge._LOGGED_BRIDGE_EVENTS.clear()
+    caplog.set_level(logging.DEBUG, logger=ledgera_bridge.__name__)
+
+    monkeypatch.setenv("LEDGERA_ENABLE_RUST_CORE", "1")
+    monkeypatch.setenv("LEDGERA_FORCE_PYTHON_FALLBACK", "1")
+    assert ledgera_bridge.get_money_core() is None
+    assert "rust_bridge_disabled reason=forced_python_fallback" in caplog.text
+
+    caplog.clear()
+    ledgera_bridge._LOGGED_BRIDGE_EVENTS.clear()
+    monkeypatch.setenv("LEDGERA_FORCE_PYTHON_FALLBACK", "0")
+    monkeypatch.setattr(ledgera_bridge.importlib, "import_module", lambda name: partial)
+
+    assert ledgera_bridge.get_money_core() is None
+    assert "rust_bridge_missing_symbols core=money" in caplog.text
+    assert "minor_to_money" in caplog.text
+
+
+def test_bridge_logs_ready_core_once(monkeypatch, caplog) -> None:
+    module = _module_with_symbols(*ledgera_bridge._AUDIT_SYMBOLS)
+    ledgera_bridge._LOGGED_BRIDGE_EVENTS.clear()
+    caplog.set_level(logging.DEBUG, logger=ledgera_bridge.__name__)
+    monkeypatch.setenv("LEDGERA_ENABLE_RUST_CORE", "1")
+    monkeypatch.delenv("LEDGERA_FORCE_PYTHON_FALLBACK", raising=False)
+    monkeypatch.setattr(ledgera_bridge.importlib, "import_module", lambda name: module)
+
+    assert ledgera_bridge.get_audit_core() is module
+    assert ledgera_bridge.get_audit_core() is module
+    assert caplog.text.count("rust_bridge_ready core=audit") == 1
 
 
 def test_bridge_returns_none_when_rust_core_is_not_enabled(monkeypatch) -> None:

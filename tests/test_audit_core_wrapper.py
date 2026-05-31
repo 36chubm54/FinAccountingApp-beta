@@ -91,6 +91,37 @@ def test_audit_service_reconstructs_rust_payload(monkeypatch, tmp_path: Path) ->
     )
 
 
+def test_audit_service_logs_successful_rust_path(monkeypatch, tmp_path: Path, caplog) -> None:
+    db_path = tmp_path / "audit.db"
+    _build_db(db_path)
+    repo = _repo_for_db(db_path)
+    monkeypatch.setattr(audit_service_module, "_RUST_AUDIT_CORE", _FakeAuditCore())
+    caplog.set_level(logging.DEBUG, logger=audit_service_module.__name__)
+
+    try:
+        audit_service_module.AuditService(repo).run()
+    finally:
+        repo.close()
+
+    assert "audit_rust_completed findings_count=1" in caplog.text
+    assert "today=" in caplog.text
+
+
+def test_audit_service_logs_missing_rust_core_fallback(monkeypatch, tmp_path: Path, caplog) -> None:
+    db_path = tmp_path / "audit.db"
+    _build_db(db_path)
+    repo = _repo_for_db(db_path)
+    monkeypatch.setattr(audit_service_module, "_RUST_AUDIT_CORE", None)
+    caplog.set_level(logging.DEBUG, logger=audit_service_module.__name__)
+
+    try:
+        audit_service_module.AuditService(repo).run()
+    finally:
+        repo.close()
+
+    assert "audit_python_fallback reason=rust_core_unavailable" in caplog.text
+
+
 def test_audit_service_falls_back_when_rust_payload_is_invalid(
     monkeypatch, tmp_path: Path, caplog
 ) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date
 from typing import Any
 
@@ -59,15 +60,24 @@ class AuditService:
 
     def _run_rust(self) -> AuditReport | None:
         if _RUST_AUDIT_CORE is None:
+            logger.debug("audit_python_fallback reason=rust_core_unavailable")
             return None
         db_path = getattr(self._repo, "db_path", "")
         if not isinstance(db_path, str) or not db_path:
+            logger.debug("audit_python_fallback reason=db_path_missing")
             return None
         try:
             today = date.today().isoformat()
+            started = time.perf_counter()
             findings = tuple(
                 self._finding_from_payload(row)
                 for row in _RUST_AUDIT_CORE.audit_run(db_path, today)
+            )
+            logger.debug(
+                "audit_rust_completed findings_count=%s elapsed_ms=%s today=%s",
+                len(findings),
+                int((time.perf_counter() - started) * 1000),
+                today,
             )
         except (TypeError, ValueError, RuntimeError) as exc:
             logger.debug("Rust audit core failed; falling back to Python audit path.", exc_info=exc)

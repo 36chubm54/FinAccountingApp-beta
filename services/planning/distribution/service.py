@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from datetime import date as dt_date
 from typing import Any, cast
@@ -31,6 +32,7 @@ from services.support.sql_money import signed_minor_amount_expr
 from utils.finance.money import minor_to_money
 
 _RUST_DISTRIBUTION_CORE = get_distribution_core()
+logger = logging.getLogger(__name__)
 
 
 def _payload_int(payload: dict[str, object], key: str, default: int = 0) -> int:
@@ -48,6 +50,29 @@ class DistributionService:
         self._repo = repository
         self._ensure_snapshot_schema()
 
+    def _rust_core(self, operation: str) -> tuple[RustDistributionCore | None, str | None]:
+        db_path = self._db_path()
+        if _RUST_DISTRIBUTION_CORE is not None and db_path:
+            logger.debug("distribution_rust_path operation=%s", operation)
+            return cast(RustDistributionCore, _RUST_DISTRIBUTION_CORE), db_path
+        reason = "rust_core_unavailable" if _RUST_DISTRIBUTION_CORE is None else "db_path_missing"
+        logger.debug("distribution_python_fallback operation=%s reason=%s", operation, reason)
+        return None, None
+
+    def _log_rust_read_fallback(self, operation: str, exc: Exception) -> None:
+        logger.warning(
+            "distribution_rust_read_fallback operation=%s exception_type=%s",
+            operation,
+            exc.__class__.__name__,
+        )
+
+    def _log_rust_mutation_failed(self, operation: str, exc: Exception) -> None:
+        logger.warning(
+            "distribution_rust_mutation_failed operation=%s exception_type=%s",
+            operation,
+            exc.__class__.__name__,
+        )
+
     def create_item(
         self,
         name: str,
@@ -58,19 +83,22 @@ class DistributionService:
     ) -> DistributionItem:
         item_name = normalize_name(name, "Item name is required")
         pct_value, pct_minor = normalize_pct(pct)
-        db_path = self._db_path()
-        if _RUST_DISTRIBUTION_CORE is not None and db_path:
-            rust_core = cast(RustDistributionCore, _RUST_DISTRIBUTION_CORE)
-            return self._item_from_payload(
-                rust_core.distribution_create_item(
-                    db_path,
-                    item_name,
-                    str(group_name or "").strip(),
-                    int(sort_order),
-                    pct_value,
-                    pct_minor,
+        rust_core, db_path = self._rust_core("create_item")
+        if rust_core is not None and db_path:
+            try:
+                return self._item_from_payload(
+                    rust_core.distribution_create_item(
+                        db_path,
+                        item_name,
+                        str(group_name or "").strip(),
+                        int(sort_order),
+                        pct_value,
+                        pct_minor,
+                    )
                 )
-            )
+            except Exception as exc:
+                self._log_rust_mutation_failed("create_item", exc)
+                raise
         try:
             self._repo.execute(
                 """
@@ -96,16 +124,15 @@ class DistributionService:
         return self._load_item(int(row[0]))
 
     def get_items(self, active_only: bool = True) -> list[DistributionItem]:
-        db_path = self._db_path()
-        if _RUST_DISTRIBUTION_CORE is not None and db_path:
+        rust_core, db_path = self._rust_core("get_items")
+        if rust_core is not None and db_path:
             try:
-                rust_core = cast(RustDistributionCore, _RUST_DISTRIBUTION_CORE)
                 return [
                     self._item_from_payload(row)
                     for row in rust_core.distribution_item_rows(db_path, bool(active_only))
                 ]
-            except Exception:
-                pass
+            except Exception as exc:
+                self._log_rust_read_fallback("get_items", exc)
         where = "WHERE is_active = 1" if active_only else ""
         rows = self._repo.query_all(
             f"""

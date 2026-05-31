@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import os
 from types import ModuleType
 from typing import Protocol, cast
@@ -412,6 +413,8 @@ class RustStorageControlCore(Protocol):
 _EXTENSION_IMPORT = "ledgera_core.ledgera_core"
 _ENABLE_RUST_CORE_ENV = "LEDGERA_ENABLE_RUST_CORE"
 _FORCE_PYTHON_FALLBACK_ENV = "LEDGERA_FORCE_PYTHON_FALLBACK"
+logger = logging.getLogger(__name__)
+_LOGGED_BRIDGE_EVENTS: set[tuple[str, str]] = set()
 
 _MONEY_SYMBOLS = (
     "build_rate",
@@ -529,11 +532,23 @@ def is_rust_core_enabled() -> bool:
 
 
 def load_extension_module() -> ModuleType | None:
-    if is_python_fallback_forced() or not is_rust_core_enabled():
+    if is_python_fallback_forced():
+        _log_bridge_once("disabled", "forced", "rust_bridge_disabled reason=forced_python_fallback")
+        return None
+    if not is_rust_core_enabled():
+        _log_bridge_once(
+            "disabled", "not_enabled", "rust_bridge_disabled reason=rust_core_not_enabled"
+        )
         return None
     try:
         return importlib.import_module(_EXTENSION_IMPORT)
-    except Exception:
+    except Exception as exc:
+        _log_bridge_once(
+            "import_failed",
+            exc.__class__.__name__,
+            "rust_bridge_import_failed exception_type=%s",
+            exc.__class__.__name__,
+        )
         return None
 
 
@@ -541,86 +556,117 @@ def _has_symbols(module: ModuleType | None, required: tuple[str, ...]) -> bool:
     return module is not None and all(callable(getattr(module, name, None)) for name in required)
 
 
-def get_money_core() -> RustMoneyCore | None:
+def _missing_symbols(module: ModuleType | None, required: tuple[str, ...]) -> tuple[str, ...]:
+    if module is None:
+        return required
+    return tuple(name for name in required if not callable(getattr(module, name, None)))
+
+
+def _log_bridge_once(event: str, key: str, message: str, *args: object) -> None:
+    marker = (event, key)
+    if marker in _LOGGED_BRIDGE_EVENTS:
+        return
+    _LOGGED_BRIDGE_EVENTS.add(marker)
+    logger.debug(message, *args)
+
+
+def _get_core(core_name: str, required: tuple[str, ...]) -> ModuleType | None:
     module = load_extension_module()
-    if not _has_symbols(module, _MONEY_SYMBOLS):
+    missing = _missing_symbols(module, required)
+    if missing:
+        if module is not None:
+            _log_bridge_once(
+                "missing_symbols",
+                core_name,
+                "rust_bridge_missing_symbols core=%s missing=%s",
+                core_name,
+                ",".join(missing),
+            )
+        return None
+    _log_bridge_once("ready", core_name, "rust_bridge_ready core=%s", core_name)
+    return module
+
+
+def get_money_core() -> RustMoneyCore | None:
+    module = _get_core("money", _MONEY_SYMBOLS)
+    if module is None:
         return None
     return cast(RustMoneyCore, module)
 
 
 def get_balance_core() -> RustBalanceCore | None:
-    module = load_extension_module()
-    if not _has_symbols(module, _BALANCE_SYMBOLS):
+    module = _get_core("balance", _BALANCE_SYMBOLS)
+    if module is None:
         return None
     return cast(RustBalanceCore, module)
 
 
 def get_repository_read_core() -> RustRepositoryReadCore | None:
-    module = load_extension_module()
-    if not _has_symbols(module, _REPOSITORY_SYMBOLS):
+    module = _get_core("repository_read", _REPOSITORY_SYMBOLS)
+    if module is None:
         return None
     return cast(RustRepositoryReadCore, module)
 
 
 def get_metrics_core() -> RustMetricsCore | None:
-    module = load_extension_module()
-    if not _has_symbols(module, _METRICS_SYMBOLS):
+    module = _get_core("metrics", _METRICS_SYMBOLS)
+    if module is None:
         return None
     return cast(RustMetricsCore, module)
 
 
 def get_timeline_core() -> RustTimelineCore | None:
-    module = load_extension_module()
-    if not _has_symbols(module, _TIMELINE_SYMBOLS):
+    module = _get_core("timeline", _TIMELINE_SYMBOLS)
+    if module is None:
         return None
     return cast(RustTimelineCore, module)
 
 
 def get_currency_core() -> RustCurrencyCore | None:
-    module = load_extension_module()
-    if not _has_symbols(module, _CURRENCY_SYMBOLS):
+    module = _get_core("currency", _CURRENCY_SYMBOLS)
+    if module is None:
         return None
     return cast(RustCurrencyCore, module)
 
 
 def get_distribution_core() -> RustDistributionCore | None:
-    module = load_extension_module()
-    if not _has_symbols(module, _DISTRIBUTION_SYMBOLS):
+    module = _get_core("distribution", _DISTRIBUTION_SYMBOLS)
+    if module is None:
         return None
     return cast(RustDistributionCore, module)
 
 
 def get_budget_planning_core() -> RustBudgetPlanningCore | None:
-    module = load_extension_module()
-    if not _has_symbols(module, _BUDGET_PLANNING_SYMBOLS):
+    module = _get_core("budget_planning", _BUDGET_PLANNING_SYMBOLS)
+    if module is None:
         return None
     return cast(RustBudgetPlanningCore, module)
 
 
 def get_debt_core() -> RustDebtCore | None:
-    module = load_extension_module()
-    if not _has_symbols(module, _DEBT_SYMBOLS):
+    module = _get_core("debt", _DEBT_SYMBOLS)
+    if module is None:
         return None
     return cast(RustDebtCore, module)
 
 
 def get_sync_core() -> RustSyncCore | None:
-    module = load_extension_module()
-    if not _has_symbols(module, _SYNC_SYMBOLS):
+    module = _get_core("sync", _SYNC_SYMBOLS)
+    if module is None:
         return None
     return cast(RustSyncCore, module)
 
 
 def get_audit_core() -> RustAuditCore | None:
-    module = load_extension_module()
-    if not _has_symbols(module, _AUDIT_SYMBOLS):
+    module = _get_core("audit", _AUDIT_SYMBOLS)
+    if module is None:
         return None
     return cast(RustAuditCore, module)
 
 
 def get_storage_control_core() -> RustStorageControlCore | None:
-    module = load_extension_module()
-    if not _has_symbols(module, _STORAGE_CONTROL_SYMBOLS):
+    module = _get_core("storage_control", _STORAGE_CONTROL_SYMBOLS)
+    if module is None:
         return None
     return cast(RustStorageControlCore, module)
 
