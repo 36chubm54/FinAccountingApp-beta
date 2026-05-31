@@ -204,6 +204,8 @@ Also important:
 | `services.planning.budget.BudgetService` | Budget CRUD, category/tag budgets, and live tracking |
 | `services.planning.debts.DebtService` | Debt/loan lifecycle |
 | `services.planning.distribution.DistributionService` | Monthly distribution and frozen rows |
+| `services.sync.SyncService` | Alpha local sync daemon/status/discovery/push seam |
+| `bridge.ledgera_bridge` | Opt-in Rust engine loader, capability checks, and Python fallback policy |
 | `services.support.app_update.AppUpdateService` | GitHub Releases lookup, prerelease-aware asset selection, and streamed updater downloads for the Windows installer and packaged Linux packages |
 | `infrastructure.sqlite_repository.SQLiteRecordRepository` | Primary runtime repository |
 | `storage.sqlite_storage.SQLiteStorage` | Low-level SQLite adapter / schema bootstrap |
@@ -226,6 +228,8 @@ Practical highlights in the current working tree:
 - `FinancialController.list_tags()` / `search_tags()` / `set_tag_color()` — app-level entry points for tag-aware UI and analytics
 - `SQLiteRecordRepository.replace_records_and_transfers(...)` — safe bulk operation replacement with debt-payment link remapping
 - `gui.logging_utils.log_ui_error(...)` — shared structured logging helper for GUI errors and degraded flows
+- `services.sync.SyncService` — alpha.3 local synchronization of standalone cashflow records between Desktop instances; it is not a general sync/CRDT layer
+- `bridge.ledgera_bridge` — the only supported Python loading surface for the Rust engine; app code does not directly import the compiled extension
 
 ### Import / backup entry points
 

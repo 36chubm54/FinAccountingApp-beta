@@ -204,6 +204,8 @@ python packaging/linux/verify_system_packages.py --deb artifacts/Ledgera-<versio
 | `services.planning.budget.BudgetService` | Budget CRUD, category/tag budgets и live tracking |
 | `services.planning.debts.DebtService` | Debt/loan lifecycle |
 | `services.planning.distribution.DistributionService` | Monthly distribution и frozen rows |
+| `services.sync.SyncService` | Alpha local sync daemon/status/discovery/push seam |
+| `bridge.ledgera_bridge` | Opt-in Rust engine loader, capability checks и Python fallback policy |
 | `services.support.app_update.AppUpdateService` | Проверка GitHub Releases, prerelease-aware asset selection и stream-download updater payload для Windows installer и packaged Linux packages |
 | `infrastructure.sqlite_repository.SQLiteRecordRepository` | Основной runtime repository |
 | `storage.sqlite_storage.SQLiteStorage` | Низкоуровневый SQLite adapter / schema bootstrap |
@@ -226,6 +228,8 @@ python packaging/linux/verify_system_packages.py --deb artifacts/Ledgera-<versio
 - `FinancialController.list_tags()` / `search_tags()` / `set_tag_color()` — app-level entry points для tag-aware UI и аналитики
 - `SQLiteRecordRepository.replace_records_and_transfers(...)` — безопасная bulk-замена операций с ремапом связанных debt-payment ссылок
 - `gui.logging_utils.log_ui_error(...)` — общий structured logging helper для GUI ошибок и деградаций
+- `services.sync.SyncService` — alpha.3 локальная синхронизация standalone cashflow records между Desktop-инстансами; не является общим sync/CRDT слоем
+- `bridge.ledgera_bridge` — единственная поддерживаемая Python-точка загрузки Rust engine; прямые imports compiled extension в app code не используются
 
 ### Import / backup entry points
 
