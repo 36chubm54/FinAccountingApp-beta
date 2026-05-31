@@ -127,6 +127,7 @@ class FinancialApp(tk.Tk):
     _online_var: tk.BooleanVar | None
     _currency_status_label: ttk.Label | None
     _price_status_label: ttk.Label | None
+    _sync_status_label: ttk.Label | None
     _display_currency_var: tk.StringVar | None
     _display_currency_combo: ttk.Combobox | None
     _language_var: tk.StringVar | None

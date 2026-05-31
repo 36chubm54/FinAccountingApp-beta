@@ -3,15 +3,14 @@ use ledgera_engine_storage::{
     DebtRecordPayload, DistributionItemPayload, DistributionSubitemPayload,
     FrozenDistributionPayload, MandatoryExpenseRow, MonthlyCashflowRow, MonthlyCumulativeRow,
     MonthlySummaryRow, NetWorthDeltaRow, RecordRow, TagCoverageRow, TagMetricRow, TransferRow,
-    WalletBalanceRow, WalletRow,
-    budget_batch_spent_minor as storage_budget_batch_spent_minor,
+    WalletBalanceRow, WalletRow, budget_batch_spent_minor as storage_budget_batch_spent_minor,
     budget_create as storage_budget_create, budget_delete as storage_budget_delete,
     budget_overlap_exists as storage_budget_overlap_exists,
     budget_replace_rows as storage_budget_replace_rows, budget_rows as storage_budget_rows,
     budget_spent_minor as storage_budget_spent_minor,
     budget_update_limit as storage_budget_update_limit, cashflow_sum as storage_cashflow_sum,
-    debt_create_obligation as storage_debt_create_obligation,
-    debt_delete as storage_debt_delete, debt_delete_payment as storage_debt_delete_payment,
+    debt_create_obligation as storage_debt_create_obligation, debt_delete as storage_debt_delete,
+    debt_delete_payment as storage_debt_delete_payment,
     debt_payment_rows as storage_debt_payment_rows,
     debt_payment_total_minor as storage_debt_payment_total_minor,
     debt_recalculate_payload as storage_debt_recalculate_payload,
@@ -63,6 +62,12 @@ use ledgera_engine_storage::{
     wallet_balance_parts as storage_wallet_balance_parts,
     wallet_balance_rows as storage_wallet_balance_rows,
     wallet_list_rows as storage_wallet_list_rows,
+};
+use ledgera_engine_sync::{
+    SyncApplyResult, SyncConfig, SyncPeer, SyncStatus,
+    sync_discover_peers as engine_sync_discover_peers, sync_push_once as engine_sync_push_once,
+    sync_start_daemon as engine_sync_start_daemon, sync_status as engine_sync_status,
+    sync_stop_daemon as engine_sync_stop_daemon,
 };
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -933,6 +938,93 @@ fn storage_clear_read_cache() -> PyResult<()> {
     Ok(())
 }
 
+fn sync_config_from_dict(payload: &Bound<'_, PyDict>) -> PyResult<SyncConfig> {
+    Ok(SyncConfig {
+        db_path: dict_required(payload, "db_path")?,
+        device_id: dict_required(payload, "device_id")?,
+        device_name: dict_required(payload, "device_name")?,
+        bind_host: dict_required(payload, "bind_host")?,
+        bind_port: dict_required(payload, "bind_port")?,
+        discovery_enabled: dict_required(payload, "discovery_enabled")?,
+        discovery_port: dict_required(payload, "discovery_port")?,
+        poll_interval_ms: dict_required(payload, "poll_interval_ms")?,
+    })
+}
+
+fn sync_status_to_dict(py: Python<'_>, status: SyncStatus) -> PyResult<Py<PyAny>> {
+    let payload = PyDict::new(py);
+    payload.set_item("enabled", status.enabled)?;
+    payload.set_item("running", status.running)?;
+    payload.set_item("bind_host", status.bind_host)?;
+    payload.set_item("bind_port", status.bind_port)?;
+    payload.set_item("device_id", status.device_id)?;
+    payload.set_item("device_name", status.device_name)?;
+    payload.set_item("last_error", status.last_error)?;
+    Ok(payload.into_any().unbind())
+}
+
+fn sync_peer_to_dict(py: Python<'_>, peer: SyncPeer) -> PyResult<Py<PyAny>> {
+    let payload = PyDict::new(py);
+    payload.set_item("host", peer.host)?;
+    payload.set_item("port", peer.port)?;
+    payload.set_item("device_id", peer.device_id)?;
+    payload.set_item("device_name", peer.device_name)?;
+    Ok(payload.into_any().unbind())
+}
+
+fn sync_result_to_dict(py: Python<'_>, result: SyncApplyResult) -> PyResult<Py<PyAny>> {
+    let payload = PyDict::new(py);
+    payload.set_item("inserted", result.inserted)?;
+    payload.set_item("skipped", result.skipped)?;
+    payload.set_item("errors", result.errors)?;
+    Ok(payload.into_any().unbind())
+}
+
+#[pyfunction]
+fn sync_start_daemon(py: Python<'_>, config: &Bound<'_, PyDict>) -> PyResult<Py<PyAny>> {
+    engine_sync_start_daemon(sync_config_from_dict(config)?)
+        .map_err(core_err)
+        .and_then(|status| sync_status_to_dict(py, status))
+}
+
+#[pyfunction]
+fn sync_stop_daemon(py: Python<'_>) -> PyResult<Py<PyAny>> {
+    engine_sync_stop_daemon()
+        .map_err(core_err)
+        .and_then(|status| sync_status_to_dict(py, status))
+}
+
+#[pyfunction]
+fn sync_status(py: Python<'_>) -> PyResult<Py<PyAny>> {
+    sync_status_to_dict(py, engine_sync_status())
+}
+
+#[pyfunction]
+#[pyo3(signature = (timeout_ms, discovery_port = 37639))]
+fn sync_discover_peers(
+    py: Python<'_>,
+    timeout_ms: u64,
+    discovery_port: u16,
+) -> PyResult<Vec<Py<PyAny>>> {
+    engine_sync_discover_peers(timeout_ms, discovery_port)
+        .map_err(core_err)?
+        .into_iter()
+        .map(|peer| sync_peer_to_dict(py, peer))
+        .collect()
+}
+
+#[pyfunction]
+fn sync_push_once(
+    py: Python<'_>,
+    config: &Bound<'_, PyDict>,
+    peer_host: &str,
+    peer_port: u16,
+) -> PyResult<Py<PyAny>> {
+    engine_sync_push_once(sync_config_from_dict(config)?, peer_host, peer_port)
+        .map_err(core_err)
+        .and_then(|result| sync_result_to_dict(py, result))
+}
+
 #[pyfunction]
 fn timeline_monthly_cashflow(
     py: Python<'_>,
@@ -1578,5 +1670,10 @@ fn ledgera_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(debt_recalculate_payload, m)?)?;
     m.add_function(wrap_pyfunction!(debt_validate_payment_amount, m)?)?;
     m.add_function(wrap_pyfunction!(storage_clear_read_cache, m)?)?;
+    m.add_function(wrap_pyfunction!(sync_start_daemon, m)?)?;
+    m.add_function(wrap_pyfunction!(sync_stop_daemon, m)?)?;
+    m.add_function(wrap_pyfunction!(sync_status, m)?)?;
+    m.add_function(wrap_pyfunction!(sync_discover_peers, m)?)?;
+    m.add_function(wrap_pyfunction!(sync_push_once, m)?)?;
     Ok(())
 }

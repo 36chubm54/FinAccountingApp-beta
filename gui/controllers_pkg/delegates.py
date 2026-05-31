@@ -16,6 +16,7 @@ from services.planning.debts import DebtService
 from services.planning.distribution import DistributionService
 from services.portfolio.assets import AssetService
 from services.portfolio.goals import GoalService
+from services.sync import SyncPeer, SyncResult, SyncService, SyncStatus
 
 
 class ControllerDelegateMixin:
@@ -25,6 +26,7 @@ class ControllerDelegateMixin:
     _planning: Any
     _debts: Any
     _analysis: Any
+    _sync: SyncService
 
     def wallet_balance(self, wallet_id: int) -> float:
         return CalculateWalletBalance(self._repository, self._currency).execute(wallet_id)
@@ -327,3 +329,18 @@ class ControllerDelegateMixin:
 
     def _min_date_iso(self, a: str, b: str) -> str:
         return self._analysis._min_date_iso(a, b)
+
+    def start_sync_daemon(self) -> SyncStatus:
+        return self._sync.start_daemon()
+
+    def stop_sync_daemon(self) -> SyncStatus:
+        return self._sync.stop_daemon()
+
+    def get_sync_status(self) -> SyncStatus:
+        return self._sync.status()
+
+    def discover_sync_peers(self, timeout_ms: int = 1000) -> list[SyncPeer]:
+        return self._sync.discover_peers(timeout_ms)
+
+    def sync_push_once(self, peer_host: str, peer_port: int) -> SyncResult:
+        return self._sync.push_once(peer_host, peer_port)

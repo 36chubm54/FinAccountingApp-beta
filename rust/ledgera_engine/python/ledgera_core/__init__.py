@@ -93,6 +93,11 @@ transfer_list_rows = getattr(_ledgera_core, "transfer_list_rows", None)
 transfer_id_by_record_index = getattr(_ledgera_core, "transfer_id_by_record_index", None)
 wallet_list_rows = getattr(_ledgera_core, "wallet_list_rows", None)
 storage_clear_read_cache = getattr(_ledgera_core, "storage_clear_read_cache", None)
+sync_discover_peers = getattr(_ledgera_core, "sync_discover_peers", None)
+sync_push_once = getattr(_ledgera_core, "sync_push_once", None)
+sync_start_daemon = getattr(_ledgera_core, "sync_start_daemon", None)
+sync_status = getattr(_ledgera_core, "sync_status", None)
+sync_stop_daemon = getattr(_ledgera_core, "sync_stop_daemon", None)
 
 __all__ = [
     "build_rate",
@@ -249,4 +254,14 @@ if wallet_list_rows is not None:
     __all__.append("wallet_list_rows")
 if storage_clear_read_cache is not None:
     __all__.append("storage_clear_read_cache")
+if sync_discover_peers is not None:
+    __all__.append("sync_discover_peers")
+if sync_push_once is not None:
+    __all__.append("sync_push_once")
+if sync_start_daemon is not None:
+    __all__.append("sync_start_daemon")
+if sync_status is not None:
+    __all__.append("sync_status")
+if sync_stop_daemon is not None:
+    __all__.append("sync_stop_daemon")
 __doc__ = _ledgera_core.__doc__

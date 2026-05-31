@@ -173,6 +173,20 @@ class _LedgeraCoreModule(Protocol):
 
     def storage_clear_read_cache(self) -> None: ...
 
+    def sync_discover_peers(
+        self, timeout_ms: int, discovery_port: int = 37639
+    ) -> list[dict[str, object]]: ...
+
+    def sync_push_once(
+        self, config: dict[str, object], peer_host: str, peer_port: int
+    ) -> dict[str, object]: ...
+
+    def sync_start_daemon(self, config: dict[str, object]) -> dict[str, object]: ...
+
+    def sync_status(self) -> dict[str, object]: ...
+
+    def sync_stop_daemon(self) -> dict[str, object]: ...
+
 
 ledgera_core = cast(_LedgeraCoreModule, _ledgera_core)
 
@@ -440,7 +454,7 @@ def test_planning_parity_exports_smoke():
         )
         conn.execute(
             "INSERT INTO debt_payments "
-            "(id, debt_id, record_id, operation_type, principal_paid_minor, is_write_off, payment_date) " # noqa: E501
+            "(id, debt_id, record_id, operation_type, principal_paid_minor, is_write_off, payment_date) "  # noqa: E501
             "VALUES (1, 1, NULL, 'debt_repay', 2500, 0, '2026-03-03')"
         )
         conn.commit()
@@ -551,3 +565,16 @@ def test_planning_parity_exports_smoke():
     assert ledgera_core.debt_payment_rows(str(db_path), created_debt_id) == []
     ledgera_core.storage_clear_read_cache()
     db_path.unlink(missing_ok=True)
+
+
+def test_sync_exports_smoke():
+    _assert_callable_export("sync_discover_peers")
+    _assert_callable_export("sync_push_once")
+    _assert_callable_export("sync_start_daemon")
+    _assert_callable_export("sync_status")
+    _assert_callable_export("sync_stop_daemon")
+
+    status = ledgera_core.sync_status()
+    assert status["running"] in {True, False}
+    stopped = ledgera_core.sync_stop_daemon()
+    assert stopped["running"] is False

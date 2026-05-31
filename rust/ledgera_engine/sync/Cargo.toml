@@ -1,0 +1,10 @@
+[package]
+name = "ledgera_engine_sync"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ledgera_engine_storage.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true

@@ -102,6 +102,9 @@ class _FakeStatusController:
     def get_runtime_currency_config(self) -> dict[str, object]:
         return dict(self.runtime_config)
 
+    def get_sync_status(self):
+        return SimpleNamespace(running=False, last_error=None)
+
 
 class _FakeStatusOwner:
     def __init__(self) -> None:
@@ -109,6 +112,7 @@ class _FakeStatusOwner:
         self._online_var = _FakeVar(False)
         self._currency_status_label = _FakeLabel()
         self._price_status_label = _FakeLabel("")
+        self._sync_status_label = _FakeLabel("")
         self._display_currency_var = _FakeVar("KZT")
         self._display_currency_combo = _FakeCombo()
         self._online_toggle_running = False
@@ -178,6 +182,7 @@ def test_status_bar_coordinator_refreshes_and_schedules_timer_through_owner_cont
     assert owner._online_var.get() is True
     assert owner._currency_status_label.cget("text") == "Обновлено 12:30"
     assert owner._price_status_label.cget("text") == "Цены активов: локально"
+    assert owner._sync_status_label.cget("text") == "Sync: off"
     assert len(owner._scheduled) == 1
     assert owner._scheduled[0][0] == "status_refresh"
     assert owner._scheduled[0][1] == 60_000

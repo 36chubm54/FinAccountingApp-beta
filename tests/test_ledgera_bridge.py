@@ -189,6 +189,11 @@ def test_bridge_returns_typed_cores_when_symbols_are_complete(monkeypatch) -> No
         "debt_replace_rows",
         "debt_rows",
         "debt_validate_payment_amount",
+        "sync_discover_peers",
+        "sync_push_once",
+        "sync_start_daemon",
+        "sync_status",
+        "sync_stop_daemon",
         "storage_clear_read_cache",
     )
     monkeypatch.setenv("LEDGERA_ENABLE_RUST_CORE", "1")
@@ -204,5 +209,5 @@ def test_bridge_returns_typed_cores_when_symbols_are_complete(monkeypatch) -> No
     assert ledgera_bridge.get_distribution_core() is module
     assert ledgera_bridge.get_budget_planning_core() is module
     assert ledgera_bridge.get_debt_core() is module
-    assert ledgera_bridge.get_sync_core() is None
+    assert ledgera_bridge.get_sync_core() is module
     assert ledgera_bridge.get_storage_control_core() is module

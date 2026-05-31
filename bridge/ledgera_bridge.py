@@ -386,7 +386,19 @@ class RustDebtCore(Protocol):
 
 
 class RustSyncCore(Protocol):
-    pass
+    def sync_discover_peers(
+        self, timeout_ms: int, discovery_port: int = 37639
+    ) -> list[dict[str, object]]: ...
+
+    def sync_push_once(
+        self, config: dict[str, object], peer_host: str, peer_port: int
+    ) -> dict[str, object]: ...
+
+    def sync_start_daemon(self, config: dict[str, object]) -> dict[str, object]: ...
+
+    def sync_status(self) -> dict[str, object]: ...
+
+    def sync_stop_daemon(self) -> dict[str, object]: ...
 
 
 class RustStorageControlCore(Protocol):
@@ -492,7 +504,13 @@ _DEBT_SYMBOLS = (
     "debt_rows",
     "debt_validate_payment_amount",
 )
-_SYNC_SYMBOLS = ("sync_start_daemon", "sync_stop_daemon")
+_SYNC_SYMBOLS = (
+    "sync_discover_peers",
+    "sync_push_once",
+    "sync_start_daemon",
+    "sync_status",
+    "sync_stop_daemon",
+)
 
 
 def is_python_fallback_forced() -> bool:

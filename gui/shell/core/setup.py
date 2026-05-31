@@ -32,6 +32,7 @@ def initialize_shell_state(owner: Any, *, after_jobs: Mapping[str, str]) -> None
     owner._online_var = None
     owner._currency_status_label = None
     owner._price_status_label = None
+    owner._sync_status_label = None
     owner._display_currency_var = None
     owner._display_currency_combo = None
     owner._language_var = None

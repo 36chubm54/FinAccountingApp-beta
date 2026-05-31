@@ -73,6 +73,7 @@ def assign_status_bar_state(owner: Any, result: StatusBarBuildResult) -> ttk.Fra
     owner._online_var = result.online_var
     owner._currency_status_label = result.currency_status_label
     owner._price_status_label = result.price_status_label
+    owner._sync_status_label = result.sync_status_label
     owner._display_currency_var = result.display_currency_var
     owner._display_currency_combo = result.display_currency_combo
     owner._language_var = result.language_var
