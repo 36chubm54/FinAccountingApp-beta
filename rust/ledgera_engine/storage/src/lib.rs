@@ -137,13 +137,35 @@ pub struct MetricsRefreshSnapshot {
     pub monthly_summary: Vec<MonthlySummaryRow>,
 }
 
+mod audit;
 mod metrics;
+mod planning;
 mod timeline;
 
+pub use audit::{AuditFindingRow, audit_run, audit_run_for_date};
 pub use metrics::{
-    metrics_period_snapshot, metrics_refresh_snapshot,
-    metrics_burn_rate, metrics_income_by_category, metrics_monthly_summary, metrics_savings_rate,
+    metrics_burn_rate, metrics_income_by_category, metrics_monthly_summary,
+    metrics_period_snapshot, metrics_refresh_snapshot, metrics_savings_rate,
     metrics_spending_by_category, metrics_spending_by_tag, metrics_tag_coverage,
+};
+pub use planning::{
+    BudgetCreatePayload, BudgetPayload, DebtPayload, DebtPaymentPayload, DebtRecalculatePayload,
+    DebtRecordPayload, DistributionItemPayload, DistributionMonthlyPayload,
+    DistributionSubitemPayload, DistributionValidationRow, FrozenDistributionPayload,
+    budget_batch_spent_minor, budget_create, budget_delete, budget_overlap_exists,
+    budget_replace_rows, budget_rows, budget_spent_minor, budget_update_limit,
+    debt_create_obligation, debt_delete, debt_delete_payment, debt_payment_rows,
+    debt_payment_total_minor, debt_recalculate_payload, debt_register_payment, debt_replace_rows,
+    debt_rows, debt_validate_payment_amount, distribution_available_months, distribution_create_item,
+    distribution_create_subitem, distribution_delete_item, distribution_delete_subitem,
+    distribution_frozen_rows, distribution_history_months, distribution_is_month_auto_fixed,
+    distribution_is_month_fixed, distribution_item_rows, distribution_monthly_payload,
+    distribution_net_income_for_period, distribution_replace_frozen_rows,
+    distribution_replace_structure, distribution_subitem_rows, distribution_unfreeze_month,
+    distribution_update_item_name, distribution_update_item_order, distribution_update_item_pct,
+    distribution_update_subitem_name, distribution_update_subitem_order,
+    distribution_update_subitem_pct, distribution_validate_structure,
+    distribution_write_frozen_row,
 };
 pub use timeline::{
     timeline_cumulative_income_expense, timeline_monthly_cashflow,

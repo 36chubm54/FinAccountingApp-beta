@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.use_cases_pkg.wallets import CalculateNetWorth, CalculateWalletBalance
@@ -16,6 +17,9 @@ from services.planning.debts import DebtService
 from services.planning.distribution import DistributionService
 from services.portfolio.assets import AssetService
 from services.portfolio.goals import GoalService
+from services.sync import SyncPeer, SyncResult, SyncService, SyncStatus
+
+logger = logging.getLogger(__name__)
 
 
 class ControllerDelegateMixin:
@@ -25,6 +29,7 @@ class ControllerDelegateMixin:
     _planning: Any
     _debts: Any
     _analysis: Any
+    _sync: SyncService
 
     def wallet_balance(self, wallet_id: int) -> float:
         return CalculateWalletBalance(self._repository, self._currency).execute(wallet_id)
@@ -327,3 +332,43 @@ class ControllerDelegateMixin:
 
     def _min_date_iso(self, a: str, b: str) -> str:
         return self._analysis._min_date_iso(a, b)
+
+    def start_sync_daemon(
+        self,
+        *,
+        bind_host: str = "127.0.0.1",
+        bind_port: int = 0,
+        discovery_enabled: bool = False,
+        discovery_port: int = 37639,
+        poll_interval_ms: int = 1000,
+        device_name: str | None = None,
+    ) -> SyncStatus:
+        logger.info(
+            "controller_sync_start_daemon bind_host=%s bind_port=%s discovery_enabled=%s "
+            "discovery_port=%s",
+            bind_host,
+            int(bind_port),
+            bool(discovery_enabled),
+            int(discovery_port),
+        )
+        return self._sync.start_daemon(
+            bind_host=bind_host,
+            bind_port=bind_port,
+            discovery_enabled=discovery_enabled,
+            discovery_port=discovery_port,
+            poll_interval_ms=poll_interval_ms,
+            device_name=device_name,
+        )
+
+    def stop_sync_daemon(self) -> SyncStatus:
+        logger.info("controller_sync_stop_daemon")
+        return self._sync.stop_daemon()
+
+    def get_sync_status(self) -> SyncStatus:
+        return self._sync.status()
+
+    def discover_sync_peers(self, timeout_ms: int = 1000) -> list[SyncPeer]:
+        return self._sync.discover_peers(timeout_ms)
+
+    def sync_push_once(self, peer_host: str, peer_port: int) -> SyncResult:
+        return self._sync.push_once(peer_host, peer_port)

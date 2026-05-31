@@ -7,6 +7,42 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [3.0.0-alpha.3] - 2026-05-31
+
+### Added
+
+- Added Rust-backed planning write-path MVPs for Distribution, Budget, and Debt services while preserving the existing Python public APIs, dataclasses, validation, and GUI contracts.
+- Added the first local `ledgera-sync` MVP for additive LAN synchronization of standalone cashflow records between Desktop instances.
+- Added Rust-backed AuditEngine v2 parity through a read-only `audit_run` batch path covering the current 15-check audit contract.
+- Added seam-level diagnostic logging for Rust bridge capability decisions, sync lifecycle/results, audit execution/fallback, controller sync entrypoints, and planning Rust/Python boundaries.
+
+### Changed
+
+- Extended `bridge.ledgera_bridge` with planning, sync, audit, and storage-control surfaces while keeping `LEDGERA_ENABLE_RUST_CORE=1` opt-in and `LEDGERA_FORCE_PYTHON_FALLBACK=1` rollback semantics.
+- Kept Python ownership of public planning models, service signatures, GUI/controller contracts, validation, and dataclass reconstruction while Rust owns selected atomic SQLite mutations.
+- Kept sync intentionally narrow: standalone income/expense records only, inserted as new local rows by fingerprint, with no update/delete propagation, CRDT, cloud relay, credentials, or schema migration.
+- Made sync discovery startup fail explicitly when the UDP discovery port cannot be bound instead of reporting a listening daemon with a dead discovery responder.
+
+### Fixed
+
+- Aligned Rust audit future-date validation with Python local-date semantics by passing the Python-side local `today` into the Rust audit path.
+- Normalized wildcard sync discovery hosts so peers discovered from `0.0.0.0` / `::` resolve to the sender address instead of an unusable wildcard address.
+- Exposed controller-level sync daemon options so LAN/discovery mode can be started through the app controller without manual service scripts.
+- Hardened Rust/Python seam observability so Rust fallback and partial capability states are visible in debug logs without logging financial payloads or full DB paths.
+
+### Testing
+
+- Added Rust tests for planning write paths, sync lifecycle/discovery failure, AuditEngine v2 checks, and smoke exports through `ledgera_core`.
+- Isolated daemon-lifecycle sync tests around the shared Rust daemon singleton so parallel Rust test execution remains deterministic.
+- Added Python parity tests for Distribution, Budget, Debt, SyncService, AuditService, bridge capability gating, forced Python fallback, and seam-level logging.
+- Validated the alpha.3 slice with targeted `cargo test`, `cargo clippy --all-targets -- -D warnings`, `maturin build --release`, targeted `pytest`, and `npx -y pyright`.
+- Manually validated local two-Desktop sync by pushing a standalone record into a second app clone in `0.049s`.
+
+### Deferred
+
+- General record CRUD, transfer sync, debt/budget/distribution sync, update/delete propagation, conflict resolution, CRDT, pairing UI, auth/encryption, Kotlin/Android, and cloud/relay sync remain out of alpha.3 scope.
+- Rust-owned schema migrations, WAL bootstrap policy, and broad repository ownership remain future v3 milestones.
+
 ## [3.0.0-alpha.2] - 2026-05-30
 
 ### Added

@@ -1,5 +1,5 @@
 [workspace]
-members = ["core", "storage", "ffi"]
+members = ["core", "storage", "sync", "ffi"]
 resolver = "3"
 
 [workspace.package]
@@ -10,5 +10,8 @@ edition = "2024"
 pyo3 = { version = "0.28.3", features = ["extension-module"] }
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 criterion = "0.7.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
 ledgera_engine_core = { path = "core" }
 ledgera_engine_storage = { path = "storage" }
+ledgera_engine_sync = { path = "sync" }

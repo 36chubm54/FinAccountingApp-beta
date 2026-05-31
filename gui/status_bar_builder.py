@@ -36,6 +36,7 @@ class StatusBarBuildResult:
     online_var: tk.BooleanVar
     currency_status_label: ttk.Label
     price_status_label: ttk.Label
+    sync_status_label: ttk.Label
     display_currency_var: tk.StringVar
     display_currency_combo: ttk.Combobox
     language_var: tk.StringVar
@@ -75,7 +76,7 @@ def resolve_current_theme_label(theme_label_to_key: dict[str, str]) -> str:
 def build_status_bar(owner: Any) -> StatusBarBuildResult:
     typed_owner = owner
     bar = ttk.Frame(owner, style="StatusBar.TFrame", padding=(PAD_SM, 3))
-    bar.grid_columnconfigure(7, weight=1)
+    bar.grid_columnconfigure(9, weight=1)
 
     online_var = tk.BooleanVar(value=False)
     online_check = ttk.Checkbutton(
@@ -112,11 +113,22 @@ def build_status_bar(owner: Any) -> StatusBarBuildResult:
     ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
         row=0, column=5, sticky="ns", pady=5, padx=(0, PAD_SM)
     )
+    sync_status_label = ttk.Label(
+        bar,
+        text="Sync: off",
+        anchor="w",
+        style="StatusBar.TLabel",
+    )
+    sync_status_label.grid(row=0, column=6, sticky="w", padx=(0, PAD_SM), pady=4)
+
+    ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
+        row=0, column=7, sticky="ns", pady=5, padx=(0, PAD_SM)
+    )
     ttk.Label(
         bar,
         text=tr("app.status.display_currency", "Показ:"),
         style="StatusBarMuted.TLabel",
-    ).grid(row=0, column=6, sticky="w", padx=(0, 6), pady=4)
+    ).grid(row=0, column=8, sticky="w", padx=(0, 6), pady=4)
     display_values = typed_owner.controller.get_available_display_currencies()
     display_currency_var = tk.StringVar(value=typed_owner.controller.get_display_currency())
     display_currency_combo = ttk.Combobox(
@@ -127,20 +139,20 @@ def build_status_bar(owner: Any) -> StatusBarBuildResult:
         state="readonly",
         style="StatusBar.TCombobox",
     )
-    display_currency_combo.grid(row=0, column=7, sticky="w", padx=(0, PAD_SM), pady=2)
+    display_currency_combo.grid(row=0, column=9, sticky="w", padx=(0, PAD_SM), pady=2)
     display_currency_combo.bind(
         "<<ComboboxSelected>>", typed_owner._on_display_currency_changed, add="+"
     )
     enable_wayland_combobox_support(display_currency_combo)
 
     ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
-        row=0, column=8, sticky="ns", pady=5, padx=(0, PAD_SM)
+        row=0, column=10, sticky="ns", pady=5, padx=(0, PAD_SM)
     )
     ttk.Label(
         bar,
         text=tr("common.language", "Язык:"),
         style="StatusBarMuted.TLabel",
-    ).grid(row=0, column=9, sticky="w", padx=(0, 6), pady=4)
+    ).grid(row=0, column=11, sticky="w", padx=(0, 6), pady=4)
     language_codes = build_language_codes()
     language_var = tk.StringVar(value=get_language().upper())
     language_combo = ttk.Combobox(
@@ -151,18 +163,18 @@ def build_status_bar(owner: Any) -> StatusBarBuildResult:
         state="readonly",
         style="StatusBar.TCombobox",
     )
-    language_combo.grid(row=0, column=10, sticky="w", padx=(0, PAD_SM), pady=2)
+    language_combo.grid(row=0, column=12, sticky="w", padx=(0, PAD_SM), pady=2)
     language_combo.bind("<<ComboboxSelected>>", typed_owner._on_language_changed, add="+")
     enable_wayland_combobox_support(language_combo)
 
     ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
-        row=0, column=11, sticky="ns", pady=5, padx=(0, PAD_SM)
+        row=0, column=13, sticky="ns", pady=5, padx=(0, PAD_SM)
     )
     ttk.Label(
         bar,
         text=tr("common.theme", "Тема:"),
         style="StatusBarMuted.TLabel",
-    ).grid(row=0, column=12, sticky="w", padx=(0, 6), pady=4)
+    ).grid(row=0, column=14, sticky="w", padx=(0, 6), pady=4)
     theme_label_to_key = build_theme_label_to_key()
     theme_labels = list(theme_label_to_key.keys())
     theme_var = tk.StringVar(value=resolve_current_theme_label(theme_label_to_key))
@@ -174,20 +186,20 @@ def build_status_bar(owner: Any) -> StatusBarBuildResult:
         state="readonly",
         style="StatusBar.TCombobox",
     )
-    theme_combo.grid(row=0, column=13, sticky="w", padx=(0, PAD_SM), pady=2)
+    theme_combo.grid(row=0, column=15, sticky="w", padx=(0, PAD_SM), pady=2)
     theme_combo.bind("<<ComboboxSelected>>", typed_owner._on_theme_changed, add="+")
     enable_wayland_combobox_support(theme_combo)
 
     ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
-        row=0, column=14, sticky="ns", pady=5, padx=(0, PAD_SM)
+        row=0, column=16, sticky="ns", pady=5, padx=(0, PAD_SM)
     )
     ttk.Label(
         bar,
         text=tr("app.status.version", "v{version}", version=__version__),
         style="StatusBarMuted.TLabel",
-    ).grid(row=0, column=15, sticky="e", padx=(0, PAD_SM), pady=4)
+    ).grid(row=0, column=17, sticky="e", padx=(0, PAD_SM), pady=4)
     ttk.Separator(bar, orient=tk.VERTICAL, style="StatusBar.TSeparator").grid(
-        row=0, column=16, sticky="ns", pady=5, padx=(0, 4)
+        row=0, column=18, sticky="ns", pady=5, padx=(0, 4)
     )
     ttk.Button(
         bar,
@@ -196,13 +208,14 @@ def build_status_bar(owner: Any) -> StatusBarBuildResult:
         command=lambda: _show_hotkey_help(owner),
         takefocus=False,
         width=1,
-    ).grid(row=0, column=17, sticky="e", padx=(0, 6), pady=2)
+    ).grid(row=0, column=19, sticky="e", padx=(0, 6), pady=2)
 
     return StatusBarBuildResult(
         frame=bar,
         online_var=online_var,
         currency_status_label=currency_status_label,
         price_status_label=price_status_label,
+        sync_status_label=sync_status_label,
         display_currency_var=display_currency_var,
         display_currency_combo=display_currency_combo,
         language_var=language_var,

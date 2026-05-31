@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import os
 from types import ModuleType
 from typing import Protocol, cast
@@ -167,6 +168,244 @@ class RustCurrencyCore(Protocol):
     ) -> list[str]: ...
 
 
+class RustDistributionCore(Protocol):
+    def distribution_available_months(self, db_path: str) -> list[str]: ...
+
+    def distribution_create_item(
+        self,
+        db_path: str,
+        name: str,
+        group_name: str,
+        sort_order: int,
+        pct: float,
+        pct_minor: int,
+    ) -> dict[str, object]: ...
+
+    def distribution_create_subitem(
+        self,
+        db_path: str,
+        item_id: int,
+        name: str,
+        sort_order: int,
+        pct: float,
+        pct_minor: int,
+    ) -> dict[str, object]: ...
+
+    def distribution_delete_item(self, db_path: str, item_id: int) -> None: ...
+
+    def distribution_delete_subitem(self, db_path: str, subitem_id: int) -> None: ...
+
+    def distribution_frozen_rows(
+        self, db_path: str, start_month: str | None = None, end_month: str | None = None
+    ) -> list[dict[str, object]]: ...
+
+    def distribution_history_months(
+        self, db_path: str, start_month: str, end_month: str
+    ) -> list[str]: ...
+
+    def distribution_is_month_auto_fixed(self, db_path: str, month: str) -> bool: ...
+
+    def distribution_is_month_fixed(self, db_path: str, month: str) -> bool: ...
+
+    def distribution_item_rows(
+        self, db_path: str, active_only: bool
+    ) -> list[dict[str, object]]: ...
+
+    def distribution_monthly_payload(
+        self, db_path: str, month: str, start_date: str, end_date: str
+    ) -> dict[str, object]: ...
+
+    def distribution_net_income_for_period(
+        self, db_path: str, start_date: str, end_date: str
+    ) -> tuple[float, int]: ...
+
+    def distribution_validate_structure(self, db_path: str) -> list[dict[str, object]]: ...
+
+    def distribution_replace_frozen_rows(
+        self,
+        db_path: str,
+        rows: list[
+            tuple[
+                str,
+                list[str],
+                list[tuple[str, str]],
+                list[tuple[str, str]],
+                bool,
+                bool,
+            ]
+        ],
+    ) -> None: ...
+
+    def distribution_replace_structure(
+        self,
+        db_path: str,
+        items: list[tuple[int, str, str, int, float, int, bool]],
+        subitems: list[tuple[int, int, str, int, float, int, bool]],
+    ) -> None: ...
+
+    def distribution_subitem_rows(
+        self, db_path: str, item_id: int, active_only: bool
+    ) -> list[dict[str, object]]: ...
+
+    def distribution_unfreeze_month(self, db_path: str, month: str) -> None: ...
+
+    def distribution_update_item_name(
+        self, db_path: str, item_id: int, name: str
+    ) -> dict[str, object]: ...
+
+    def distribution_update_item_order(
+        self, db_path: str, item_id: int, sort_order: int
+    ) -> None: ...
+
+    def distribution_update_item_pct(
+        self, db_path: str, item_id: int, pct: float, pct_minor: int
+    ) -> dict[str, object]: ...
+
+    def distribution_update_subitem_name(
+        self, db_path: str, subitem_id: int, name: str
+    ) -> dict[str, object]: ...
+
+    def distribution_update_subitem_order(
+        self, db_path: str, subitem_id: int, sort_order: int
+    ) -> None: ...
+
+    def distribution_update_subitem_pct(
+        self, db_path: str, subitem_id: int, pct: float, pct_minor: int
+    ) -> dict[str, object]: ...
+
+    def distribution_write_frozen_row(
+        self,
+        db_path: str,
+        month: str,
+        column_order: list[str],
+        headings_by_column: list[tuple[str, str]],
+        values_by_column: list[tuple[str, str]],
+        is_negative: bool,
+        auto_fixed: bool,
+    ) -> None: ...
+
+
+class RustBudgetPlanningCore(Protocol):
+    def budget_batch_spent_minor(
+        self, db_path: str, budgets: list[tuple[int, str, str, str, str, bool]]
+    ) -> list[tuple[int, int]]: ...
+
+    def budget_create(
+        self,
+        db_path: str,
+        category: str,
+        scope_type: str,
+        scope_value: str,
+        start_date: str,
+        end_date: str,
+        limit_base: float,
+        limit_base_minor: int,
+        include_mandatory: bool,
+    ) -> dict[str, object]: ...
+
+    def budget_delete(self, db_path: str, budget_id: int) -> None: ...
+
+    def budget_overlap_exists(
+        self,
+        db_path: str,
+        scope_type: str,
+        scope_value: str,
+        start_date: str,
+        end_date: str,
+        exclude_id: int | None = None,
+    ) -> bool: ...
+
+    def budget_replace_rows(
+        self,
+        db_path: str,
+        rows: list[tuple[int, str, str, str, float, int, bool, str, str]],
+    ) -> None: ...
+
+    def budget_rows(self, db_path: str) -> list[dict[str, object]]: ...
+
+    def budget_spent_minor(
+        self,
+        db_path: str,
+        scope_type: str,
+        scope_value: str,
+        start_date: str,
+        end_date: str,
+        include_mandatory: bool,
+    ) -> int: ...
+
+    def budget_update_limit(
+        self,
+        db_path: str,
+        budget_id: int,
+        limit_base: float,
+        limit_base_minor: int,
+    ) -> dict[str, object]: ...
+
+
+class RustDebtCore(Protocol):
+    def debt_create_obligation(
+        self,
+        db_path: str,
+        debt_payload: dict[str, object],
+        open_record_payload: dict[str, object],
+    ) -> dict[str, object]: ...
+
+    def debt_delete(self, db_path: str, debt_id: int) -> None: ...
+
+    def debt_delete_payment(
+        self, db_path: str, payment_id: int, delete_linked_record: bool
+    ) -> dict[str, object]: ...
+
+    def debt_payment_rows(
+        self, db_path: str, debt_id: int | None = None
+    ) -> list[dict[str, object]]: ...
+
+    def debt_payment_total_minor(self, db_path: str, debt_id: int) -> int: ...
+
+    def debt_recalculate_payload(self, db_path: str, debt_id: int) -> dict[str, object]: ...
+
+    def debt_register_payment(
+        self,
+        db_path: str,
+        debt_id: int,
+        payment_payload: dict[str, object],
+        payment_record_payload: dict[str, object] | None = None,
+    ) -> dict[str, object]: ...
+
+    def debt_replace_rows(
+        self,
+        db_path: str,
+        debts: list[dict[str, object]],
+        payments: list[dict[str, object]],
+    ) -> None: ...
+
+    def debt_rows(self, db_path: str) -> list[dict[str, object]]: ...
+
+    def debt_validate_payment_amount(
+        self, remaining_amount_minor: int, payment_amount_minor: int
+    ) -> int: ...
+
+
+class RustSyncCore(Protocol):
+    def sync_discover_peers(
+        self, timeout_ms: int, discovery_port: int = 37639
+    ) -> list[dict[str, object]]: ...
+
+    def sync_push_once(
+        self, config: dict[str, object], peer_host: str, peer_port: int
+    ) -> dict[str, object]: ...
+
+    def sync_start_daemon(self, config: dict[str, object]) -> dict[str, object]: ...
+
+    def sync_status(self) -> dict[str, object]: ...
+
+    def sync_stop_daemon(self) -> dict[str, object]: ...
+
+
+class RustAuditCore(Protocol):
+    def audit_run(self, db_path: str, today: str | None = None) -> list[dict[str, object]]: ...
+
+
 class RustStorageControlCore(Protocol):
     def storage_clear_read_cache(self) -> None: ...
 
@@ -174,6 +413,8 @@ class RustStorageControlCore(Protocol):
 _EXTENSION_IMPORT = "ledgera_core.ledgera_core"
 _ENABLE_RUST_CORE_ENV = "LEDGERA_ENABLE_RUST_CORE"
 _FORCE_PYTHON_FALLBACK_ENV = "LEDGERA_FORCE_PYTHON_FALLBACK"
+logger = logging.getLogger(__name__)
+_LOGGED_BRIDGE_EVENTS: set[tuple[str, str]] = set()
 
 _MONEY_SYMBOLS = (
     "build_rate",
@@ -222,6 +463,62 @@ _CURRENCY_SYMBOLS = (
     "currency_rate_for",
     "currency_resolve_provider_order",
 )
+_DISTRIBUTION_SYMBOLS = (
+    "distribution_available_months",
+    "distribution_create_item",
+    "distribution_create_subitem",
+    "distribution_delete_item",
+    "distribution_delete_subitem",
+    "distribution_frozen_rows",
+    "distribution_history_months",
+    "distribution_is_month_auto_fixed",
+    "distribution_is_month_fixed",
+    "distribution_item_rows",
+    "distribution_monthly_payload",
+    "distribution_net_income_for_period",
+    "distribution_replace_frozen_rows",
+    "distribution_replace_structure",
+    "distribution_subitem_rows",
+    "distribution_unfreeze_month",
+    "distribution_update_item_name",
+    "distribution_update_item_order",
+    "distribution_update_item_pct",
+    "distribution_update_subitem_name",
+    "distribution_update_subitem_order",
+    "distribution_update_subitem_pct",
+    "distribution_validate_structure",
+    "distribution_write_frozen_row",
+)
+_BUDGET_PLANNING_SYMBOLS = (
+    "budget_batch_spent_minor",
+    "budget_create",
+    "budget_delete",
+    "budget_overlap_exists",
+    "budget_replace_rows",
+    "budget_rows",
+    "budget_spent_minor",
+    "budget_update_limit",
+)
+_DEBT_SYMBOLS = (
+    "debt_create_obligation",
+    "debt_delete",
+    "debt_delete_payment",
+    "debt_payment_rows",
+    "debt_payment_total_minor",
+    "debt_recalculate_payload",
+    "debt_register_payment",
+    "debt_replace_rows",
+    "debt_rows",
+    "debt_validate_payment_amount",
+)
+_SYNC_SYMBOLS = (
+    "sync_discover_peers",
+    "sync_push_once",
+    "sync_start_daemon",
+    "sync_status",
+    "sync_stop_daemon",
+)
+_AUDIT_SYMBOLS = ("audit_run",)
 
 
 def is_python_fallback_forced() -> bool:
@@ -235,11 +532,23 @@ def is_rust_core_enabled() -> bool:
 
 
 def load_extension_module() -> ModuleType | None:
-    if is_python_fallback_forced() or not is_rust_core_enabled():
+    if is_python_fallback_forced():
+        _log_bridge_once("disabled", "forced", "rust_bridge_disabled reason=forced_python_fallback")
+        return None
+    if not is_rust_core_enabled():
+        _log_bridge_once(
+            "disabled", "not_enabled", "rust_bridge_disabled reason=rust_core_not_enabled"
+        )
         return None
     try:
         return importlib.import_module(_EXTENSION_IMPORT)
-    except Exception:
+    except Exception as exc:
+        _log_bridge_once(
+            "import_failed",
+            exc.__class__.__name__,
+            "rust_bridge_import_failed exception_type=%s",
+            exc.__class__.__name__,
+        )
         return None
 
 
@@ -247,69 +556,145 @@ def _has_symbols(module: ModuleType | None, required: tuple[str, ...]) -> bool:
     return module is not None and all(callable(getattr(module, name, None)) for name in required)
 
 
-def get_money_core() -> RustMoneyCore | None:
+def _missing_symbols(module: ModuleType | None, required: tuple[str, ...]) -> tuple[str, ...]:
+    if module is None:
+        return required
+    return tuple(name for name in required if not callable(getattr(module, name, None)))
+
+
+def _log_bridge_once(event: str, key: str, message: str, *args: object) -> None:
+    marker = (event, key)
+    if marker in _LOGGED_BRIDGE_EVENTS:
+        return
+    _LOGGED_BRIDGE_EVENTS.add(marker)
+    logger.debug(message, *args)
+
+
+def _get_core(core_name: str, required: tuple[str, ...]) -> ModuleType | None:
     module = load_extension_module()
-    if not _has_symbols(module, _MONEY_SYMBOLS):
+    missing = _missing_symbols(module, required)
+    if missing:
+        if module is not None:
+            _log_bridge_once(
+                "missing_symbols",
+                core_name,
+                "rust_bridge_missing_symbols core=%s missing=%s",
+                core_name,
+                ",".join(missing),
+            )
+        return None
+    _log_bridge_once("ready", core_name, "rust_bridge_ready core=%s", core_name)
+    return module
+
+
+def get_money_core() -> RustMoneyCore | None:
+    module = _get_core("money", _MONEY_SYMBOLS)
+    if module is None:
         return None
     return cast(RustMoneyCore, module)
 
 
 def get_balance_core() -> RustBalanceCore | None:
-    module = load_extension_module()
-    if not _has_symbols(module, _BALANCE_SYMBOLS):
+    module = _get_core("balance", _BALANCE_SYMBOLS)
+    if module is None:
         return None
     return cast(RustBalanceCore, module)
 
 
 def get_repository_read_core() -> RustRepositoryReadCore | None:
-    module = load_extension_module()
-    if not _has_symbols(module, _REPOSITORY_SYMBOLS):
+    module = _get_core("repository_read", _REPOSITORY_SYMBOLS)
+    if module is None:
         return None
     return cast(RustRepositoryReadCore, module)
 
 
 def get_metrics_core() -> RustMetricsCore | None:
-    module = load_extension_module()
-    if not _has_symbols(module, _METRICS_SYMBOLS):
+    module = _get_core("metrics", _METRICS_SYMBOLS)
+    if module is None:
         return None
     return cast(RustMetricsCore, module)
 
 
 def get_timeline_core() -> RustTimelineCore | None:
-    module = load_extension_module()
-    if not _has_symbols(module, _TIMELINE_SYMBOLS):
+    module = _get_core("timeline", _TIMELINE_SYMBOLS)
+    if module is None:
         return None
     return cast(RustTimelineCore, module)
 
 
 def get_currency_core() -> RustCurrencyCore | None:
-    module = load_extension_module()
-    if not _has_symbols(module, _CURRENCY_SYMBOLS):
+    module = _get_core("currency", _CURRENCY_SYMBOLS)
+    if module is None:
         return None
     return cast(RustCurrencyCore, module)
 
 
+def get_distribution_core() -> RustDistributionCore | None:
+    module = _get_core("distribution", _DISTRIBUTION_SYMBOLS)
+    if module is None:
+        return None
+    return cast(RustDistributionCore, module)
+
+
+def get_budget_planning_core() -> RustBudgetPlanningCore | None:
+    module = _get_core("budget_planning", _BUDGET_PLANNING_SYMBOLS)
+    if module is None:
+        return None
+    return cast(RustBudgetPlanningCore, module)
+
+
+def get_debt_core() -> RustDebtCore | None:
+    module = _get_core("debt", _DEBT_SYMBOLS)
+    if module is None:
+        return None
+    return cast(RustDebtCore, module)
+
+
+def get_sync_core() -> RustSyncCore | None:
+    module = _get_core("sync", _SYNC_SYMBOLS)
+    if module is None:
+        return None
+    return cast(RustSyncCore, module)
+
+
+def get_audit_core() -> RustAuditCore | None:
+    module = _get_core("audit", _AUDIT_SYMBOLS)
+    if module is None:
+        return None
+    return cast(RustAuditCore, module)
+
+
 def get_storage_control_core() -> RustStorageControlCore | None:
-    module = load_extension_module()
-    if not _has_symbols(module, _STORAGE_CONTROL_SYMBOLS):
+    module = _get_core("storage_control", _STORAGE_CONTROL_SYMBOLS)
+    if module is None:
         return None
     return cast(RustStorageControlCore, module)
 
 
 __all__ = [
     "RustBalanceCore",
+    "RustAuditCore",
     "RustCurrencyCore",
+    "RustBudgetPlanningCore",
+    "RustDebtCore",
+    "RustDistributionCore",
     "RustMetricsCore",
     "RustMoneyCore",
     "RustRepositoryReadCore",
+    "RustSyncCore",
     "RustTimelineCore",
     "RustStorageControlCore",
+    "get_audit_core",
     "get_balance_core",
+    "get_budget_planning_core",
     "get_currency_core",
+    "get_debt_core",
+    "get_distribution_core",
     "get_metrics_core",
     "get_money_core",
     "get_repository_read_core",
     "get_storage_control_core",
+    "get_sync_core",
     "get_timeline_core",
     "is_python_fallback_forced",
     "is_rust_core_enabled",

@@ -404,7 +404,7 @@ def test_update_mandatory_wallet_and_period_persist(tmp_path: Path) -> None:
         repo.close()
 
 
-def test_audit_reports_14_checks_on_clean_db(tmp_path: Path) -> None:
+def test_audit_reports_15_findings_with_14_passed_on_clean_db(tmp_path: Path) -> None:
     db_path = tmp_path / "mandatory_audit.db"
     repo = SQLiteRecordRepository(str(db_path), schema_path=_schema_path())
     try:

@@ -15,6 +15,7 @@ from gui.controllers_pkg.imports import ControllerImportFacade
 from gui.controllers_pkg.planning import ControllerPlanningFacade
 from gui.controllers_pkg.portfolio import ControllerPortfolioFacade
 from services.support.app_update import AppUpdateService
+from services.sync import SyncService
 
 logger = logging.getLogger(__name__)
 RepoCapability = TypeVar("RepoCapability")
@@ -27,6 +28,7 @@ class FinancialController(ControllerDelegateMixin, ControllerCoreMixin):
         self._app_update = AppUpdateService()
         self._record_service = RecordService(repository)
         self._ui_preferences = UIPreferencesService(repository, currency_service)
+        self._sync = SyncService(repository)
         self._imports = ControllerImportFacade(
             repository=repository,
             currency=currency_service,

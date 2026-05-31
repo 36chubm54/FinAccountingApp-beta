@@ -35,6 +35,11 @@ class OnlineStatusSnapshot(Protocol):
     is_online: bool
 
 
+class SyncStatusSnapshot(Protocol):
+    running: bool
+    last_error: str | None
+
+
 class StatusBarController(Protocol):
     def set_online_mode(self, enabled: bool) -> None: ...
 
@@ -51,6 +56,8 @@ class StatusBarController(Protocol):
     def get_runtime_currency_config(self) -> dict[str, object]: ...
 
     def refresh_currency_rates(self) -> bool: ...
+
+    def get_sync_status(self) -> SyncStatusSnapshot: ...
 
 
 class BackgroundRunner(Protocol):
@@ -80,6 +87,9 @@ class StatusBarOwner(Protocol):
 
     @property
     def _price_status_label(self) -> LabelLike | None: ...
+
+    @property
+    def _sync_status_label(self) -> LabelLike | None: ...
 
     @property
     def _display_currency_var(self) -> StringVarLike | None: ...
@@ -175,6 +185,19 @@ class StatusBarCoordinator:
             self._owner._price_status_label.config(
                 text=tr("app.status.prices_local", "Цены активов: локально")
             )
+        if self._owner._sync_status_label is not None:
+            try:
+                sync_status = self._owner.controller.get_sync_status()
+            except (RuntimeError, ValueError, TypeError):
+                self._owner._sync_status_label.config(text="Sync: error")
+            else:
+                if sync_status.last_error:
+                    sync_text = "Sync: error"
+                elif sync_status.running:
+                    sync_text = "Sync: listening"
+                else:
+                    sync_text = "Sync: off"
+                self._owner._sync_status_label.config(text=sync_text)
 
     def start_status_refresh_timer(self) -> None:
         self.refresh_status_bar()

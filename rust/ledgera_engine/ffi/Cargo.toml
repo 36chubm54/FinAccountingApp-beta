@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 [dependencies]
 ledgera_engine_core.workspace = true
 ledgera_engine_storage.workspace = true
+ledgera_engine_sync.workspace = true
 pyo3.workspace = true
 
 [dev-dependencies]

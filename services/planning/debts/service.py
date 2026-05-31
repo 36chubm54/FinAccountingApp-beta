@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
+from typing import Any, cast
 
 from app.data.protocols import DebtRepositoryProtocol
 from app.use_cases_pkg.support import wallet_balance_base, wallet_by_id
+from bridge.ledgera_bridge import RustDebtCore, get_debt_core
 from domain.debt import Debt, DebtKind, DebtOperationType, DebtPayment, DebtStatus
 from domain.records import ExpenseRecord, IncomeRecord, Record
 from services.planning.debts.helpers import (
@@ -11,12 +14,56 @@ from services.planning.debts.helpers import (
     normalize_date,
     validate_payment_amount,
 )
-from utils.finance.money import minor_to_money, to_minor_units, to_money_float
+from utils.finance.money import (
+    minor_to_money,
+    rate_to_text,
+    to_minor_units,
+    to_money_float,
+    to_rate_float,
+)
+
+_RUST_DEBT_CORE = get_debt_core()
+logger = logging.getLogger(__name__)
+
+
+def _payload_int(payload: dict[str, object], key: str, default: int = 0) -> int:
+    return int(cast(Any, payload.get(key, default)))
+
+
+def _payload_float(payload: dict[str, object], key: str, default: float = 0.0) -> float:
+    return float(cast(Any, payload.get(key, default)))
+
+
+def _payload_str(payload: dict[str, object], key: str, default: str = "") -> str:
+    return str(payload.get(key, default))
 
 
 class DebtService:
     def __init__(self, repository: DebtRepositoryProtocol) -> None:
         self._repo = repository
+
+    def _rust_core(self, operation: str) -> tuple[RustDebtCore | None, str | None]:
+        db_path = self._db_path()
+        if _RUST_DEBT_CORE is not None and db_path:
+            logger.debug("debt_rust_path operation=%s", operation)
+            return cast(RustDebtCore, _RUST_DEBT_CORE), db_path
+        reason = "rust_core_unavailable" if _RUST_DEBT_CORE is None else "db_path_missing"
+        logger.debug("debt_python_fallback operation=%s reason=%s", operation, reason)
+        return None, None
+
+    def _log_rust_read_fallback(self, operation: str, exc: Exception) -> None:
+        logger.warning(
+            "debt_rust_read_fallback operation=%s exception_type=%s",
+            operation,
+            exc.__class__.__name__,
+        )
+
+    def _log_rust_mutation_failed(self, operation: str, exc: Exception) -> None:
+        logger.warning(
+            "debt_rust_mutation_failed operation=%s exception_type=%s",
+            operation,
+            exc.__class__.__name__,
+        )
 
     def create_debt(
         self,
@@ -72,7 +119,7 @@ class DebtService:
         description: str = "",
     ) -> DebtPayment:
         debt = self._repo.get_debt_by_id(int(debt_id))
-        payment_amount_minor = validate_payment_amount(debt, amount_base)
+        payment_amount_minor = self._validate_payment_amount(debt, amount_base)
         payment_date_text = normalize_date(payment_date)
         record = self._build_payment_record(
             debt=debt,
@@ -81,23 +128,39 @@ class DebtService:
             payment_date=payment_date_text,
             description=description,
         )
+        payment = DebtPayment(
+            id=self._next_debt_payment_id(),
+            debt_id=int(debt.id),
+            record_id=None,
+            operation_type=(
+                DebtOperationType.DEBT_REPAY
+                if debt.kind is DebtKind.DEBT
+                else DebtOperationType.LOAN_COLLECT
+            ),
+            principal_paid_minor=payment_amount_minor,
+            is_write_off=False,
+            payment_date=payment_date_text,
+        )
+
+        rust_core, db_path = self._rust_core("register_payment")
+        if rust_core is not None and db_path:
+            try:
+                return self._payment_from_payload(
+                    rust_core.debt_register_payment(
+                        db_path,
+                        int(debt.id),
+                        self._payment_to_payload(payment),
+                        self._record_payload_from_record(record),
+                    )
+                )
+            except Exception as exc:
+                self._log_rust_mutation_failed("register_payment", exc)
+                raise
 
         with self._repo.transaction():
             self._repo.save(record)
             record_id = self._latest_record_id()
-            payment = DebtPayment(
-                id=self._next_debt_payment_id(),
-                debt_id=int(debt.id),
-                record_id=record_id,
-                operation_type=(
-                    DebtOperationType.DEBT_REPAY
-                    if debt.kind is DebtKind.DEBT
-                    else DebtOperationType.LOAN_COLLECT
-                ),
-                principal_paid_minor=payment_amount_minor,
-                is_write_off=False,
-                payment_date=payment_date_text,
-            )
+            payment = replace(payment, record_id=record_id)
             self._repo.save_debt_payment(payment)
             self._repo.save_debt(
                 apply_payment_to_debt(
@@ -116,19 +179,34 @@ class DebtService:
         payment_date: str,
     ) -> DebtPayment:
         debt = self._repo.get_debt_by_id(int(debt_id))
-        payment_amount_minor = validate_payment_amount(debt, amount_base)
+        payment_amount_minor = self._validate_payment_amount(debt, amount_base)
         payment_date_text = normalize_date(payment_date)
+        payment = DebtPayment(
+            id=self._next_debt_payment_id(),
+            debt_id=int(debt.id),
+            record_id=None,
+            operation_type=DebtOperationType.DEBT_FORGIVE,
+            principal_paid_minor=payment_amount_minor,
+            is_write_off=True,
+            payment_date=payment_date_text,
+        )
+
+        rust_core, db_path = self._rust_core("register_write_off")
+        if rust_core is not None and db_path:
+            try:
+                return self._payment_from_payload(
+                    rust_core.debt_register_payment(
+                        db_path,
+                        int(debt.id),
+                        self._payment_to_payload(payment),
+                        None,
+                    )
+                )
+            except Exception as exc:
+                self._log_rust_mutation_failed("register_write_off", exc)
+                raise
 
         with self._repo.transaction():
-            payment = DebtPayment(
-                id=self._next_debt_payment_id(),
-                debt_id=int(debt.id),
-                record_id=None,
-                operation_type=DebtOperationType.DEBT_FORGIVE,
-                principal_paid_minor=payment_amount_minor,
-                is_write_off=True,
-                payment_date=payment_date_text,
-            )
             self._repo.save_debt_payment(payment)
             self._repo.save_debt(
                 apply_payment_to_debt(
@@ -171,10 +249,26 @@ class DebtService:
         return self._repo.get_debt_by_id(int(debt_id))
 
     def delete_debt(self, debt_id: int) -> None:
+        rust_core, db_path = self._rust_core("delete_debt")
+        if rust_core is not None and db_path:
+            try:
+                rust_core.debt_delete(db_path, int(debt_id))
+                return
+            except Exception as exc:
+                self._log_rust_mutation_failed("delete_debt", exc)
+                raise
         if not self._repo.delete_debt(int(debt_id)):
             raise ValueError(f"Debt not found: {debt_id}")
 
     def delete_payment(self, payment_id: int, *, delete_linked_record: bool = False) -> None:
+        rust_core, db_path = self._rust_core("delete_payment")
+        if rust_core is not None and db_path:
+            try:
+                rust_core.debt_delete_payment(db_path, int(payment_id), bool(delete_linked_record))
+                return
+            except Exception as exc:
+                self._log_rust_mutation_failed("delete_payment", exc)
+                raise
         payment = self._repo.get_debt_payment_by_id(int(payment_id))
         debt = self._repo.get_debt_by_id(int(payment.debt_id))
         restored_remaining = min(
@@ -200,6 +294,23 @@ class DebtService:
 
     def recalculate_debt(self, debt_id: int) -> Debt:
         debt = self._repo.get_debt_by_id(int(debt_id))
+        rust_core, db_path = self._rust_core("recalculate_debt")
+        if rust_core is not None and db_path:
+            try:
+                payload = rust_core.debt_recalculate_payload(db_path, int(debt_id))
+                recalculated = replace(
+                    debt,
+                    remaining_amount_minor=_payload_int(payload, "remaining_amount_minor"),
+                    status=DebtStatus(str(payload.get("status", DebtStatus.OPEN.value))),
+                    closed_at=(
+                        None if payload.get("closed_at") is None else str(payload.get("closed_at"))
+                    ),
+                )
+                self._repo.save_debt(recalculated)
+                return self._repo.get_debt_by_id(int(debt_id))
+            except Exception as exc:
+                self._log_rust_read_fallback("recalculate_debt", exc)
+
         payments = self._repo.load_debt_payments(int(debt_id))
         paid_minor = sum(int(payment.principal_paid_minor) for payment in payments)
         remaining_minor = max(0, int(debt.total_amount_minor) - paid_minor)
@@ -214,16 +325,31 @@ class DebtService:
         return self._repo.get_debt_by_id(int(debt_id))
 
     def get_debt_history(self, debt_id: int) -> list[DebtPayment]:
+        rust_core, db_path = self._rust_core("get_debt_history")
+        if rust_core is not None and db_path:
+            try:
+                return [
+                    self._payment_from_payload(row)
+                    for row in rust_core.debt_payment_rows(db_path, int(debt_id))
+                ]
+            except Exception as exc:
+                self._log_rust_read_fallback("get_debt_history", exc)
         return self._repo.load_debt_payments(int(debt_id))
 
     def get_all_debts(self) -> list[Debt]:
+        rust_core, db_path = self._rust_core("get_all_debts")
+        if rust_core is not None and db_path:
+            try:
+                return [self._debt_from_payload(row) for row in rust_core.debt_rows(db_path)]
+            except Exception as exc:
+                self._log_rust_read_fallback("get_all_debts", exc)
         return self._repo.load_debts()
 
     def get_open_debts(self) -> list[Debt]:
-        return [debt for debt in self._repo.load_debts() if debt.status is DebtStatus.OPEN]
+        return [debt for debt in self.get_all_debts() if debt.status is DebtStatus.OPEN]
 
     def get_closed_debts(self) -> list[Debt]:
-        return [debt for debt in self._repo.load_debts() if debt.status is DebtStatus.CLOSED]
+        return [debt for debt in self.get_all_debts() if debt.status is DebtStatus.CLOSED]
 
     def _create_obligation(
         self,
@@ -262,6 +388,27 @@ class DebtService:
             status=DebtStatus.OPEN,
             created_at=created_at_text,
         )
+
+        rust_core, db_path = self._rust_core(f"create_{kind.value}")
+        if rust_core is not None and db_path:
+            try:
+                record = self._build_open_record(
+                    debt=debt,
+                    wallet_id=wallet_id,
+                    amount_minor=amount_minor,
+                    operation_date=created_at_text,
+                    description=description,
+                )
+                return self._debt_from_payload(
+                    rust_core.debt_create_obligation(
+                        db_path,
+                        self._debt_to_payload(debt),
+                        self._record_payload_from_record(record),
+                    )
+                )
+            except Exception as exc:
+                self._log_rust_mutation_failed(f"create_{kind.value}", exc)
+                raise
 
         with self._repo.transaction():
             self._repo.save_debt(debt)
@@ -335,6 +482,103 @@ class DebtService:
         projected_balance = to_money_float(balance - to_money_float(amount_base))
         if projected_balance < 0:
             raise ValueError("Insufficient funds in wallet")
+
+    def _db_path(self) -> str | None:
+        db_path = getattr(self._repo, "db_path", None)
+        return db_path if isinstance(db_path, str) and db_path else None
+
+    def _debt_from_payload(self, payload: dict[str, object]) -> Debt:
+        return Debt(
+            id=_payload_int(payload, "id"),
+            contact_name=_payload_str(payload, "contact_name"),
+            kind=DebtKind(_payload_str(payload, "kind")),
+            total_amount_minor=_payload_int(payload, "total_amount_minor"),
+            remaining_amount_minor=_payload_int(payload, "remaining_amount_minor"),
+            currency=_payload_str(payload, "currency"),
+            interest_rate=_payload_float(payload, "interest_rate"),
+            status=DebtStatus(_payload_str(payload, "status")),
+            created_at=_payload_str(payload, "created_at"),
+            closed_at=(
+                None if payload.get("closed_at") is None else _payload_str(payload, "closed_at")
+            ),
+        )
+
+    def _payment_from_payload(self, payload: dict[str, object]) -> DebtPayment:
+        return DebtPayment(
+            id=_payload_int(payload, "id"),
+            debt_id=_payload_int(payload, "debt_id"),
+            record_id=(
+                None if payload.get("record_id") is None else _payload_int(payload, "record_id")
+            ),
+            operation_type=DebtOperationType(_payload_str(payload, "operation_type")),
+            principal_paid_minor=_payload_int(payload, "principal_paid_minor"),
+            is_write_off=bool(payload.get("is_write_off", False)),
+            payment_date=_payload_str(payload, "payment_date"),
+        )
+
+    def _debt_to_payload(self, debt: Debt) -> dict[str, object]:
+        return {
+            "id": int(debt.id),
+            "contact_name": str(debt.contact_name),
+            "kind": str(debt.kind.value),
+            "total_amount_minor": int(debt.total_amount_minor),
+            "remaining_amount_minor": int(debt.remaining_amount_minor),
+            "currency": str(debt.currency).upper(),
+            "interest_rate": float(debt.interest_rate),
+            "status": str(debt.status.value),
+            "created_at": str(debt.created_at),
+            "closed_at": debt.closed_at,
+        }
+
+    def _payment_to_payload(self, payment: DebtPayment) -> dict[str, object]:
+        return {
+            "id": int(payment.id),
+            "debt_id": int(payment.debt_id),
+            "record_id": payment.record_id,
+            "operation_type": str(payment.operation_type.value),
+            "principal_paid_minor": int(payment.principal_paid_minor),
+            "is_write_off": bool(payment.is_write_off),
+            "payment_date": str(payment.payment_date),
+        }
+
+    def _record_payload_from_record(self, record: Record) -> dict[str, object]:
+        return {
+            "type": str(record.type),
+            "date": str(record.date),
+            "wallet_id": int(record.wallet_id),
+            "amount_original": to_money_float(record.amount_original or 0.0),
+            "amount_original_minor": to_minor_units(record.amount_original or 0.0),
+            "currency": str(record.currency).upper(),
+            "rate_at_operation": to_rate_float(record.rate_at_operation),
+            "rate_at_operation_text": rate_to_text(record.rate_at_operation),
+            "amount_base": to_money_float(record.amount_base or 0.0),
+            "amount_base_minor": to_minor_units(record.amount_base or 0.0),
+            "category": str(record.category),
+            "description": str(record.description or ""),
+            "period": getattr(record, "period", None),
+        }
+
+    def _validate_payment_amount(self, debt: Debt, amount_base: float) -> int:
+        amount_minor = to_minor_units(amount_base)
+        if _RUST_DEBT_CORE is not None:
+            try:
+                logger.debug("debt_rust_path operation=validate_payment_amount")
+                rust_core = cast(RustDebtCore, _RUST_DEBT_CORE)
+                return int(
+                    rust_core.debt_validate_payment_amount(
+                        int(debt.remaining_amount_minor),
+                        amount_minor,
+                    )
+                )
+            except Exception as exc:
+                if exc.__class__.__name__ == "ValueError":
+                    raise
+                self._log_rust_read_fallback("validate_payment_amount", exc)
+        else:
+            logger.debug(
+                "debt_python_fallback operation=validate_payment_amount reason=rust_core_unavailable" # noqa: E501
+            )
+        return validate_payment_amount(debt, amount_base)
 
     def _latest_debt_id(self) -> int:
         row = self._repo.query_one("SELECT id FROM debts ORDER BY id DESC LIMIT 1")

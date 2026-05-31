@@ -88,6 +88,7 @@ def test_assign_status_bar_state_copies_builder_result_to_owner() -> None:
         online_var=Mock(),
         currency_status_label=Mock(),
         price_status_label=Mock(),
+        sync_status_label=Mock(),
         display_currency_var=Mock(),
         display_currency_combo=Mock(),
         language_var=Mock(),
@@ -102,6 +103,7 @@ def test_assign_status_bar_state_copies_builder_result_to_owner() -> None:
     assert assigned_frame is frame
     assert owner._theme_label_to_key == {"Темная": "dark"}
     assert owner._display_currency_combo is result.display_currency_combo
+    assert owner._sync_status_label is result.sync_status_label
 
 
 def test_rebuild_status_bar_replaces_existing_frame_and_refreshes() -> None:
@@ -115,6 +117,7 @@ def test_rebuild_status_bar_replaces_existing_frame_and_refreshes() -> None:
         online_var=Mock(),
         currency_status_label=Mock(),
         price_status_label=Mock(),
+        sync_status_label=Mock(),
         display_currency_var=Mock(),
         display_currency_combo=Mock(),
         language_var=Mock(),
@@ -147,6 +150,7 @@ def test_rebuild_status_bar_logs_expected_cleanup_failure(caplog) -> None:
         online_var=Mock(),
         currency_status_label=Mock(),
         price_status_label=Mock(),
+        sync_status_label=Mock(),
         display_currency_var=Mock(),
         display_currency_combo=Mock(),
         language_var=Mock(),

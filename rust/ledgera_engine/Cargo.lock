@@ -301,6 +301,7 @@ version = "0.7.0"
 dependencies = [
  "ledgera_engine_core",
  "ledgera_engine_storage",
+ "ledgera_engine_sync",
  "pyo3",
  "rusqlite",
 ]
@@ -316,6 +317,16 @@ dependencies = [
  "criterion",
  "ledgera_engine_core",
  "rusqlite",
+]
+
+[[package]]
+name = "ledgera_engine_sync"
+version = "0.7.0"
+dependencies = [
+ "ledgera_engine_storage",
+ "rusqlite",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

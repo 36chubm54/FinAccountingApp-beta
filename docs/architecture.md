@@ -50,6 +50,20 @@ Current implementation note:
 - the desktop runtime still depends primarily on `infrastructure/sqlite_repository.py` as the only fully featured backend for preferences, audit, analytics, planning, and shell-facing workflows
 - treat JSON storage and other adapters as narrower persistence backends, not as drop-in replacements for the full runtime feature set
 
+### Rust engine bridge
+
+`rust/ledgera_engine` is the v3 Rust workspace. It is loaded by Python only through
+`bridge.ledgera_bridge`, which performs environment gating, extension loading, and
+capability checks for the PyO3 `ledgera_core` module.
+
+Current rules:
+
+- `LEDGERA_ENABLE_RUST_CORE=1` enables Rust-backed bridge loading
+- `LEDGERA_FORCE_PYTHON_FALLBACK=1` forces Python fallback and wins over the enable flag
+- Python remains the owner of public service APIs, dataclasses, GUI/controller contracts, user-facing validation, and fallback paths
+- Rust surfaces exchange primitive payloads only: `int`, `float`, `str`, `bool`, `dict`, and `list`
+- seam-level logs are diagnostic only and must not include full DB paths, descriptions, tags, amounts, or financial payloads
+
 ### Runtime currency configuration
 
 `CurrencyService` treats runtime currency/provider settings as persisted application policy layered on top of the repository-owned accounting base currency.
@@ -193,6 +207,8 @@ Current Rust analytics contract:
   tests, local development, and safe rollout
 - Rust analytics reads are read-only; schema changes, migrations, and writes
   remain outside the Rust path in this alpha
+- seam-level bridge and service logs can report backend selection, fallback, and
+  elapsed timing for diagnostics, but not full query payloads or local DB paths
 
 Benchmarking note:
 
@@ -348,6 +364,13 @@ As of the current working tree, the subsystem supports:
 
 Tag budgets reuse the same pace/forecast pipeline, but their spend queries are resolved through `record_tags` rather than direct category predicates.
 
+`v3.0.0-alpha.3` adds an optional Rust-backed BudgetEngine write path below
+`BudgetService`. Python keeps date parsing, scope/tag normalization, positive
+limit validation, `Budget` / `BudgetResult` reconstruction, and forecast/status
+assembly. Rust owns selected atomic SQLite mutations and read helpers for
+budget create/list/delete/update-limit/replace, overlap checks, and spent-minor
+calculation when the bridge is enabled.
+
 ### 4.3 Debts and Loans
 
 Core modules:
@@ -358,6 +381,14 @@ Core modules:
 - `utils/finance/debt_report.py`
 
 This subsystem links debt payments to cashflow records and affects net worth and report exports.
+
+`v3.0.0-alpha.3` adds an optional Rust-backed DebtEngine write path below
+`DebtService`. Python keeps wallet lookup, balance checks, payment validation,
+record semantics, and `Debt` / `DebtPayment` reconstruction. Rust performs the
+atomic SQLite write for debt/loan creation, cash payment, write-off, payment
+deletion, debt deletion, row replacement, and history reads when the bridge is
+enabled. Debt-created cashflow records are the only record writes intentionally
+included in this Rust path because they must stay atomic with debt/payment rows.
 
 ### 4.4 Mandatory Expenses
 
@@ -379,6 +410,12 @@ Core modules:
 - `gui/tabs/distribution/`
 
 This subsystem calculates monthly net-income allocation and supports frozen snapshot rows.
+
+`v3.0.0-alpha.3` adds an optional Rust-backed DistributionEngine write path
+below `DistributionService`. Python keeps public models and validation helpers,
+while Rust can own item/subitem CRUD, structure replacement, monthly payload
+reads, frozen-row operations, freeze/unfreeze checks, and history reads through
+atomic SQLite operations.
 
 ### 4.6 Assets / Goals / Dashboard
 
@@ -403,6 +440,39 @@ Core modules:
 - `app/runtime/audit.py`
 
 Audit is intentionally read-only and validates runtime integrity without mutating data.
+
+`v3.0.0-alpha.3` adds an optional Rust-backed AuditEngine v2 batch path below
+`AuditService`. The Rust path returns the same ordered 15-check finding contract
+as the Python implementation, including OK findings. Python still owns
+`AuditReport`, `AuditFinding`, `AuditSeverity`, GUI dialogs, and
+`FinancialController.run_audit()`. Rust audit remains strictly read-only and
+does not run migrations, repair actions, or cache writes.
+
+### 4.7.1 Local Sync
+
+Core modules:
+
+- `services/sync/service.py`
+- `gui/controllers_pkg/delegates.py`
+- `rust/ledgera_engine/sync`
+
+`v3.0.0-alpha.3` introduces the first local sync MVP for Desktop instances on
+the same LAN.
+
+Current sync contract:
+
+- `SyncService` exposes start/stop/status, peer discovery, and one-shot push
+- `FinancialController` exposes the same sync operations to GUI/controller callers
+- Rust sync uses newline-delimited JSON over TCP plus lightweight UDP discovery
+- only standalone `records` rows are synchronized: `transfer_id IS NULL`,
+  `related_debt_id IS NULL`, and type is `income` or `expense`
+- remote records are inserted as new local IDs; duplicate detection uses a
+  canonical fingerprint over stable record fields
+- transfers, debt-linked records, mandatory templates, budgets, distribution,
+  tags, assets, goals, updates, deletes, conflict resolution, CRDT, cloud relay,
+  credentials, and pairing UI are out of the current sync scope
+- if discovery is enabled and the UDP discovery port cannot be bound, daemon
+  startup fails instead of reporting a listening but undiscoverable instance
 
 ### 4.8 Import / Backup Reliability
 
